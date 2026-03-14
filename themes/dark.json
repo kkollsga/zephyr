@@ -1,0 +1,22 @@
+{
+  "name": "Dark",
+  "background": "#1e1e1e",
+  "foreground": "#d4d4d4",
+  "gutter": "#6e6e6e",
+  "gutterBg": "#1e1e1e",
+  "cursor": "#d4d4d4",
+  "selection": "#3c5a8c80",
+  "lineHighlight": "#282828",
+  "statusBg": "#191919",
+  "statusFg": "#969696",
+  "tokens": {
+    "keyword": "#c586c0",
+    "string": "#ce9178",
+    "comment": "#6a9955",
+    "function": "#dcdcaa",
+    "type": "#4ec9b0",
+    "number": "#b5cea8",
+    "operator": "#d4d4d4",
+    "variable": "#9cdcfe"
+  }
+}

@@ -1,0 +1,6 @@
+# Build artifacts
+zephyr
+Zephyr.app/
+
+# Claude config
+.claude/

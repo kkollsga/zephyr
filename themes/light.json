@@ -1,0 +1,22 @@
+{
+  "name": "Light",
+  "background": "#ffffff",
+  "foreground": "#1e1e1e",
+  "gutter": "#969696",
+  "gutterBg": "#ffffff",
+  "cursor": "#1e1e1e",
+  "selection": "#add6ff80",
+  "lineHighlight": "#f5f5f5",
+  "statusBg": "#f0f0f0",
+  "statusFg": "#646464",
+  "tokens": {
+    "keyword": "#af00db",
+    "string": "#a31515",
+    "comment": "#008000",
+    "function": "#795e26",
+    "type": "#267f99",
+    "number": "#09885a",
+    "operator": "#1e1e1e",
+    "variable": "#001080"
+  }
+}

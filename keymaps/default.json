@@ -1,0 +1,20 @@
+[
+  {"key": "Cmd+S", "command": "file.save"},
+  {"key": "Cmd+O", "command": "file.open"},
+  {"key": "Cmd+N", "command": "file.new"},
+  {"key": "Cmd+W", "command": "file.close"},
+  {"key": "Cmd+Z", "command": "edit.undo"},
+  {"key": "Cmd+Shift+Z", "command": "edit.redo"},
+  {"key": "Cmd+X", "command": "edit.cut"},
+  {"key": "Cmd+C", "command": "edit.copy"},
+  {"key": "Cmd+V", "command": "edit.paste"},
+  {"key": "Cmd+A", "command": "edit.selectAll"},
+  {"key": "Cmd+F", "command": "edit.find"},
+  {"key": "Cmd+Shift+F", "command": "edit.findReplace"},
+  {"key": "Cmd+B", "command": "view.sidebar"},
+  {"key": "Cmd+Shift+P", "command": "view.commandPalette"},
+  {"key": "Cmd+P", "command": "view.fuzzyFinder"},
+  {"key": "Cmd+Q", "command": "app.quit"},
+  {"key": "Cmd+D", "command": "edit.selectNextOccurrence"},
+  {"key": "Cmd+Shift+L", "command": "edit.splitSelectionIntoLines"}
+]
