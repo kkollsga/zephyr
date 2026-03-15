@@ -10,6 +10,7 @@ app: build
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp $(BINARY) $(APP)/Contents/MacOS/
 	cp Info.plist $(APP)/Contents/
+	codesign --force --sign - $(APP)
 
 run: build
 	./$(BINARY) $(ARGS)

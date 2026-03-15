@@ -13,7 +13,7 @@ func DarkTheme() Theme {
 		Background:    nrgba(30, 30, 30, 255),
 		Foreground:    nrgba(212, 212, 212, 255),
 		Gutter:        nrgba(110, 110, 110, 255),
-		GutterBg:      nrgba(30, 30, 30, 255),
+		GutterBg:      nrgba(28, 28, 28, 255),
 		Cursor:        nrgba(212, 212, 212, 255),
 		Selection:     nrgba(60, 90, 140, 128),
 		LineHighlight: nrgba(40, 40, 40, 255),

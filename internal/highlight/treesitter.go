@@ -64,9 +64,12 @@ func NewHighlighterForLanguage(name string) *Highlighter {
 }
 
 // Parse parses the source code and builds the syntax tree.
+// Always does a full reparse since we don't track edit byte offsets.
+// Passing the old tree without calling Tree.Edit() first causes tree-sitter
+// to produce incorrect tokens when the text has changed.
 func (h *Highlighter) Parse(source []byte) {
 	h.source = source
-	h.tree = h.parser.Parse(h.tree, source)
+	h.tree = h.parser.Parse(nil, source)
 }
 
 // Update performs an incremental update after an edit.
