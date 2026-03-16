@@ -12,14 +12,25 @@ package main
 
 static bool _titlebarDone = false;
 static volatile bool _hasUnsavedChanges = false;
+static volatile bool _closeRequested = false;
 
-void setUnsavedFlag(bool val) { _hasUnsavedChanges = val; }
+void setUnsavedFlag(bool val) {
+	if (val != _hasUnsavedChanges) NSLog(@"[Zephyr] unsaved flag: %d -> %d", _hasUnsavedChanges, val);
+	_hasUnsavedChanges = val;
+}
 bool getUnsavedFlag(void)     { return _hasUnsavedChanges; }
 
-// windowShouldClose: — always allow close; Go handles saving in DestroyEvent.
-static BOOL interceptedWindowShouldClose(id self, SEL _cmd, NSWindow *sender) {
-	return YES;
+// Check-and-reset: returns true once after the close button was clicked
+// with unsaved changes, then clears the flag.
+bool checkAndResetCloseRequested(void) {
+	if (_closeRequested) {
+		_closeRequested = false;
+		return true;
+	}
+	return false;
 }
+
+static id _closeHelper = nil;  // forward decl for ensureButtonsVisible
 
 // Ensure the traffic light buttons are visible and composited above
 // Gio's Metal layer.  Gio hides them whenever Configure() runs
@@ -33,6 +44,12 @@ static void ensureButtonsVisible(NSWindow *window) {
 	if (close.hidden) [close setHidden:NO];
 	if (mini.hidden)  [mini  setHidden:NO];
 	if (zoom.hidden)  [zoom  setHidden:NO];
+
+	// Re-apply our close intercept if Gio reset the button's target.
+	if (_closeHelper && [close target] != _closeHelper) {
+		[close setTarget:_closeHelper];
+		[close setAction:@selector(handleClose:)];
+	}
 
 	// Walk up to the titlebar container and keep its layer above Metal.
 	NSView *themeFrame = window.contentView.superview;
@@ -48,15 +65,38 @@ static void ensureButtonsVisible(NSWindow *window) {
 	}
 }
 
-static void installCloseHandler(NSWindow *window) {
-	id delegate = window.delegate;
-	if (!delegate) return;
-	Class cls = [delegate class];
-	// Only add if the class doesn't already implement windowShouldClose:
-	if (!class_getInstanceMethod(cls, @selector(windowShouldClose:))) {
-		class_addMethod(cls, @selector(windowShouldClose:),
-		                (IMP)interceptedWindowShouldClose, "B@:@");
+// Intercept the close button directly by replacing its target/action.
+// This is more robust than delegate swizzling because Gio frequently
+// reconfigures the window and may reset delegate state.
+
+static void handleCloseButtonClick(id self, SEL _cmd, id sender) {
+	NSLog(@"[Zephyr] close button clicked, unsaved=%d", _hasUnsavedChanges);
+	if (_hasUnsavedChanges) {
+		_closeRequested = true;
+		return;
 	}
+	// No unsaved changes — close normally.
+	NSWindow *win = [sender window];
+	if (win) [win close];
+}
+
+static void installCloseHandler(NSWindow *window) {
+	NSButton *close = [window standardWindowButton:NSWindowCloseButton];
+	if (!close) {
+		NSLog(@"[Zephyr] installCloseHandler: no close button");
+		return;
+	}
+	if (!_closeHelper) {
+		Class cls = objc_allocateClassPair([NSObject class],
+		                                   "ZephyrCloseHelper", 0);
+		class_addMethod(cls, @selector(handleClose:),
+		                (IMP)handleCloseButtonClick, "v@:@");
+		objc_registerClassPair(cls);
+		_closeHelper = [[cls alloc] init];
+	}
+	[close setTarget:_closeHelper];
+	[close setAction:@selector(handleClose:)];
+	NSLog(@"[Zephyr] close handler installed on button %@", close);
 }
 
 void registerTitlebarObserver() {
@@ -128,6 +168,15 @@ func setUnsavedFlag(unsaved bool) {
 	C.setUnsavedFlag(C.bool(unsaved))
 }
 
-// trafficLightPadding is the horizontal space reserved for the macOS
-// close/minimize/zoom buttons plus a margin so tabs don't crowd them.
-const trafficLightPadding = 160
+// closeRequested returns true if the user clicked the red close button
+// while there were unsaved changes. Resets the flag after reading.
+func closeRequested() bool {
+	return bool(C.checkAndResetCloseRequested())
+}
+
+// trafficLightPaddingDp is the horizontal space (in Dp) reserved for the
+// macOS close/minimize/zoom buttons plus a margin so tabs don't crowd them.
+// This is converted to pixels via gtx.Dp() at each call site so it scales
+// correctly across Retina (2×) and non-Retina (1×) displays.
+// The three buttons span ~54pt; we add a small margin.
+const trafficLightPaddingDp = 76

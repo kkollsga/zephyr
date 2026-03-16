@@ -8,4 +8,6 @@ func titlebarReady() bool { return true }
 
 func setUnsavedFlag(unsaved bool) {}
 
-const trafficLightPadding = 0
+func closeRequested() bool { return false }
+
+const trafficLightPaddingDp = 0

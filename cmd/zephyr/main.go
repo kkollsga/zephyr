@@ -55,18 +55,59 @@ type appState struct {
 	colorMap   highlight.TokenColorMap
 	statusRend *render.TextRenderer
 	tabRend    *render.TextRenderer // font for tab bar
+	plusRend   *render.TextRenderer // larger font for "+" button
 	tag        *bool
 	langSel    *ui.LanguageSelector
 	langLabelX int
 	lastMaxY   int
 	lastMaxX   int
-	dragging     bool
-	window       *app.Window
-	saveAsCh     chan string // result channel from Save As dialog
-	tabBarHeight int        // computed from display scale to match native titlebar
+	dragging       bool
+	quitInProgress bool
+	window         *app.Window
+
+	tabBarHeight   int      // computed from display scale to match native titlebar
+	trafficLightPx int     // traffic light padding in pixels (scaled from Dp)
 	hoverX, hoverY int     // last pointer position for hover effects
+	dp             func(v unit.Dp) int // cached scale function from latest gtx
 }
 const editorTopPad = 10 // top margin above first line of text
+
+// tabLayout holds scaled pixel values for tab bar layout.
+type tabLayout struct {
+	leftPad  int // space before title text
+	innerGap int // space between title and close button
+	closeW   int // close button / dot area width
+	rightPad int // space after close button to tab edge
+	tabGap   int // space between tab edge and "+" button
+	plusW    int // "+" button width
+	titleGap int // space before app title text
+}
+
+func (st *appState) tabMetrics() tabLayout {
+	if st.dp == nil {
+		return tabLayout{8, 2, 10, 6, 2, 28, 16}
+	}
+	return tabLayout{
+		leftPad:  st.dp(8),
+		innerGap: st.dp(2),
+		closeW:   st.dp(10),
+		rightPad: st.dp(6),
+		tabGap:   st.dp(2),
+		plusW:     st.dp(28),
+		titleGap: st.dp(16),
+	}
+}
+
+// tabWidth computes the pixel width of a tab given its title.
+// Layout: [leftPad] title [innerGap] closeBtn [rightPad]
+func (st *appState) tabWidth(title string) int {
+	tr := st.tabRend
+	if tr == nil {
+		return 0
+	}
+	m := st.tabMetrics()
+	return m.leftPad + len(title)*tr.CharWidth + m.innerGap + m.closeW + m.rightPad
+}
 
 func (st *appState) activeEd() *editor.Editor {
 	return st.tabBar.ActiveEditor()
@@ -122,7 +163,6 @@ func run() {
 		tag:       new(bool),
 		langSel:   ui.NewLanguageSelector(),
 		window:    w,
-		saveAsCh:  make(chan string, 1),
 	}
 
 	// Init tab state for first tab
@@ -141,14 +181,34 @@ func run() {
 		evt := w.Event()
 		switch e := evt.(type) {
 		case app.DestroyEvent:
-			st.saveAllBeforeQuit()
-			os.Exit(0)
+			if st.saveAllBeforeQuit() {
+				os.Exit(0)
+			}
+			// User cancelled — don't exit. Re-create the window.
+			w = new(app.Window)
+			w.Option(
+				app.Decorated(false),
+				app.Title("Zephyr"),
+				app.Size(unit.Dp(1024), unit.Dp(768)),
+				app.MinSize(unit.Dp(400), unit.Dp(300)),
+			)
+			st.window = w
+			setupTitlebar()
 
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 			st.initRenderers(gtx)
-			st.processSaveAs()
 			setUnsavedFlag(st.hasUnsavedChanges())
+			if closeRequested() && !st.quitInProgress {
+				st.quitInProgress = true
+				go func() {
+					if st.saveAllBeforeQuit() {
+						os.Exit(0)
+					}
+					st.quitInProgress = false
+					st.window.Invalidate()
+				}()
+			}
 			st.handleEvents(gtx, w)
 			st.draw(gtx, w)
 			e.Frame(gtx.Ops)
@@ -205,6 +265,13 @@ func (st *appState) initRenderers(gtx layout.Context) {
 	})
 	st.tabRend.ComputeMetrics(gtx)
 
+	st.plusRend = render.NewTextRenderer(st.shaper, render.TextStyle{
+		FontSize:   18,
+		LineHeight: 1.0,
+		Foreground: st.theme.Foreground,
+	})
+	st.plusRend.ComputeMetrics(gtx)
+
 	st.cursorRend = render.NewCursorRenderer(
 		st.theme.Cursor,
 		st.textRend.CharWidth,
@@ -213,7 +280,9 @@ func (st *appState) initRenderers(gtx layout.Context) {
 
 	// Match the native macOS titlebar height (28dp) plus a little padding.
 	// On Retina (2×) this is ~76px; on 1× it's ~38px.
+	st.dp = gtx.Dp
 	st.tabBarHeight = gtx.Dp(32)
+	st.trafficLightPx = gtx.Dp(trafficLightPaddingDp)
 }
 
 func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
@@ -229,7 +298,7 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 			key.Filter{Focus: st.tag, Optional: key.ModShortcut | key.ModShift},
 			key.Filter{Focus: st.tag, Name: key.NameTab},
 			key.Filter{Focus: st.tag, Name: key.NameTab, Optional: key.ModShift},
-			pointer.Filter{Target: st.tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll},
+			pointer.Filter{Target: st.tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll | pointer.Move},
 		)
 		if !ok {
 			break
@@ -339,13 +408,28 @@ func (st *appState) handleKey(ke key.Event) {
 		ed.Redo()
 		st.reparseHighlight()
 	case ke.Name == "S" && ke.Modifiers == key.ModShortcut:
-		if ed.FilePath == "" {
-			go st.saveAsDialog()
-		} else {
-			if err := ed.Save(); err != nil {
-				fmt.Fprintf(os.Stderr, "save error: %v\n", err)
+		tab := st.tabBar.ActiveTab()
+		if tab != nil {
+			if tab.Editor.FilePath == "" {
+				go func() {
+					st.saveTabAs(tab)
+					st.updateWindowTitle()
+					st.window.Invalidate()
+				}()
+			} else {
+				st.saveTab(tab)
+				st.updateWindowTitle()
 			}
-			st.updateWindowTitle()
+		}
+	case ke.Name == "S" && ke.Modifiers == key.ModShortcut|key.ModShift:
+		// Cmd+Shift+S = Save As
+		tab := st.tabBar.ActiveTab()
+		if tab != nil {
+			go func() {
+				st.saveTabAs(tab)
+				st.updateWindowTitle()
+				st.window.Invalidate()
+			}()
 		}
 	case ke.Name == "A" && ke.Modifiers == key.ModShortcut:
 		ed.Selection.SelectAll(ed.Buffer)
@@ -368,7 +452,16 @@ func (st *appState) handleKey(ke key.Event) {
 			st.reparseHighlight()
 		}
 	case ke.Name == "Q" && ke.Modifiers == key.ModShortcut:
-		os.Exit(0)
+		if !st.quitInProgress {
+			st.quitInProgress = true
+			go func() {
+				if st.saveAllBeforeQuit() {
+					os.Exit(0)
+				}
+				st.quitInProgress = false
+				st.window.Invalidate()
+			}()
+		}
 	// Selection via shift+arrows
 	case ke.Name == key.NameLeftArrow && ke.Modifiers == key.ModShift:
 		if !ed.Selection.Active {
@@ -518,36 +611,117 @@ func (st *appState) newTab() {
 	st.updateWindowTitle()
 }
 
-// saveAllBeforeQuit saves each modified tab. Files with a path are saved
-// directly; untitled files get a Save As dialog. If the user cancels any
-// Save As dialog that file is skipped.
-func (st *appState) saveAllBeforeQuit() {
+// saveAllBeforeQuit prompts the user for each unsaved tab.
+// Returns true if the quit should proceed, false if the user cancelled.
+func (st *appState) saveAllBeforeQuit() bool {
 	for _, tab := range st.tabBar.Tabs {
 		if !tab.Editor.Modified {
 			continue
 		}
-		if tab.Editor.FilePath != "" {
-			_ = tab.Editor.Save()
-		} else {
-			// Show a synchronous Save As dialog for this tab.
-			defaultName := tab.Title
-			if defaultName == "" || defaultName == "Untitled" {
-				defaultName = "Untitled.txt"
-			}
-			script := fmt.Sprintf(
-				`set filePath to POSIX path of (choose file name with prompt "Save \"%s\" as" default name %q)`+"\n"+`return filePath`,
-				tab.Title, defaultName,
-			)
-			out, err := exec.Command("osascript", "-e", script).Output()
-			if err != nil {
-				continue // user cancelled — skip this file
-			}
-			path := strings.TrimSpace(string(out))
-			if path != "" {
-				_ = tab.Editor.SaveAs(path)
+		result := st.promptSaveDialog(tab.Title)
+		switch result {
+		case saveResultCancel:
+			return false
+		case saveResultDiscard:
+			continue
+		case saveResultSave:
+			if !st.saveTab(tab) {
+				return false
 			}
 		}
 	}
+	return true
+}
+
+// --- Save dialog types ---
+
+type saveResult int
+
+const (
+	saveResultCancel  saveResult = iota
+	saveResultDiscard
+	saveResultSave
+)
+
+// promptSaveDialog shows a native "Do you want to save?" dialog.
+// Buttons: Cancel (Escape) / Discard / Save
+// For untitled files, "Save" triggers a Save As file picker.
+func (st *appState) promptSaveDialog(title string) saveResult {
+	script := fmt.Sprintf(
+		`display dialog "Do you want to save changes to \"%s\"?" buttons {"Discard", "Cancel", "Save"} default button "Save" cancel button "Cancel" with icon caution`,
+		title,
+	)
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		return saveResultCancel
+	}
+	result := strings.TrimSpace(string(out))
+	switch {
+	case strings.Contains(result, "Save"):
+		return saveResultSave
+	case strings.Contains(result, "Discard"):
+		return saveResultDiscard
+	default:
+		return saveResultCancel
+	}
+}
+
+// saveTab saves a tab to its existing path. Returns false if the file is
+// untitled (caller should use saveTabAs instead).
+func (st *appState) saveTab(tab *ui.Tab) bool {
+	if tab.Editor.FilePath == "" {
+		return st.saveTabAs(tab)
+	}
+	if err := tab.Editor.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "save error: %v\n", err)
+		return false
+	}
+	return true
+}
+
+// saveTabAs shows a native Save As file dialog. Returns false if the user
+// cancelled.
+func (st *appState) saveTabAs(tab *ui.Tab) bool {
+	defaultName := tab.Title
+	if defaultName == "" || defaultName == "Untitled" {
+		ts := st.tabStates[tab.Editor]
+		if ts != nil && ts.langLabel != "" && ts.langLabel != "Plain Text" {
+			defaultName = "Untitled" + langToExtension(ts.langLabel)
+		} else {
+			defaultName = "Untitled.txt"
+		}
+	}
+
+	script := fmt.Sprintf(`set filePath to POSIX path of (choose file name with prompt "Save As" default name %q)
+return filePath`, defaultName)
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		return false
+	}
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		return false
+	}
+	if err := tab.Editor.SaveAs(path); err != nil {
+		fmt.Fprintf(os.Stderr, "save error: %v\n", err)
+		return false
+	}
+	tab.Title = filepath.Base(path)
+
+	// Update highlighter for new extension
+	ts := st.tabStates[tab.Editor]
+	if ts != nil {
+		ts.langLabel = detectLanguage(path)
+		h := highlight.NewHighlighter(path)
+		if h != nil {
+			if ts.highlighter != nil {
+				ts.highlighter.Close()
+			}
+			ts.highlighter = h
+			h.Parse([]byte(tab.Editor.Buffer.Text()))
+		}
+	}
+	return true
 }
 
 func (st *appState) hasUnsavedChanges() bool {
@@ -559,7 +733,6 @@ func (st *appState) hasUnsavedChanges() bool {
 	return false
 }
 
-
 func (st *appState) closeCurrentTab() {
 	idx := st.tabBar.ActiveIdx
 	if idx < 0 {
@@ -569,7 +742,7 @@ func (st *appState) closeCurrentTab() {
 }
 
 // closeTabAt closes the tab at idx. If the tab has unsaved changes it
-// shows a Save/Discard/Cancel prompt via osascript.
+// shows a Save/Save As/Discard/Cancel prompt via osascript.
 func (st *appState) closeTabAt(idx int) {
 	if idx < 0 || idx >= len(st.tabBar.Tabs) {
 		return
@@ -601,40 +774,25 @@ func (st *appState) forceCloseTab(idx int) {
 	st.updateWindowTitle()
 }
 
-// promptAndCloseTab shows a native Save/Discard/Cancel dialog.  Runs in a
-// goroutine because osascript blocks.
+// promptAndCloseTab shows the unified save dialog and closes the tab
+// based on the user's choice. Runs in a goroutine because osascript blocks.
 func (st *appState) promptAndCloseTab(idx int) {
-	title := "Untitled"
-	if idx < len(st.tabBar.Tabs) {
-		title = st.tabBar.Tabs[idx].Title
-	}
-	script := fmt.Sprintf(
-		`display dialog "Do you want to save changes to \"%s\"?" buttons {"Cancel", "Discard", "Save"} default button "Save" with icon caution`,
-		title,
-	)
-	out, err := exec.Command("osascript", "-e", script).Output()
-	if err != nil {
-		// User pressed Cancel or closed the dialog.
+	if idx < 0 || idx >= len(st.tabBar.Tabs) {
 		return
 	}
-	result := strings.TrimSpace(string(out))
-	switch {
-	case strings.Contains(result, "Save"):
-		if idx < len(st.tabBar.Tabs) {
-			tab := st.tabBar.Tabs[idx]
-			if tab.Editor.FilePath != "" {
-				_ = tab.Editor.Save()
-			} else {
-				// No path yet — trigger Save As, then close when done.
-				go st.saveAsDialog()
-				return
-			}
+	tab := st.tabBar.Tabs[idx]
+	result := st.promptSaveDialog(tab.Title)
+	switch result {
+	case saveResultCancel:
+		return
+	case saveResultDiscard:
+		st.forceCloseTab(idx)
+		st.window.Invalidate()
+	case saveResultSave:
+		if st.saveTab(tab) {
+			st.forceCloseTab(idx)
+			st.window.Invalidate()
 		}
-		st.forceCloseTab(idx)
-		st.window.Invalidate()
-	case strings.Contains(result, "Discard"):
-		st.forceCloseTab(idx)
-		st.window.Invalidate()
 	}
 }
 
@@ -679,66 +837,8 @@ func langToExtension(lang string) string {
 	}
 }
 
-func (st *appState) saveAsDialog() {
-	// Suggest filename based on active language
-	defaultName := "Untitled"
-	ts := st.activeTabState()
-	if ts != nil && ts.langLabel != "" && ts.langLabel != "Plain Text" {
-		defaultName += langToExtension(ts.langLabel)
-	} else {
-		defaultName += ".txt"
-	}
-
-	script := fmt.Sprintf(`set filePath to POSIX path of (choose file name with prompt "Save As" default name %q)
-return filePath`, defaultName)
-	out, err := exec.Command("osascript", "-e", script).Output()
-	if err != nil {
-		return
-	}
-	path := strings.TrimSpace(string(out))
-	if path != "" {
-		st.saveAsCh <- path
-		st.window.Invalidate()
-	}
-}
-
-func (st *appState) processSaveAs() {
-	select {
-	case path := <-st.saveAsCh:
-		ed := st.activeEd()
-		if ed == nil {
-			return
-		}
-		if err := ed.SaveAs(path); err != nil {
-			fmt.Fprintf(os.Stderr, "save error: %v\n", err)
-			return
-		}
-
-		// Update tab title
-		tab := st.tabBar.ActiveTab()
-		if tab != nil {
-			tab.Title = filepath.Base(path)
-		}
-
-		// Init highlighter for the new file extension
-		ts := st.activeTabState()
-		if ts != nil {
-			ts.langLabel = detectLanguage(path)
-			h := highlight.NewHighlighter(path)
-			if h != nil {
-				if ts.highlighter != nil {
-					ts.highlighter.Close()
-				}
-				ts.highlighter = h
-				ts.highlighter.Parse([]byte(ed.Buffer.Text()))
-				ts.langLabel = ts.highlighter.Language()
-			}
-		}
-
-		st.updateWindowTitle()
-	default:
-	}
-}
+// processSaveAs is kept for compatibility but no longer used.
+// Save-as is now handled synchronously by saveTabAs.
 
 func (st *appState) switchTab(idx int) {
 	st.tabBar.SwitchToTab(idx)
@@ -752,15 +852,15 @@ func (st *appState) handleTabBarClick(x int) {
 		return
 	}
 
+	m := st.tabMetrics()
+
 	// Calculate tab positions
-	tabX := trafficLightPadding
+	tabX := st.trafficLightPx
 	for i, tab := range st.tabBar.Tabs {
-		title := tab.Title
-		tabW := (len(title)+4)*tr.CharWidth + 20 + 12 // title + padding + close button + right pad
+		tabW := st.tabWidth(tab.Title)
 		if x >= tabX && x < tabX+tabW {
 			// Check if click is on the close button area
-			closeX := tabX + tabW - 34
-			if x >= closeX {
+			if x >= tabX+tabW-m.closeW-m.rightPad {
 				st.closeTabAt(i)
 			} else {
 				st.switchTab(i)
@@ -771,9 +871,8 @@ func (st *appState) handleTabBarClick(x int) {
 	}
 
 	// Check if click is on the "+" button
-	plusX := tabX + 10
-	plusW := 36
-	if x >= plusX && x < plusX+plusW {
+	plusX := tabX + m.tabGap
+	if x >= plusX && x < plusX+m.plusW {
 		st.newTab()
 	}
 }
@@ -917,24 +1016,25 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 	modifiedColor := color.NRGBA{R: 200, G: 180, B: 100, A: 255}
 	closeColor := color.NRGBA{R: 150, G: 150, B: 150, A: 255}
 
-	tabX := trafficLightPadding
-	textY := (st.tabBarHeight - tr.LineHeightPx) / 2
+	m := st.tabMetrics()
 
-	tabPadLeft := tr.CharWidth + 4 // left padding inside each tab
+	tabX := st.trafficLightPx
+	textY := (st.tabBarHeight - tr.LineHeightPx) / 2
 
 	// Hover detection — is the pointer in the tab bar area?
 	inTabBar := st.hoverY >= 0 && st.hoverY < st.tabBarHeight
 
 	closeHoverColor := color.NRGBA{R: 230, G: 60, B: 60, A: 255}   // bright red
 	plusHoverColor := color.NRGBA{R: 60, G: 130, B: 230, A: 255}    // blue
+	radius := gtx.Dp(6)
+	dotR := gtx.Dp(3)
 
 	for i, tab := range st.tabBar.Tabs {
 		title := tab.Title
-		tabW := (len(title)+4)*tr.CharWidth + 20 + 12 // extra right padding after close btn
+		tabW := st.tabWidth(title)
 
 		// Active tab background with rounded top corners.
 		if i == st.tabBar.ActiveIdx {
-			radius := 6
 			activeRect := clip.UniformRRect(image.Rectangle{
 				Min: image.Pt(tabX, 0),
 				Max: image.Pt(tabX+tabW, st.tabBarHeight+radius),
@@ -944,38 +1044,41 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 			activeRect.Pop()
 		}
 
-		// Tab title
+		// Tab title — layout: [leftPad] title [innerGap] closeBtn [rightPad]
 		fg := dimFg
 		if i == st.tabBar.ActiveIdx {
 			fg = hoverFg
 		}
-		tr.RenderGlyphs(gtx.Ops, gtx, title, tabX+tabPadLeft, textY, fg)
+		tr.RenderGlyphs(gtx.Ops, gtx, title, tabX+m.leftPad, textY, fg)
 
-		// Close button / modified indicator — inset from tab right edge
-		closeX := tabX + tabW - 28
+		// Close button / modified indicator — centered in closeW area
+		closeX := tabX + m.leftPad + len(title)*tr.CharWidth + m.innerGap
 		closeY := st.tabBarHeight / 2
-		closeHitLeft := tabX + tabW - 34
-		closeHovered := inTabBar && st.hoverX >= closeHitLeft && st.hoverX < tabX+tabW-8
+		closeHitLeft := closeX
+		closeHitRight := closeX + m.closeW
+		closeHovered := inTabBar && st.hoverX >= closeHitLeft && st.hoverX < closeHitRight
 
 		if tab.Editor.Modified {
 			dotColor := modifiedColor
 			if closeHovered {
 				dotColor = closeHoverColor
 			}
-			r := 4
-			dotRect := clip.Rect{
-				Min: image.Pt(closeX-r+4, closeY-r),
-				Max: image.Pt(closeX+r+4, closeY+r),
+			dotCx := closeX + m.closeW/2
+			dotEllipse := clip.Ellipse{
+				Min: image.Pt(dotCx-dotR, closeY-dotR),
+				Max: image.Pt(dotCx+dotR, closeY+dotR),
 			}.Push(gtx.Ops)
 			paint.ColorOp{Color: dotColor}.Add(gtx.Ops)
 			paint.PaintOp{}.Add(gtx.Ops)
-			dotRect.Pop()
+			dotEllipse.Pop()
 		} else {
 			xFg := closeColor
 			if closeHovered {
 				xFg = closeHoverColor
 			}
-			tr.RenderGlyphs(gtx.Ops, gtx, "x", closeX, textY, xFg)
+			// Center the "x" glyph within closeW
+			xGlyphX := closeX + (m.closeW-tr.CharWidth)/2
+			tr.RenderGlyphs(gtx.Ops, gtx, "x", xGlyphX, textY, xFg)
 		}
 
 		tabX += tabW
@@ -993,20 +1096,19 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 		}
 	}
 
-	// "+" button — slightly larger, with spacing from last tab
-	tabX += 10
-	plusW := 36
-	plusHovered := inTabBar && st.hoverX >= tabX && st.hoverX < tabX+plusW
+	// "+" button
+	tabX += m.tabGap
+	plusHovered := inTabBar && st.hoverX >= tabX && st.hoverX < tabX+m.plusW
 	plusFg := color.NRGBA{R: 170, G: 170, B: 170, A: 255}
 	if plusHovered {
 		plusFg = plusHoverColor
 	}
-	plusY := (st.tabBarHeight - st.textRend.LineHeightPx) / 2
-	st.textRend.RenderGlyphs(gtx.Ops, gtx, "+", tabX+(plusW-st.textRend.CharWidth)/2, plusY, plusFg)
-	plusEndX := tabX + plusW
+	plusY := (st.tabBarHeight - st.plusRend.LineHeightPx) / 2
+	st.plusRend.RenderGlyphs(gtx.Ops, gtx, "+", tabX+(m.plusW-st.plusRend.CharWidth)/2, plusY, plusFg)
+	plusEndX := tabX + m.plusW
 
 	// App title and subtitle (right of "+" if space allows)
-	titleX := plusEndX + 20
+	titleX := plusEndX + m.titleGap
 	titleText := "Zephyr"
 	titleW := len(titleText) * tr.CharWidth
 	titleFg := color.NRGBA{R: 160, G: 160, B: 160, A: 255}
