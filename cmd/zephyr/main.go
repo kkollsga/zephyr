@@ -39,9 +39,11 @@ func main() {
 
 // tabState holds per-tab state that isn't part of the editor itself.
 type tabState struct {
-	viewport    *render.Viewport
-	highlighter *highlight.Highlighter
-	langLabel   string
+	viewport       *render.Viewport
+	highlighter    *highlight.Highlighter
+	langLabel      string
+	lastCursorLine int // tracks cursor to detect movement; -1 = uninitialized
+	lastCursorCol  int
 }
 
 type appState struct {
@@ -63,6 +65,7 @@ type appState struct {
 	lastMaxX   int
 	dragging       bool
 	quitInProgress bool
+	scrollAccum    float32 // accumulated fractional scroll delta
 	window         *app.Window
 
 	tabBarHeight   int      // computed from display scale to match native titlebar
@@ -121,8 +124,9 @@ func (st *appState) activeTabState() *tabState {
 	ts, ok := st.tabStates[ed]
 	if !ok {
 		ts = &tabState{
-			viewport:  render.NewViewport(),
-			langLabel: detectLanguage(ed.FilePath),
+			viewport:       render.NewViewport(),
+			langLabel:      detectLanguage(ed.FilePath),
+			lastCursorLine: -1,
 		}
 		// Init highlighter
 		if ed.FilePath != "" {
@@ -292,13 +296,20 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 	areaStack.Pop()
 	gtx.Source.Execute(key.FocusCmd{Tag: st.tag})
 
+	// Compute dynamic scroll range based on viewport position.
+	scrollRange := pointer.ScrollRange{Min: -10000, Max: 10000}
+	if ts := st.activeTabState(); ts != nil && st.textRend != nil && st.textRend.LineHeightPx > 0 {
+		up, down := ts.viewport.ScrollablePixels(st.textRend.LineHeightPx)
+		scrollRange = pointer.ScrollRange{Min: -up, Max: down}
+	}
+
 	for {
 		ev, ok := gtx.Source.Event(
 			key.FocusFilter{Target: st.tag},
 			key.Filter{Focus: st.tag, Optional: key.ModShortcut | key.ModShift},
 			key.Filter{Focus: st.tag, Name: key.NameTab},
 			key.Filter{Focus: st.tag, Name: key.NameTab, Optional: key.ModShift},
-			pointer.Filter{Target: st.tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll | pointer.Move},
+			pointer.Filter{Target: st.tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll | pointer.Move, ScrollY: scrollRange},
 		)
 		if !ok {
 			break
@@ -581,8 +592,13 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		}
 
 	case pointer.Scroll:
-		if ts := st.activeTabState(); ts != nil {
-			ts.viewport.ScrollBy(int(pe.Scroll.Y / 3))
+		if ts := st.activeTabState(); ts != nil && st.textRend != nil && st.textRend.LineHeightPx > 0 {
+			st.scrollAccum += pe.Scroll.Y
+			pixels := int(st.scrollAccum)
+			if pixels != 0 {
+				ts.viewport.ScrollByPixels(pixels, st.textRend.LineHeightPx)
+				st.scrollAccum -= float32(pixels)
+			}
 		}
 	}
 }
@@ -898,22 +914,30 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	}
 
 	// Update viewport
+	statusH := 0
+	if st.statusRend != nil {
+		statusH = st.statusRend.LineHeightPx + 6
+	}
 	ts.viewport.TotalLines = ed.Buffer.LineCount()
 	if st.textRend.LineHeightPx > 0 {
-		statusH := 0
-		if st.statusRend != nil {
-			statusH = st.statusRend.LineHeightPx + 6
-		}
 		ts.viewport.VisibleLines = (gtx.Constraints.Max.Y - statusH - st.tabBarHeight - editorTopPad) / st.textRend.LineHeightPx
 	}
-	ts.viewport.ScrollToRevealCursor(ed.Cursor.Line)
+	// Only scroll to reveal cursor when it has actually moved (not during
+	// trackpad/mouse-wheel scrolling, which should move the viewport freely).
+	if ed.Cursor.Line != ts.lastCursorLine || ed.Cursor.Col != ts.lastCursorCol {
+		ts.viewport.ScrollToRevealCursor(ed.Cursor.Line)
+		ts.lastCursorLine = ed.Cursor.Line
+		ts.lastCursorCol = ed.Cursor.Col
+	}
 
-	// Offset everything below the tab bar
+	// Offset everything below the tab bar and clip to the editor area.
+	editorH := gtx.Constraints.Max.Y - st.tabBarHeight - statusH
 	tabOff := op.Offset(image.Pt(0, st.tabBarHeight)).Push(gtx.Ops)
+	editorClip := clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, editorH)}.Push(gtx.Ops)
 
 	// Gutter
 	firstLine, lastLine := ts.viewport.VisibleRange()
-	gutterWidth := st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ts.viewport.TotalLines, editorTopPad)
+	gutterWidth := st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ts.viewport.TotalLines, editorTopPad, ts.viewport.PixelOffset)
 
 	// Gutter right separator
 	gutterSepColor := color.NRGBA{R: 50, G: 50, B: 50, A: 255}
@@ -943,7 +967,7 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		if err != nil {
 			continue
 		}
-		y := (i-firstLine)*st.textRend.LineHeightPx + editorTopPad
+		y := (i-firstLine)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
 
 		var spans []render.ColorSpan
 		if len(allTokens) > 0 {
@@ -958,8 +982,8 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		byteOffset += len(line) + 1
 	}
 
-	// Offset cursor and selection by top padding
-	padOff := op.Offset(image.Pt(0, editorTopPad)).Push(gtx.Ops)
+	// Offset cursor and selection by top padding minus scroll pixel offset
+	padOff := op.Offset(image.Pt(0, editorTopPad-ts.viewport.PixelOffset)).Push(gtx.Ops)
 
 	// Selection
 	if ed.Selection.Active && !ed.Selection.IsEmpty() {
@@ -981,6 +1005,7 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 
 	padOff.Pop()
 
+	editorClip.Pop()
 	tabOff.Pop()
 
 	// Status line

@@ -14,10 +14,7 @@ static bool _titlebarDone = false;
 static volatile bool _hasUnsavedChanges = false;
 static volatile bool _closeRequested = false;
 
-void setUnsavedFlag(bool val) {
-	if (val != _hasUnsavedChanges) NSLog(@"[Zephyr] unsaved flag: %d -> %d", _hasUnsavedChanges, val);
-	_hasUnsavedChanges = val;
-}
+void setUnsavedFlag(bool val) { _hasUnsavedChanges = val; }
 bool getUnsavedFlag(void)     { return _hasUnsavedChanges; }
 
 // Check-and-reset: returns true once after the close button was clicked
@@ -70,7 +67,6 @@ static void ensureButtonsVisible(NSWindow *window) {
 // reconfigures the window and may reset delegate state.
 
 static void handleCloseButtonClick(id self, SEL _cmd, id sender) {
-	NSLog(@"[Zephyr] close button clicked, unsaved=%d", _hasUnsavedChanges);
 	if (_hasUnsavedChanges) {
 		_closeRequested = true;
 		return;
@@ -82,10 +78,7 @@ static void handleCloseButtonClick(id self, SEL _cmd, id sender) {
 
 static void installCloseHandler(NSWindow *window) {
 	NSButton *close = [window standardWindowButton:NSWindowCloseButton];
-	if (!close) {
-		NSLog(@"[Zephyr] installCloseHandler: no close button");
-		return;
-	}
+	if (!close) return;
 	if (!_closeHelper) {
 		Class cls = objc_allocateClassPair([NSObject class],
 		                                   "ZephyrCloseHelper", 0);
@@ -96,7 +89,6 @@ static void installCloseHandler(NSWindow *window) {
 	}
 	[close setTarget:_closeHelper];
 	[close setAction:@selector(handleClose:)];
-	NSLog(@"[Zephyr] close handler installed on button %@", close);
 }
 
 void registerTitlebarObserver() {

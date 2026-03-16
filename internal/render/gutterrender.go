@@ -37,11 +37,15 @@ func (gr *GutterRenderer) Width(maxLineNum int) int {
 }
 
 // RenderGutter draws line numbers for visible lines.
-// yOffset adds vertical padding before the first line number.
-func (gr *GutterRenderer) RenderGutter(gtx layout.Context, ops *op.Ops, firstLine, lastLine, totalLines int, yOffset ...int) int {
+// extraOffsets: [0] = topPad (vertical padding), [1] = pixelOffset (sub-line scroll).
+func (gr *GutterRenderer) RenderGutter(gtx layout.Context, ops *op.Ops, firstLine, lastLine, totalLines int, extraOffsets ...int) int {
 	topPad := 0
-	if len(yOffset) > 0 {
-		topPad = yOffset[0]
+	pixelOff := 0
+	if len(extraOffsets) > 0 {
+		topPad = extraOffsets[0]
+	}
+	if len(extraOffsets) > 1 {
+		pixelOff = extraOffsets[1]
 	}
 	width := gr.Width(totalLines)
 
@@ -61,7 +65,7 @@ func (gr *GutterRenderer) RenderGutter(gtx layout.Context, ops *op.Ops, firstLin
 
 	for i := firstLine; i <= lastLine && i < totalLines; i++ {
 		lineNum := fmt.Sprintf("%*d", maxDigits, i+1)
-		y := (i-firstLine)*gr.LineHeight + topPad
+		y := (i-firstLine)*gr.LineHeight + topPad - pixelOff
 
 		xOffset := width - (len(lineNum)+1)*gr.CharWidth
 
