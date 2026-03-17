@@ -28,6 +28,60 @@ bool checkAndResetCloseRequested(void) {
 }
 
 static id _closeHelper = nil;  // forward decl for ensureButtonsVisible
+static bool _mouseDownSwizzled = false;
+
+// Override mouseDownCanMoveWindow on the Gio content view so that clicking
+// in the titlebar area does NOT start a native window drag.  We handle
+// window dragging ourselves for the empty tab-bar space.
+static BOOL swizzled_mouseDownCanMoveWindow(id self, SEL _cmd) {
+	return NO;
+}
+
+static void swizzleContentView(NSWindow *window) {
+	if (_mouseDownSwizzled) return;
+	NSView *cv = window.contentView;
+	if (!cv) return;
+
+	// Also override on the superview (theme frame) which is the actual
+	// responder for titlebar drags.
+	NSView *themeFrame = cv.superview;
+	if (themeFrame) {
+		Class themeClass = [themeFrame class];
+		Method orig = class_getInstanceMethod(themeClass, @selector(mouseDownCanMoveWindow));
+		if (orig) {
+			method_setImplementation(orig, (IMP)swizzled_mouseDownCanMoveWindow);
+		} else {
+			class_addMethod(themeClass, @selector(mouseDownCanMoveWindow),
+			                (IMP)swizzled_mouseDownCanMoveWindow, "B@:");
+		}
+	}
+
+	// Override on the content view itself too.
+	Class cvClass = [cv class];
+	Method orig = class_getInstanceMethod(cvClass, @selector(mouseDownCanMoveWindow));
+	if (orig) {
+		method_setImplementation(orig, (IMP)swizzled_mouseDownCanMoveWindow);
+	} else {
+		class_addMethod(cvClass, @selector(mouseDownCanMoveWindow),
+		                (IMP)swizzled_mouseDownCanMoveWindow, "B@:");
+	}
+
+	window.movableByWindowBackground = NO;
+	_mouseDownSwizzled = true;
+}
+
+// Programmatically start a native window drag using the current event.
+// Called from Go when the user drags on empty tab-bar space.
+void performWindowDrag(void) {
+	NSEvent *event = [NSApp currentEvent];
+	if (!event) return;
+	for (NSWindow *window in [NSApp windows]) {
+		if ([window isVisible] && window.contentView) {
+			[window performWindowDragWithEvent:event];
+			return;
+		}
+	}
+}
 
 // Ensure the traffic light buttons are visible and composited above
 // Gio's Metal layer.  Gio hides them whenever Configure() runs
@@ -60,6 +114,21 @@ static void ensureButtonsVisible(NSWindow *window) {
 			v.layer.zPosition = 1000;
 		}
 	}
+}
+
+// Called from Go after every frame to immediately re-show traffic lights
+// that Gio's Metal layer may have hidden during Configure().
+// Must dispatch to the main thread since Go's run() goroutine is not on it.
+void ensureTrafficLightsVisible(void) {
+	if (!_titlebarDone) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		for (NSWindow *window in [NSApp windows]) {
+			if ([window isVisible] && window.contentView) {
+				ensureButtonsVisible(window);
+				return;
+			}
+		}
+	});
 }
 
 // Intercept the close button directly by replacing its target/action.
@@ -116,6 +185,7 @@ void registerTitlebarObserver() {
 
 			installCloseHandler(window);
 			ensureButtonsVisible(window);
+			swizzleContentView(window);
 			_titlebarDone = true;
 			[t invalidate];
 
@@ -145,6 +215,39 @@ void registerTitlebarObserver() {
 bool titlebarReady() {
 	return _titlebarDone;
 }
+
+// Returns true if the global mouse cursor is outside all visible app windows.
+bool isPointerOutsideWindow() {
+	NSPoint mouseLocation = [NSEvent mouseLocation];
+	for (NSWindow *window in [NSApp windows]) {
+		if ([window isVisible] && NSPointInRect(mouseLocation, [window frame])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Returns the global mouse position as (x, y) in screen coordinates.
+void getGlobalMousePosition(double *outX, double *outY) {
+	NSPoint mouseLocation = [NSEvent mouseLocation];
+	*outX = mouseLocation.x;
+	*outY = mouseLocation.y;
+}
+
+// Returns the window frame as (x, y, w, h) in screen coordinates.
+void getWindowFrame(double *outX, double *outY, double *outW, double *outH) {
+	for (NSWindow *window in [NSApp windows]) {
+		if ([window isVisible] && window.contentView) {
+			NSRect frame = [window frame];
+			*outX = frame.origin.x;
+			*outY = frame.origin.y;
+			*outW = frame.size.width;
+			*outH = frame.size.height;
+			return;
+		}
+	}
+	*outX = 0; *outY = 0; *outW = 0; *outH = 0;
+}
 */
 import "C"
 
@@ -160,10 +263,42 @@ func setUnsavedFlag(unsaved bool) {
 	C.setUnsavedFlag(C.bool(unsaved))
 }
 
+// ensureTrafficLights re-shows the macOS traffic light buttons after a frame
+// render. Gio's Metal layer can hide them during Configure().
+func ensureTrafficLights() {
+	C.ensureTrafficLightsVisible()
+}
+
 // closeRequested returns true if the user clicked the red close button
 // while there were unsaved changes. Resets the flag after reading.
 func closeRequested() bool {
 	return bool(C.checkAndResetCloseRequested())
+}
+
+// pointerOutsideWindow returns true if the mouse cursor is outside all
+// visible application windows. Used for tab drag-out detection.
+func pointerOutsideWindow() bool {
+	return bool(C.isPointerOutsideWindow())
+}
+
+// globalMousePosition returns the global mouse position in screen coordinates.
+func globalMousePosition() (x, y float64) {
+	var cx, cy C.double
+	C.getGlobalMousePosition(&cx, &cy)
+	return float64(cx), float64(cy)
+}
+
+// windowFrame returns the current window frame in screen coordinates.
+func windowFrame() (x, y, w, h float64) {
+	var cx, cy, cw, ch C.double
+	C.getWindowFrame(&cx, &cy, &cw, &ch)
+	return float64(cx), float64(cy), float64(cw), float64(ch)
+}
+
+// startWindowDrag initiates a native macOS window drag from the current event.
+// Called when the user drags on empty tab bar space (not on a tab).
+func startWindowDrag() {
+	C.performWindowDrag()
 }
 
 // trafficLightPaddingDp is the horizontal space (in Dp) reserved for the

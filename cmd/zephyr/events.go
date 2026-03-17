@@ -2,7 +2,6 @@ package main
 
 import (
 	"math"
-	"os"
 
 	"gioui.org/app"
 	"gioui.org/f32"
@@ -58,6 +57,50 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 }
 
 func (st *appState) handleKey(ke key.Event) {
+	// Unified save menu intercepts all input
+	if st.saveMenu.visible {
+		if st.saveMenuShowSaveAs() {
+			// Save As rows visible — handle filename editing keys
+			switch {
+			case ke.Name == key.NameEscape:
+				st.saveMenu.visible = false
+				st.quitInProgress = false
+			case ke.Name == key.NameReturn:
+				st.executeSaveAs()
+			case ke.Name == key.NameDeleteBackward:
+				st.saveAsDeleteBack()
+			case ke.Name == key.NameDeleteForward:
+				st.saveAsDeleteForward()
+			case ke.Name == key.NameLeftArrow && ke.Modifiers == 0:
+				st.saveMenu.selectAll = false
+				if st.saveMenu.cursor > 0 {
+					st.saveMenu.cursor--
+				}
+			case ke.Name == key.NameRightArrow && ke.Modifiers == 0:
+				st.saveMenu.selectAll = false
+				if st.saveMenu.cursor < len(st.saveMenu.filename) {
+					st.saveMenu.cursor++
+				}
+			case ke.Name == key.NameLeftArrow && ke.Modifiers == key.ModShortcut:
+				st.saveMenu.selectAll = false
+				st.saveMenu.cursor = 0
+			case ke.Name == key.NameRightArrow && ke.Modifiers == key.ModShortcut:
+				st.saveMenu.selectAll = false
+				st.saveMenu.cursor = len(st.saveMenu.filename)
+			case ke.Name == "A" && ke.Modifiers == key.ModShortcut:
+				st.saveMenu.selectAll = true
+				st.saveMenu.cursor = len(st.saveMenu.filename)
+			}
+		} else {
+			// Collapsed mode (file-backed, no Save As rows) — only Escape
+			if ke.Name == key.NameEscape {
+				st.saveMenu.visible = false
+				st.quitInProgress = false
+			}
+		}
+		return
+	}
+
 	if st.langSel.Visible {
 		switch ke.Name {
 		case key.NameEscape:
@@ -164,38 +207,34 @@ func (st *appState) handleKey(ke key.Event) {
 		ed.Cursor.PageUp(ed.Buffer, st.activeTabState().viewport.VisibleLines)
 	case ke.Name == key.NameDeleteBackward && ke.Modifiers == 0:
 		if st.deleteAutoPair() {
-			st.reparseHighlight()
+			st.afterEdit()
 		} else if st.softTabBackspace() {
-			st.reparseHighlight()
+			st.afterEdit()
 		} else {
 			ed.DeleteBackward()
-			st.reparseHighlight()
+			st.afterEdit()
 		}
 	case ke.Name == key.NameDeleteForward && ke.Modifiers == 0:
 		ed.DeleteForward()
-		st.reparseHighlight()
+		st.afterEdit()
 	case ke.Name == key.NameReturn && ke.Modifiers == 0:
 		indent := st.computeAutoIndent()
 		ed.InsertText("\n" + indent)
-		st.reparseHighlight()
+		st.afterEdit()
 	case ke.Name == key.NameTab && ke.Modifiers == 0:
 		ed.InsertText("    ")
-		st.reparseHighlight()
+		st.afterEdit()
 	case ke.Name == "Z" && ke.Modifiers == key.ModShortcut:
 		ed.Undo()
-		st.reparseHighlight()
+		st.afterEdit()
 	case ke.Name == "Z" && ke.Modifiers == key.ModShortcut|key.ModShift:
 		ed.Redo()
-		st.reparseHighlight()
+		st.afterEdit()
 	case ke.Name == "S" && ke.Modifiers == key.ModShortcut:
 		tab := st.tabBar.ActiveTab()
 		if tab != nil {
 			if tab.Editor.FilePath == "" {
-				go func() {
-					st.saveTabAs(tab)
-					st.updateWindowTitle()
-					st.window.Invalidate()
-				}()
+				st.showSaveAsMenu(st.tabBar.ActiveIdx, false, false)
 			} else {
 				st.saveTab(tab)
 				st.updateWindowTitle()
@@ -203,13 +242,8 @@ func (st *appState) handleKey(ke key.Event) {
 		}
 	case ke.Name == "S" && ke.Modifiers == key.ModShortcut|key.ModShift:
 		// Cmd+Shift+S = Save As
-		tab := st.tabBar.ActiveTab()
-		if tab != nil {
-			go func() {
-				st.saveTabAs(tab)
-				st.updateWindowTitle()
-				st.window.Invalidate()
-			}()
+		if st.tabBar.ActiveIdx >= 0 {
+			st.showSaveAsMenu(st.tabBar.ActiveIdx, false, false)
 		}
 	case ke.Name == "A" && ke.Modifiers == key.ModShortcut:
 		ed.Selection.SelectAll(ed.Buffer)
@@ -224,23 +258,16 @@ func (st *appState) handleKey(ke key.Event) {
 		if text := ed.SelectedText(); text != "" {
 			clipboard.Set(text)
 			ed.DeleteSelection()
-			st.reparseHighlight()
+			st.afterEdit()
 		}
 	case ke.Name == "V" && ke.Modifiers == key.ModShortcut:
 		if text := clipboard.Get(); text != "" {
 			ed.InsertText(text)
-			st.reparseHighlight()
+			st.afterEdit()
 		}
 	case ke.Name == "Q" && ke.Modifiers == key.ModShortcut:
 		if !st.quitInProgress {
-			st.quitInProgress = true
-			go func() {
-				if st.saveAllBeforeQuit() {
-					os.Exit(0)
-				}
-				st.quitInProgress = false
-				st.window.Invalidate()
-			}()
+			st.startQuitFlow()
 		}
 	// Find / Replace
 	case ke.Name == "F" && ke.Modifiers == key.ModShortcut:
@@ -284,10 +311,22 @@ func (st *appState) handlePointer(pe pointer.Event) {
 	st.hoverY = int(pe.Position.Y)
 
 	switch pe.Kind {
-	case pointer.Press:
-		// Check tab bar clicks first
+	case pointer.Move:
+		// Check for incoming tab transfers when pointer is in the tab bar
 		if int(pe.Position.Y) < st.tabBarHeight {
-			st.handleTabBarClick(int(pe.Position.X))
+			st.checkIncomingTabTransfer()
+		}
+
+	case pointer.Press:
+		// Save menu takes priority over everything
+		if st.saveMenu.visible {
+			st.handleSaveMenuClick(int(pe.Position.X), int(pe.Position.Y))
+			return
+		}
+
+		// Check tab bar clicks first (or overflow dropdown which extends below)
+		if int(pe.Position.Y) < st.tabBarHeight || st.overflowOpen {
+			st.handleTabBarPress(int(pe.Position.X), int(pe.Position.Y))
 			return
 		}
 
@@ -353,6 +392,11 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		st.cursorRend.ResetBlink()
 
 	case pointer.Drag:
+		// Tab drag takes priority over text selection drag
+		if st.tabDrag.active {
+			st.handleTabBarDrag(int(pe.Position.X), int(pe.Position.Y))
+			return
+		}
 		if !st.dragging {
 			return
 		}
@@ -366,6 +410,10 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		st.cursorRend.ResetBlink()
 
 	case pointer.Release:
+		if st.tabDrag.active {
+			st.handleTabBarRelease(int(pe.Position.X), int(pe.Position.Y))
+			return
+		}
 		if st.dragging {
 			st.dragging = false
 			if ed := st.activeEd(); ed != nil && ed.Selection.IsEmpty() {
@@ -404,6 +452,13 @@ func (st *appState) pointerToLineCol(pos f32.Point) (line, col int) {
 }
 
 func (st *appState) handleTextInput(text string) {
+	if st.saveMenu.visible && st.saveMenuShowSaveAs() {
+		st.saveAsInsertText(text)
+		return
+	}
+	if st.saveMenu.visible {
+		return // collapsed mode ignores text input
+	}
 	if st.findBar.Visible {
 		st.findBar.InsertChar(text)
 		if st.findBar.FocusField == 0 {
@@ -421,7 +476,7 @@ func (st *appState) handleTextInput(text string) {
 		next := ed.RuneAfterCursor()
 		if string(next) == text {
 			ed.Cursor.MoveRight(ed.Buffer)
-			st.reparseHighlight()
+			st.afterEdit()
 			return
 		}
 	}
@@ -432,13 +487,13 @@ func (st *appState) handleTextInput(text string) {
 			if next != 0 && next != ' ' && next != '\t' && next != '\n' &&
 				next != ')' && next != ']' && next != '}' && next != ',' && next != ';' {
 				ed.InsertText(text)
-				st.reparseHighlight()
+				st.afterEdit()
 				return
 			}
 		}
 		ed.InsertText(text + closer)
 		ed.Cursor.MoveLeft(ed.Buffer)
-		st.reparseHighlight()
+		st.afterEdit()
 		return
 	}
 
@@ -446,5 +501,5 @@ func (st *appState) handleTextInput(text string) {
 	if text == "}" || text == ")" || text == "]" {
 		st.autoDedentClosingBracket()
 	}
-	st.reparseHighlight()
+	st.afterEdit()
 }

@@ -3,6 +3,7 @@ package editor
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kristianweb/zephyr/internal/buffer"
 )
@@ -17,8 +18,6 @@ type SearchResult struct {
 
 // Find searches for all occurrences of a pattern in the buffer.
 func Find(pt *buffer.PieceTable, pattern string, useRegex, caseSensitive bool) ([]SearchResult, error) {
-	text := pt.Text()
-
 	if useRegex {
 		flags := ""
 		if !caseSensitive {
@@ -28,10 +27,57 @@ func Find(pt *buffer.PieceTable, pattern string, useRegex, caseSensitive bool) (
 		if err != nil {
 			return nil, err
 		}
+		text := pt.Text()
 		return findRegex(pt, text, re), nil
 	}
 
+	// For literal search, use line-by-line to avoid full buffer allocation.
+	if !strings.Contains(pattern, "\n") {
+		return findLiteralByLine(pt, pattern, caseSensitive), nil
+	}
+	text := pt.Text()
 	return findLiteral(pt, text, pattern, caseSensitive), nil
+}
+
+// findLiteralByLine searches line-by-line to avoid a full-buffer allocation.
+// Only works for single-line patterns (no newlines).
+func findLiteralByLine(pt *buffer.PieceTable, pattern string, caseSensitive bool) []SearchResult {
+	if len(pattern) == 0 {
+		return nil
+	}
+	searchPattern := pattern
+	if !caseSensitive {
+		searchPattern = strings.ToLower(pattern)
+	}
+
+	var results []SearchResult
+	nLines := pt.LineCount()
+	for lineIdx := 0; lineIdx < nLines; lineIdx++ {
+		line, err := pt.Line(lineIdx)
+		if err != nil {
+			continue
+		}
+		searchLine := line
+		if !caseSensitive {
+			searchLine = strings.ToLower(line)
+		}
+		offset := 0
+		for {
+			idx := strings.Index(searchLine[offset:], searchPattern)
+			if idx == -1 {
+				break
+			}
+			col := utf8.RuneCountInString(line[:offset+idx])
+			results = append(results, SearchResult{
+				Offset: pt.LineStartOffset(lineIdx) + offset + idx,
+				Length: len(pattern),
+				Line:   lineIdx,
+				Col:    col,
+			})
+			offset += idx + 1
+		}
+	}
+	return results
 }
 
 func findLiteral(pt *buffer.PieceTable, text, pattern string, caseSensitive bool) []SearchResult {
@@ -95,19 +141,22 @@ func ReplaceAll(pt *buffer.PieceTable, pattern, replacement string, useRegex, ca
 		return 0, err
 	}
 
+	// Pre-compile regex once if needed
+	var re *regexp.Regexp
+	if useRegex {
+		flags := ""
+		if !caseSensitive {
+			flags = "(?i)"
+		}
+		re, _ = regexp.Compile(flags + pattern)
+	}
+
 	// Replace from end to start to preserve offsets
 	count := 0
 	for i := len(results) - 1; i >= 0; i-- {
 		r := results[i]
-		if useRegex {
-			// For regex, compute the actual replacement with group substitution
-			text := pt.Text()
-			flags := ""
-			if !caseSensitive {
-				flags = "(?i)"
-			}
-			re, _ := regexp.Compile(flags + pattern)
-			matchText := text[r.Offset : r.Offset+r.Length]
+		if re != nil {
+			matchText, _ := pt.Substring(r.Offset, r.Length)
 			expanded := re.ReplaceAllString(matchText, replacement)
 			Replace(pt, r.Offset, r.Length, expanded)
 		} else {

@@ -14,3 +14,18 @@ type Piece struct {
 	Offset int
 	Length int
 }
+
+// EditInfo captures byte offsets and row/column points for a single edit,
+// suitable for constructing a tree-sitter EditInput.
+// Columns are byte offsets within the line (not rune counts).
+type EditInfo struct {
+	StartByte  int
+	OldEndByte int
+	NewEndByte int
+	StartRow   int
+	StartCol   int
+	OldEndRow  int
+	OldEndCol  int
+	NewEndRow  int
+	NewEndCol  int
+}

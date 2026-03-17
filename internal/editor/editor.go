@@ -95,8 +95,7 @@ func (e *Editor) DeleteBackward() {
 	}
 
 	// Get the rune before cursor (may be multi-byte)
-	text := e.Buffer.Text()
-	_, runeSize := utf8.DecodeLastRuneInString(text[:offset])
+	_, runeSize := e.Buffer.RuneBeforeOffset(offset)
 	deleted, _ := e.Buffer.Substring(offset-runeSize, runeSize)
 
 	e.History.Record(EditAction{
@@ -164,8 +163,7 @@ func (e *Editor) DeleteForward() {
 	}
 
 	// Get the rune at cursor (may be multi-byte)
-	text := e.Buffer.Text()
-	_, runeSize := utf8.DecodeRuneInString(text[offset:])
+	_, runeSize := e.Buffer.RuneAtOffset(offset)
 	deleted, _ := e.Buffer.Substring(offset, runeSize)
 
 	e.History.Record(EditAction{
@@ -319,11 +317,10 @@ func (e *Editor) setCursorFromOffset(offset int) {
 // RuneAfterCursor returns the rune immediately after the cursor, or 0 if at end.
 func (e *Editor) RuneAfterCursor() rune {
 	offset := e.cursorOffset()
-	text := e.Buffer.Text()
-	if offset >= len(text) {
+	if offset >= e.Buffer.Length() {
 		return 0
 	}
-	r, _ := utf8.DecodeRuneInString(text[offset:])
+	r, _ := e.Buffer.RuneAtOffset(offset)
 	return r
 }
 
@@ -460,8 +457,7 @@ func (e *Editor) DeleteBackwardAtAllCursors() {
 			continue
 		}
 		// Get the rune before this cursor
-		text := e.Buffer.Text()
-		_, runeSize := utf8.DecodeLastRuneInString(text[:info.offset])
+		_, runeSize := e.Buffer.RuneBeforeOffset(info.offset)
 		deleted, _ := e.Buffer.Substring(info.offset-runeSize, runeSize)
 		e.History.Record(EditAction{
 			Type:   ActionDelete,

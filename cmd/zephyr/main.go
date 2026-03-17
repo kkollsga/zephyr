@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -30,7 +31,7 @@ type tabState struct {
 	langLabel      string
 	lastCursorLine int // tracks cursor to detect movement; -1 = uninitialized
 	lastCursorCol  int
-	byteOffsets    []int // byte offset at the start of each line; rebuilt on reparse
+	sourceBuf      []byte // reusable buffer for tree-sitter source
 }
 
 type appState struct {
@@ -52,16 +53,73 @@ type appState struct {
 	langLabelX int
 	lastMaxY   int
 	lastMaxX   int
-	dragging       bool
-	quitInProgress bool
-	scrollAccum    float32 // accumulated fractional scroll delta
-	window         *app.Window
+	dragging        bool
+	quitInProgress  bool
+	scrollAccum     float32 // accumulated fractional scroll delta
+	window          *app.Window
+	lastWindowTitle string  // dedup title updates to avoid Configure() thrash
 
 	tabBarHeight   int      // computed from display scale to match native titlebar
 	trafficLightPx int     // traffic light padding in pixels (scaled from Dp)
 	hoverX, hoverY int     // last pointer position for hover effects
 	dp             func(v unit.Dp) int // cached scale function from latest gtx
+
+	// Tab overflow state
+	overflowOpen         bool  // true when the overflow dropdown is visible
+	overflowStartIdx     int   // first tab index that overflows (== len(Tabs) if none)
+	overflowBtnX         int   // left edge X of the ">" button (for click detection)
+	overflowBtnW         int   // width of the ">" button
+	barTabIdxs           []int // tab indices shown in the bar (computed each frame)
+	dropdownTabIdxs      []int // tab indices shown in the dropdown (computed each frame)
+	dropdownHeader       int   // tab index shown as first dropdown item for continuity (-1 = none)
+
+	// Debounced reparse state
+	reparsePending  bool
+	reparseDeadline time.Time
+
+	// Footer notification (e.g. "Saved to: /path/to/file")
+	notification      string
+	notificationUntil time.Time
+
+	// Graceful exit state
+	exitPending  bool
+	exitDeadline time.Time
+
+	// Unified save menu state (in-app dropdown with tag, where, toggle)
+	saveMenu struct {
+		visible        bool
+		tabIdx         int
+		forQuit        bool   // continue quit flow after action
+		closeAfterSave bool   // close tab after save (close-tab flow)
+		saveAsExpanded bool   // true when Save As rows are shown for file-backed tabs
+
+		// Save As fields
+		filename  []rune
+		cursor    int    // rune position in filename
+		selectAll bool   // entire filename is selected
+		dir              string // directory to save in
+		tags             [7]bool // macOS Finder tags: Red, Orange, Yellow, Green, Blue, Purple, Gray
+		confirmOverwrite bool   // true when waiting for overwrite confirmation
+	}
+
+	// Tab drag state
+	tabDrag struct {
+		active        bool // a tab press is in progress
+		tabIdx        int  // index of the tab being dragged
+		startX        int  // pointer X at press
+		startY        int  // pointer Y at press
+		currentX      int  // current pointer X
+		currentY      int  // current pointer Y
+		started       bool // true once drag threshold (5px) exceeded
+		dropTargetIdx int  // flat MoveTab target index
+		fromDropdown  bool // drag started from overflow dropdown
+		dropInBar     bool // true if gap renders in bar, false if in dropdown
+		dropSlot      int  // gap position within bar or dropdown section
+	}
 }
+// macOS Finder tag names (indexed 0–6).
+var finderTagNames = [7]string{"Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"}
+
 const editorTopPad = 10 // top margin above first line of text
 
 // tabLayout holds scaled pixel values for tab bar layout.
@@ -95,7 +153,8 @@ func (st *appState) activeTabState() *tabState {
 		if ed.FilePath != "" {
 			ts.highlighter = highlight.NewHighlighter(ed.FilePath)
 			if ts.highlighter != nil {
-				ts.highlighter.Parse([]byte(ed.Buffer.Text()))
+				ts.sourceBuf = ed.Buffer.TextBytes(ts.sourceBuf)
+				ts.highlighter.Parse(ts.sourceBuf)
 				ts.langLabel = ts.highlighter.Language()
 			}
 		}
@@ -107,7 +166,25 @@ func (st *appState) activeTabState() *tabState {
 func run() {
 	tabBar := ui.NewTabBar()
 
-	if len(os.Args) > 1 {
+	if len(os.Args) > 2 && os.Args[1] == "--temp" {
+		// Load content from temp file but treat as untitled
+		path, _ := filepath.Abs(os.Args[2])
+		ed, err := editor.NewEditorFromFile(path)
+		if err != nil {
+			ed = editor.NewEmptyEditor()
+		} else {
+			ed.FilePath = "" // mark as untitled
+			os.Remove(path)  // clean up temp file
+		}
+		title := "Untitled"
+		for i := 3; i < len(os.Args)-1; i++ {
+			if os.Args[i] == "--title" {
+				title = os.Args[i+1]
+				break
+			}
+		}
+		tabBar.OpenEditor(ed, title)
+	} else if len(os.Args) > 1 {
 		path, _ := filepath.Abs(os.Args[1])
 		_, err := tabBar.OpenFile(path)
 		if err != nil {
@@ -149,10 +226,10 @@ func run() {
 		evt := w.Event()
 		switch e := evt.(type) {
 		case app.DestroyEvent:
-			if st.saveAllBeforeQuit() {
+			if !st.hasUnsavedChanges() {
 				os.Exit(0)
 			}
-			// User cancelled — don't exit. Re-create the window.
+			// Has unsaved changes — re-create window and show save prompt.
 			w = new(app.Window)
 			w.Option(
 				app.Decorated(false),
@@ -162,40 +239,66 @@ func run() {
 			)
 			st.window = w
 			setupTitlebar()
+			st.startQuitFlow()
 
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 			st.initRenderers(gtx)
 			setUnsavedFlag(st.hasUnsavedChanges())
-			if closeRequested() && !st.quitInProgress {
-				st.quitInProgress = true
-				go func() {
-					if st.saveAllBeforeQuit() {
-						os.Exit(0)
-					}
-					st.quitInProgress = false
-					st.window.Invalidate()
-				}()
+
+			// Check if graceful exit delay has elapsed
+			if st.exitPending && !time.Now().Before(st.exitDeadline) {
+				os.Exit(0)
 			}
-			st.handleEvents(gtx, w)
+
+			if closeRequested() && !st.quitInProgress && !st.exitPending {
+				st.startQuitFlow()
+			}
+			if !st.exitPending {
+				st.handleEvents(gtx, w)
+				st.flushReparse()
+			}
 			st.draw(gtx, w)
 			e.Frame(gtx.Ops)
+			ensureTrafficLights()
+
+			// Keep requesting frames during exit countdown
+			if st.exitPending {
+				gtx.Execute(op.InvalidateCmd{})
+			}
 		}
 	}
 }
 
 func (st *appState) updateWindowTitle() {
+	var title string
 	tab := st.tabBar.ActiveTab()
 	if tab != nil {
-		title := tab.Title
+		title = tab.Title
 		if tab.Editor.Modified {
 			title += " •"
 		}
 		title += " — Zephyr"
-		st.window.Option(app.Title(title))
 	} else {
-		st.window.Option(app.Title("Zephyr — The caffeinated editor"))
+		title = "Zephyr — The caffeinated editor"
 	}
+	if title != st.lastWindowTitle {
+		st.lastWindowTitle = title
+		st.window.Option(app.Title(title))
+	}
+}
+
+// gracefulExit shows a "Closing…" notification and exits after a short delay
+// so the user sees the message and the app doesn't feel like it crashed.
+func (st *appState) gracefulExit() {
+	if st.exitPending {
+		return
+	}
+	st.exitPending = true
+	st.exitDeadline = time.Now().Add(500 * time.Millisecond)
+	st.notification = "Closing\u2026"
+	st.notificationUntil = st.exitDeadline.Add(time.Second) // keep visible until exit
+	st.window.Invalidate()
 }
 
 func (st *appState) initRenderers(gtx layout.Context) {

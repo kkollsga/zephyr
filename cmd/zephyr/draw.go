@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"time"
 	"unicode/utf8"
 
 	"gioui.org/app"
@@ -30,6 +31,7 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	if ed == nil || ts == nil {
 		st.lastMaxY = gtx.Constraints.Max.Y
 		st.lastMaxX = gtx.Constraints.Max.X
+		st.drawStatusLine(gtx)
 		return
 	}
 
@@ -71,10 +73,10 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	paint.PaintOp{}.Add(gtx.Ops)
 	sepRect.Pop()
 
-	// Highlight tokens
+	// Highlight tokens — query only visible range
 	var allTokens []highlight.Token
 	if ts.highlighter != nil {
-		allTokens = ts.highlighter.Tokens()
+		allTokens = ts.highlighter.TokensInRange(firstLine, lastLine)
 	}
 
 	// Find match highlights (drawn before text so text is readable on top)
@@ -109,16 +111,8 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		}
 	}
 
-	// Visible text lines — use cached byte offsets when available
-	byteOffset := 0
-	if firstLine < len(ts.byteOffsets) {
-		byteOffset = ts.byteOffsets[firstLine]
-	} else {
-		for i := 0; i < firstLine && i < ts.viewport.TotalLines; i++ {
-			line, _ := ed.Buffer.Line(i)
-			byteOffset += len(line) + 1
-		}
-	}
+	// Visible text lines — use PieceTable's cached lineStarts
+	byteOffset := ed.Buffer.LineStartOffset(firstLine)
 
 	for i := firstLine; i <= lastLine && i < ts.viewport.TotalLines; i++ {
 		line, err := ed.Buffer.Line(i)
@@ -203,6 +197,11 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	st.lastMaxX = gtx.Constraints.Max.X
 	st.drawStatusLine(gtx)
 
+	// Unified save menu dropdown
+	if st.saveMenu.visible {
+		st.drawSaveMenu(gtx)
+	}
+
 	// Language selector dropdown
 	if st.langSel.Visible {
 		st.drawLangSelector(gtx)
@@ -218,81 +217,49 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 		return
 	}
 
+	// Compute overflow before drawing
+	st.computeOverflow(gtx.Constraints.Max.X)
+
 	// Tab bar background
 	bgRect := clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, st.tabBarHeight)}.Push(gtx.Ops)
 	paint.ColorOp{Color: st.theme.TabBarBg}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	bgRect.Pop()
 
-	hoverFg := st.theme.Foreground
-
 	m := st.tabMetrics()
-
-	tabX := st.trafficLightPx
 	textY := (st.tabBarHeight - tr.LineHeightPx) / 2
+	radius := gtx.Dp(6)
 
 	// Hover detection — is the pointer in the tab bar area?
 	inTabBar := st.hoverY >= 0 && st.hoverY < st.tabBarHeight
 
-	radius := gtx.Dp(6)
-	dotR := gtx.Dp(3)
+	dragging := st.tabDrag.active && st.tabDrag.started
+	dragIdx := st.tabDrag.tabIdx
+	var dragW int
+	if dragging && dragIdx < len(st.tabBar.Tabs) {
+		dragW = st.tabWidth(st.tabBar.Tabs[dragIdx].Title)
+	}
 
-	for i, tab := range st.tabBar.Tabs {
-		title := tab.Title
-		tabW := st.tabWidth(title)
+	// --- Phase 1: Draw non-dragged bar tabs, leaving a gap at the drop target ---
+	tabX := st.trafficLightPx
+	gapInserted := false
+	dropSlot := st.tabDrag.dropSlot
+	slot := 0
+	prevDrawn := false
 
-		// Active tab background with rounded top corners.
-		if i == st.tabBar.ActiveIdx {
-			activeRect := clip.UniformRRect(image.Rectangle{
-				Min: image.Pt(tabX, 0),
-				Max: image.Pt(tabX+tabW, st.tabBarHeight+radius),
-			}, radius).Push(gtx.Ops)
-			paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
-			paint.PaintOp{}.Add(gtx.Ops)
-			activeRect.Pop()
+	for _, ti := range st.barTabIdxs {
+		if dragging && ti == dragIdx {
+			continue
 		}
 
-		// Tab title — layout: [leftPad] title [innerGap] closeBtn [rightPad]
-		fg := st.theme.TabDimFg
-		if i == st.tabBar.ActiveIdx {
-			fg = hoverFg
-		}
-		tr.RenderGlyphs(gtx.Ops, gtx, title, tabX+m.leftPad, textY, fg)
-
-		// Close button / modified indicator — centered in closeW area
-		closeX := tabX + m.leftPad + len(title)*tr.CharWidth + m.innerGap
-		closeY := st.tabBarHeight / 2
-		closeHitLeft := closeX
-		closeHitRight := closeX + m.closeW
-		closeHovered := inTabBar && st.hoverX >= closeHitLeft && st.hoverX < closeHitRight
-
-		if tab.Editor.Modified {
-			dotColor := st.theme.TabModifiedDot
-			if closeHovered {
-				dotColor = st.theme.TabCloseHover
-			}
-			dotCx := closeX + m.closeW/2
-			dotEllipse := clip.Ellipse{
-				Min: image.Pt(dotCx-dotR, closeY-dotR),
-				Max: image.Pt(dotCx+dotR, closeY+dotR),
-			}.Push(gtx.Ops)
-			paint.ColorOp{Color: dotColor}.Add(gtx.Ops)
-			paint.PaintOp{}.Add(gtx.Ops)
-			dotEllipse.Pop()
-		} else {
-			xFg := st.theme.TabCloseBtn
-			if closeHovered {
-				xFg = st.theme.TabCloseHover
-			}
-			// Center the "x" glyph within closeW
-			xGlyphX := closeX + (m.closeW-tr.CharWidth)/2
-			tr.RenderGlyphs(gtx.Ops, gtx, "x", xGlyphX, textY, xFg)
+		// Insert gap before this tab if this is the drop slot
+		if dragging && st.tabDrag.dropInBar && !gapInserted && slot >= dropSlot {
+			tabX += dragW
+			gapInserted = true
 		}
 
-		tabX += tabW
-
-		// Separator between tabs — same color as bottom border
-		if i < len(st.tabBar.Tabs)-1 {
+		// Separator before this tab (if something was drawn before it)
+		if prevDrawn {
 			vPad := st.tabBarHeight / 4
 			sepRect := clip.Rect{
 				Min: image.Pt(tabX-1, vPad),
@@ -302,6 +269,96 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 			paint.PaintOp{}.Add(gtx.Ops)
 			sepRect.Pop()
 		}
+
+		st.drawSingleTab(gtx, ti, tabX, textY, radius, inTabBar)
+		tabX += st.tabWidth(st.tabBar.Tabs[ti].Title)
+		slot++
+		prevDrawn = true
+	}
+
+	// Gap at the end if not yet inserted
+	if dragging && st.tabDrag.dropInBar && !gapInserted {
+		tabX += dragW
+	}
+
+	// --- Phase 2: Draw the floating dragged tab with shadow ---
+	if dragging && dragIdx < len(st.tabBar.Tabs) {
+		tab := st.tabBar.Tabs[dragIdx]
+		floatX := st.tabDrag.currentX - dragW/2
+
+		// Clamp to tab bar bounds
+		if floatX < st.trafficLightPx {
+			floatX = st.trafficLightPx
+		}
+		maxX := gtx.Constraints.Max.X - dragW
+		if floatX > maxX {
+			floatX = maxX
+		}
+
+		// Shadow behind the floating tab
+		shadowOff := op.Offset(image.Pt(floatX+3, 3)).Push(gtx.Ops)
+		shadowRect := clip.UniformRRect(image.Rectangle{
+			Max: image.Pt(dragW, st.tabBarHeight),
+		}, radius).Push(gtx.Ops)
+		paint.ColorOp{Color: color.NRGBA{A: 50}}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		shadowRect.Pop()
+		shadowOff.Pop()
+
+		// Background for the floating tab
+		floatBg := clip.UniformRRect(image.Rectangle{
+			Min: image.Pt(floatX, 0),
+			Max: image.Pt(floatX+dragW, st.tabBarHeight),
+		}, radius).Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		floatBg.Pop()
+
+		// Title
+		fg := st.theme.Foreground
+		tr.RenderGlyphs(gtx.Ops, gtx, tab.Title, floatX+m.leftPad, textY, fg)
+
+		// Close button / modified dot
+		dotR := gtx.Dp(3)
+		closeX := floatX + m.leftPad + utf8.RuneCountInString(tab.Title)*tr.CharWidth + m.innerGap
+		closeY := st.tabBarHeight / 2
+		if tab.Editor.Modified {
+			dotCx := closeX + m.closeW/2
+			dotEllipse := clip.Ellipse{
+				Min: image.Pt(dotCx-dotR, closeY-dotR),
+				Max: image.Pt(dotCx+dotR, closeY+dotR),
+			}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabModifiedDot}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			dotEllipse.Pop()
+		} else {
+			xGlyphX := closeX + (m.closeW-tr.CharWidth)/2
+			tr.RenderGlyphs(gtx.Ops, gtx, "x", xGlyphX, textY, st.theme.TabCloseHover)
+		}
+	}
+
+	// --- Phase 3: Overflow, "+" button, title, border ---
+	hasOverflow := len(st.dropdownTabIdxs) > 0
+	if hasOverflow {
+		if dragging {
+			// Float ">" and "+" to the right edge during drag so they
+			// aren't pushed around by the tab gap animation.
+			tabX = gtx.Constraints.Max.X - m.tabGap - m.plusW - m.tabGap - st.overflowBtnW
+		} else {
+			tabX += m.tabGap
+		}
+		st.overflowBtnX = tabX
+		overflowHovered := inTabBar && st.hoverX >= tabX && st.hoverX < tabX+st.overflowBtnW
+		overflowFg := st.theme.TabCloseBtn
+		if overflowHovered || st.overflowOpen {
+			overflowFg = st.theme.TabPlusHover
+		}
+		chevron := ">"
+		if st.overflowOpen {
+			chevron = "v"
+		}
+		tr.RenderGlyphs(gtx.Ops, gtx, chevron, tabX+(st.overflowBtnW-tr.CharWidth)/2, textY, overflowFg)
+		tabX += st.overflowBtnW
 	}
 
 	// "+" button
@@ -330,7 +387,7 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 		}
 	}
 
-	// Bottom border — same color as tab separators
+	// Bottom border
 	tabBorderRect := clip.Rect{
 		Min: image.Pt(0, st.tabBarHeight-1),
 		Max: image.Pt(gtx.Constraints.Max.X, st.tabBarHeight),
@@ -338,6 +395,820 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	tabBorderRect.Pop()
+
+	// Overflow dropdown (drawn on top of everything; auto-shown during drag)
+	showDropdown := st.overflowOpen
+	if showDropdown && hasOverflow {
+		st.drawOverflowDropdown(gtx)
+	}
+}
+
+// drawSingleTab draws one tab at the given X position (used by drawTabBar).
+func (st *appState) drawSingleTab(gtx layout.Context, i, tabX, textY, radius int, inTabBar bool) {
+	tr := st.tabRend
+	m := st.tabMetrics()
+	tab := st.tabBar.Tabs[i]
+	title := tab.Title
+	tabW := st.tabWidth(title)
+	dotR := gtx.Dp(3)
+
+	// Active tab background with rounded top corners.
+	if i == st.tabBar.ActiveIdx {
+		activeRect := clip.UniformRRect(image.Rectangle{
+			Min: image.Pt(tabX, 0),
+			Max: image.Pt(tabX+tabW, st.tabBarHeight+radius),
+		}, radius).Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		activeRect.Pop()
+	}
+
+	// Tab title
+	fg := st.theme.TabDimFg
+	if i == st.tabBar.ActiveIdx {
+		fg = st.theme.Foreground
+	}
+	tr.RenderGlyphs(gtx.Ops, gtx, title, tabX+m.leftPad, textY, fg)
+
+	// Close button / modified indicator
+	closeX := tabX + m.leftPad + utf8.RuneCountInString(title)*tr.CharWidth + m.innerGap
+	closeY := st.tabBarHeight / 2
+	closeHovered := inTabBar && st.hoverX >= closeX && st.hoverX < tabX+tabW
+
+	if tab.Editor.Modified {
+		dotColor := st.theme.TabModifiedDot
+		if closeHovered {
+			dotColor = st.theme.TabCloseHover
+		}
+		dotCx := closeX + m.closeW/2
+		dotEllipse := clip.Ellipse{
+			Min: image.Pt(dotCx-dotR, closeY-dotR),
+			Max: image.Pt(dotCx+dotR, closeY+dotR),
+		}.Push(gtx.Ops)
+		paint.ColorOp{Color: dotColor}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		dotEllipse.Pop()
+	} else {
+		xFg := st.theme.TabCloseBtn
+		if closeHovered {
+			xFg = st.theme.TabCloseHover
+		}
+		xGlyphX := closeX + (m.closeW-tr.CharWidth)/2
+		tr.RenderGlyphs(gtx.Ops, gtx, "x", xGlyphX, textY, xFg)
+	}
+}
+
+// drawOverflowDropdown renders the dropdown menu listing overflowed tabs.
+// During a drag it skips the dragged item and inserts a gap at the drop target.
+func (st *appState) drawOverflowDropdown(gtx layout.Context) {
+	tr := st.tabRend
+	if tr == nil || len(st.dropdownTabIdxs) == 0 {
+		return
+	}
+
+	dragging := st.tabDrag.active && st.tabDrag.started
+	dragIdx := st.tabDrag.tabIdx
+
+	hasHeader := st.dropdownHeader >= 0
+	if dragging && st.dropdownHeader == dragIdx {
+		hasHeader = false
+	}
+	headerItems := 0
+	if hasHeader {
+		headerItems = 1
+	}
+
+	// Count visible items (exclude the dragged tab)
+	visCount := 0
+	for _, ti := range st.dropdownTabIdxs {
+		if dragging && ti == dragIdx {
+			continue
+		}
+		visCount++
+	}
+
+	// Add header and gap slots
+	displayCount := visCount + headerItems
+	if dragging && !st.tabDrag.dropInBar {
+		displayCount++
+	}
+	if displayCount == 0 {
+		return
+	}
+
+	itemH := tr.LineHeightPx + 8
+	dropdownW := st.overflowDropdownWidth()
+	dropdownH := displayCount * itemH
+
+	dropdownX := st.overflowBtnX + st.overflowBtnW - dropdownW
+	if dropdownX < 0 {
+		dropdownX = 0
+	}
+	dropdownY := st.tabBarHeight
+
+	dotR := gtx.Dp(3)
+
+	// Drop shadow
+	shadowOff := op.Offset(image.Pt(dropdownX+2, dropdownY+2)).Push(gtx.Ops)
+	shadowRect := clip.Rect{Max: image.Pt(dropdownW, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: color.NRGBA{A: 60}}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	shadowRect.Pop()
+	shadowOff.Pop()
+
+	// Background
+	bgOff := op.Offset(image.Pt(dropdownX, dropdownY)).Push(gtx.Ops)
+	bgClip := clip.Rect{Max: image.Pt(dropdownW, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabBarBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bgClip.Pop()
+	bgOff.Pop()
+
+	// Header item (last bar tab shown for continuity)
+	drawSlot := 0
+	if hasHeader {
+		tab := st.tabBar.Tabs[st.dropdownHeader]
+		iy := dropdownY
+
+		hovered := st.hoverX >= dropdownX && st.hoverX < dropdownX+dropdownW &&
+			st.hoverY >= iy && st.hoverY < iy+itemH
+		if hovered || st.dropdownHeader == st.tabBar.ActiveIdx {
+			hlOff := op.Offset(image.Pt(dropdownX, iy)).Push(gtx.Ops)
+			hlRect := clip.Rect{Max: image.Pt(dropdownW, itemH)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			hlRect.Pop()
+			hlOff.Pop()
+		}
+
+		fg := st.theme.TabDimFg
+		if st.dropdownHeader == st.tabBar.ActiveIdx {
+			fg = st.theme.Foreground
+		}
+		textY := iy + (itemH-tr.LineHeightPx)/2
+		tr.RenderGlyphs(gtx.Ops, gtx, tab.Title, dropdownX+8, textY, fg)
+
+		if tab.Editor.Modified {
+			dotCx := dropdownX + dropdownW - 12
+			dotCy := iy + itemH/2
+			dotEllipse := clip.Ellipse{
+				Min: image.Pt(dotCx-dotR, dotCy-dotR),
+				Max: image.Pt(dotCx+dotR, dotCy+dotR),
+			}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabModifiedDot}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			dotEllipse.Pop()
+		}
+
+		sepOff := op.Offset(image.Pt(dropdownX+4, iy+itemH-1)).Push(gtx.Ops)
+		sepRect := clip.Rect{Max: image.Pt(dropdownW-8, 1)}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		sepRect.Pop()
+		sepOff.Pop()
+
+		drawSlot = 1
+	}
+
+	// Dropdown items with optional gap
+	slot := 0
+	gapInserted := false
+	dropSlot := st.tabDrag.dropSlot
+
+	for _, ti := range st.dropdownTabIdxs {
+		if dragging && ti == dragIdx {
+			continue
+		}
+
+		// Insert gap with insertion indicator before this item if needed
+		if dragging && !st.tabDrag.dropInBar && !gapInserted && slot >= dropSlot {
+			st.drawDropdownInsertIndicator(gtx, tr, dropdownX, dropdownY+drawSlot*itemH, dropdownW, itemH, dragIdx)
+			drawSlot++
+			gapInserted = true
+		}
+
+		tab := st.tabBar.Tabs[ti]
+		iy := dropdownY + drawSlot*itemH
+
+		// Hover highlight
+		hovered := st.hoverX >= dropdownX && st.hoverX < dropdownX+dropdownW &&
+			st.hoverY >= iy && st.hoverY < iy+itemH
+		if hovered || ti == st.tabBar.ActiveIdx {
+			hlOff := op.Offset(image.Pt(dropdownX, iy)).Push(gtx.Ops)
+			hlRect := clip.Rect{Max: image.Pt(dropdownW, itemH)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			hlRect.Pop()
+			hlOff.Pop()
+		}
+
+		// Title text
+		fg := st.theme.TabDimFg
+		if ti == st.tabBar.ActiveIdx {
+			fg = st.theme.Foreground
+		}
+		textY := iy + (itemH-tr.LineHeightPx)/2
+		tr.RenderGlyphs(gtx.Ops, gtx, tab.Title, dropdownX+8, textY, fg)
+
+		// Modified dot
+		if tab.Editor.Modified {
+			dotCx := dropdownX + dropdownW - 12
+			dotCy := iy + itemH/2
+			dotEllipse := clip.Ellipse{
+				Min: image.Pt(dotCx-dotR, dotCy-dotR),
+				Max: image.Pt(dotCx+dotR, dotCy+dotR),
+			}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabModifiedDot}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			dotEllipse.Pop()
+		}
+
+		// Separator between items
+		if drawSlot < displayCount-1 {
+			sepOff := op.Offset(image.Pt(dropdownX+4, iy+itemH-1)).Push(gtx.Ops)
+			sepRect := clip.Rect{Max: image.Pt(dropdownW-8, 1)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			sepRect.Pop()
+			sepOff.Pop()
+		}
+
+		slot++
+		drawSlot++
+	}
+
+	// Gap at the end if not yet inserted
+	if dragging && !st.tabDrag.dropInBar && !gapInserted {
+		st.drawDropdownInsertIndicator(gtx, tr, dropdownX, dropdownY+drawSlot*itemH, dropdownW, itemH, dragIdx)
+	}
+
+	// Border around dropdown
+	borderColor := st.theme.TabBorder
+	// Top
+	bOff := op.Offset(image.Pt(dropdownX, dropdownY)).Push(gtx.Ops)
+	bRect := clip.Rect{Max: image.Pt(dropdownW, 1)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
+	// Bottom
+	bOff = op.Offset(image.Pt(dropdownX, dropdownY+dropdownH-1)).Push(gtx.Ops)
+	bRect = clip.Rect{Max: image.Pt(dropdownW, 1)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
+	// Left
+	bOff = op.Offset(image.Pt(dropdownX, dropdownY)).Push(gtx.Ops)
+	bRect = clip.Rect{Max: image.Pt(1, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
+	// Right
+	bOff = op.Offset(image.Pt(dropdownX+dropdownW-1, dropdownY)).Push(gtx.Ops)
+	bRect = clip.Rect{Max: image.Pt(1, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
+}
+
+// drawDropdownInsertIndicator renders a highlighted preview row at the gap
+// position in the overflow dropdown, showing where the dragged tab will land.
+func (st *appState) drawDropdownInsertIndicator(gtx layout.Context, tr *render.TextRenderer, dx, dy, dw, itemH, dragIdx int) {
+	// Highlighted background
+	hlOff := op.Offset(image.Pt(dx, dy)).Push(gtx.Ops)
+	hlRect := clip.Rect{Max: image.Pt(dw, itemH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	hlRect.Pop()
+	hlOff.Pop()
+
+	// Accent line at the top of the insertion row
+	lineOff := op.Offset(image.Pt(dx+4, dy)).Push(gtx.Ops)
+	lineRect := clip.Rect{Max: image.Pt(dw-8, 2)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.Cursor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	lineRect.Pop()
+	lineOff.Pop()
+
+	// Semi-transparent preview of the dragged tab title
+	if dragIdx < len(st.tabBar.Tabs) {
+		title := st.tabBar.Tabs[dragIdx].Title
+		textY := dy + (itemH-tr.LineHeightPx)/2
+		fg := st.theme.TabDimFg
+		fg.A = fg.A / 2
+		tr.RenderGlyphs(gtx.Ops, gtx, title, dx+8, textY, fg)
+	}
+}
+
+// macOS Finder tag colors (Red, Orange, Yellow, Green, Blue, Purple, Gray).
+var finderTagColors = [7]color.NRGBA{
+	{R: 0xFF, G: 0x3B, B: 0x30, A: 0xFF}, // Red
+	{R: 0xFF, G: 0x9F, B: 0x0A, A: 0xFF}, // Orange
+	{R: 0xFF, G: 0xCC, B: 0x00, A: 0xFF}, // Yellow
+	{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF}, // Green
+	{R: 0x00, G: 0x7A, B: 0xFF, A: 0xFF}, // Blue
+	{R: 0xAF, G: 0x52, B: 0xDE, A: 0xFF}, // Purple
+	{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}, // Gray
+}
+
+// saveMenuShowSaveAs returns true when the Save As rows (Name/Tag/Where/SaveAs)
+// should be visible: always for untitled tabs, or when toggled for file-backed tabs.
+func (st *appState) saveMenuShowSaveAs() bool {
+	idx := st.saveMenu.tabIdx
+	if idx < 0 || idx >= len(st.tabBar.Tabs) {
+		return false
+	}
+	return st.tabBar.Tabs[idx].Editor.FilePath == "" || st.saveMenu.saveAsExpanded
+}
+
+// saveMenuRowCount returns the number of visible rows in the save menu.
+func (st *appState) saveMenuRowCount() int {
+	idx := st.saveMenu.tabIdx
+	fileBacked := idx >= 0 && idx < len(st.tabBar.Tabs) && st.tabBar.Tabs[idx].Editor.FilePath != ""
+
+	n := 1 // bottom row: Save/Discard/Cancel (always)
+	if st.saveMenuShowSaveAs() {
+		n += 3 // Name, Tag, Where
+	}
+	if fileBacked {
+		n++ // Save As radio toggle row
+	}
+	if st.saveMenu.confirmOverwrite {
+		n += 2 // warning text + Overwrite/Back
+	}
+	return n
+}
+
+// saveMenuRect computes the dropdown position and dimensions.
+func (st *appState) saveMenuRect() (x, y, w, h, itemH int) {
+	tr := st.tabRend
+	if tr == nil {
+		return 0, 0, 0, 0, 0
+	}
+	itemH = tr.LineHeightPx + 8
+	nRows := st.saveMenuRowCount()
+	h = nRows * itemH
+	w = 32 * tr.CharWidth // fixed width for the dropdown
+
+	// Center below the prompted tab
+	tabX := st.trafficLightPx
+	idx := st.saveMenu.tabIdx
+	for _, ti := range st.barTabIdxs {
+		if ti == idx {
+			tabW := st.tabWidth(st.tabBar.Tabs[ti].Title)
+			x = tabX + tabW/2 - w/2
+			break
+		}
+		tabX += st.tabWidth(st.tabBar.Tabs[ti].Title)
+	}
+	maxX := 0
+	if st.lastMaxX > 0 {
+		maxX = st.lastMaxX
+	}
+	if x < 0 {
+		x = 0
+	}
+	if maxX > 0 && x+w > maxX {
+		x = maxX - w
+	}
+	y = st.tabBarHeight
+	return
+}
+
+// saveMenuCanSave returns true when the Save button should be active.
+// For file-backed tabs (without Save As expanded) it's always enabled.
+// When Save As rows are visible, a non-empty directory is required.
+func (st *appState) saveMenuCanSave() bool {
+	idx := st.saveMenu.tabIdx
+	if idx < 0 || idx >= len(st.tabBar.Tabs) {
+		return false
+	}
+	fileBacked := st.tabBar.Tabs[idx].Editor.FilePath != ""
+	if fileBacked && !st.saveMenu.saveAsExpanded {
+		return true // normal save to existing path
+	}
+	return st.saveMenu.dir != ""
+}
+
+// drawSaveMenu renders the save menu dropdown.
+//
+// Row layout (conditional visibility):
+//
+//	(Save As rows, if visible):
+//	  Name: [filename input]
+//	  Tag:  ● ● ● ● ● ● ●
+//	  Where: ~/path  ▼
+//	Save button row: [Save]  ○ Save As  (file-backed: radio toggle)
+//	                 [Save]              (untitled: no toggle)
+//	Bottom row:      [Discard] [Cancel]
+func (st *appState) drawSaveMenu(gtx layout.Context) {
+	tr := st.tabRend
+	if tr == nil {
+		return
+	}
+	idx := st.saveMenu.tabIdx
+	if idx < 0 || idx >= len(st.tabBar.Tabs) {
+		st.saveMenu.visible = false
+		return
+	}
+	tab := st.tabBar.Tabs[idx]
+	fileBacked := tab.Editor.FilePath != ""
+	showSaveAs := st.saveMenuShowSaveAs()
+	canSave := st.saveMenuCanSave()
+
+	dx, dy, dw, dropdownH, itemH := st.saveMenuRect()
+	if dropdownH == 0 {
+		return
+	}
+
+	// Drop shadow
+	shadowOff := op.Offset(image.Pt(dx+2, dy+2)).Push(gtx.Ops)
+	shadowRect := clip.Rect{Max: image.Pt(dw, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: color.NRGBA{A: 60}}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	shadowRect.Pop()
+	shadowOff.Pop()
+
+	// Background
+	bgOff := op.Offset(image.Pt(dx, dy)).Push(gtx.Ops)
+	bgClip := clip.Rect{Max: image.Pt(dw, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.DropdownBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bgClip.Pop()
+	bgOff.Pop()
+
+	curY := dy // tracks the Y position of the current row
+
+	// --- Save As detail rows (Name, Tag, Where) ---
+	if showSaveAs {
+		labelW := 6 * tr.CharWidth // width for "Name:", "Tag:", "Where:" labels
+		fieldX := dx + 8 + labelW + 4
+
+		// Name: [filename input]
+		{
+			iy := curY
+			textY := iy + (itemH-tr.LineHeightPx)/2
+			tr.RenderGlyphs(gtx.Ops, gtx, "Name:", dx+8, textY, st.theme.TabDimFg)
+
+			inputX := fieldX
+			inputW := dx + dw - 8 - inputX
+			inputFieldY := iy + 3
+			inputFieldH := itemH - 6
+			inputBgOff := op.Offset(image.Pt(inputX, inputFieldY)).Push(gtx.Ops)
+			inputBgRect := clip.Rect{Max: image.Pt(inputW, inputFieldH)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.Background}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			inputBgRect.Pop()
+			inputBgOff.Pop()
+
+			filenameStr := string(st.saveMenu.filename)
+			textX := inputX + 4
+			inputTextY := inputFieldY + (inputFieldH-tr.LineHeightPx)/2
+
+			if st.saveMenu.selectAll && len(st.saveMenu.filename) > 0 {
+				selW := len(st.saveMenu.filename) * tr.CharWidth
+				selOff := op.Offset(image.Pt(textX, inputTextY)).Push(gtx.Ops)
+				selRect := clip.Rect{Max: image.Pt(selW, tr.LineHeightPx)}.Push(gtx.Ops)
+				paint.ColorOp{Color: st.theme.Selection}.Add(gtx.Ops)
+				paint.PaintOp{}.Add(gtx.Ops)
+				selRect.Pop()
+				selOff.Pop()
+			}
+
+			tr.RenderGlyphs(gtx.Ops, gtx, filenameStr, textX, inputTextY, st.theme.Foreground)
+
+			if !st.saveMenu.selectAll {
+				cursorX := textX + st.saveMenu.cursor*tr.CharWidth
+				curOff := op.Offset(image.Pt(cursorX, inputTextY)).Push(gtx.Ops)
+				curRect := clip.Rect{Max: image.Pt(1, tr.LineHeightPx)}.Push(gtx.Ops)
+				paint.ColorOp{Color: st.theme.Cursor}.Add(gtx.Ops)
+				paint.PaintOp{}.Add(gtx.Ops)
+				curRect.Pop()
+				curOff.Pop()
+			}
+
+			sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
+			sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			sepRect.Pop()
+			sepOff.Pop()
+			curY += itemH
+		}
+
+		// Tag: colored dots
+		{
+			iy := curY
+			textY := iy + (itemH-tr.LineHeightPx)/2
+			tr.RenderGlyphs(gtx.Ops, gtx, "Tag:", dx+8, textY, st.theme.TabDimFg)
+
+			dotSize := tr.LineHeightPx - 2
+			dotGap := 4
+			dotY := iy + (itemH-dotSize)/2
+			dotX := fieldX
+			for ti := 0; ti < 7; ti++ {
+				cx := dotX + dotSize/2
+				cy := dotY + dotSize/2
+				r := dotSize / 2
+
+				if st.saveMenu.tags[ti] {
+					ellOff := op.Offset(image.Pt(cx-r, cy-r)).Push(gtx.Ops)
+					ell := clip.Ellipse{Max: image.Pt(r*2, r*2)}.Push(gtx.Ops)
+					paint.ColorOp{Color: finderTagColors[ti]}.Add(gtx.Ops)
+					paint.PaintOp{}.Add(gtx.Ops)
+					ell.Pop()
+					ellOff.Pop()
+				} else {
+					ellOff := op.Offset(image.Pt(cx-r, cy-r)).Push(gtx.Ops)
+					ell := clip.Ellipse{Max: image.Pt(r*2, r*2)}.Push(gtx.Ops)
+					dimColor := finderTagColors[ti]
+					dimColor.A = 0x80
+					paint.ColorOp{Color: dimColor}.Add(gtx.Ops)
+					paint.PaintOp{}.Add(gtx.Ops)
+					ell.Pop()
+					ellOff.Pop()
+
+					ir := r - 2
+					if ir > 0 {
+						ellOff2 := op.Offset(image.Pt(cx-ir, cy-ir)).Push(gtx.Ops)
+						ell2 := clip.Ellipse{Max: image.Pt(ir*2, ir*2)}.Push(gtx.Ops)
+						paint.ColorOp{Color: st.theme.DropdownBg}.Add(gtx.Ops)
+						paint.PaintOp{}.Add(gtx.Ops)
+						ell2.Pop()
+						ellOff2.Pop()
+					}
+				}
+				dotX += dotSize + dotGap
+			}
+
+			sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
+			sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			sepRect.Pop()
+			sepOff.Pop()
+			curY += itemH
+		}
+
+		// Where: directory path
+		{
+			iy := curY
+			textY := iy + (itemH-tr.LineHeightPx)/2
+			tr.RenderGlyphs(gtx.Ops, gtx, "Where:", dx+8, textY, st.theme.TabDimFg)
+
+			dirLabel := shortenDir(st.saveMenu.dir)
+			if dirLabel == "" {
+				dirLabel = "Choose…"
+			}
+			maxDirChars := (dx + dw - 8 - fieldX - 2*tr.CharWidth) / tr.CharWidth
+			if maxDirChars > 0 && utf8.RuneCountInString(dirLabel) > maxDirChars {
+				runes := []rune(dirLabel)
+				dirLabel = "…" + string(runes[len(runes)-maxDirChars+1:])
+			}
+
+			whereHover := st.hoverX >= fieldX && st.hoverX < dx+dw-8 && st.hoverY >= iy && st.hoverY < iy+itemH
+			fg := st.theme.Foreground
+			if whereHover {
+				fg = st.theme.Cursor
+			}
+			tr.RenderGlyphs(gtx.Ops, gtx, dirLabel+" ▼", fieldX, textY, fg)
+
+			sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
+			sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			sepRect.Pop()
+			sepOff.Pop()
+			curY += itemH
+		}
+	}
+
+	// --- Save As radio toggle row (file-backed only) ---
+	if fileBacked {
+		iy := curY
+		textY := iy + (itemH-tr.LineHeightPx)/2
+
+		radioLabel := "Save As"
+		radioLabelW := utf8.RuneCountInString(radioLabel) * tr.CharWidth
+		radioR := (tr.LineHeightPx - 4) / 2
+		if radioR < 3 {
+			radioR = 3
+		}
+		radioDiam := radioR * 2
+
+		// Center the radio + label in the row
+		radioTotalW := radioDiam + 4 + radioLabelW
+		radioX := dx + (dw-radioTotalW)/2
+		radioCY := iy + itemH/2
+		radioCX := radioX + radioR
+
+		toggleHover := st.hoverX >= dx && st.hoverX < dx+dw && st.hoverY >= iy && st.hoverY < iy+itemH
+		if toggleHover {
+			hlOff := op.Offset(image.Pt(dx, iy)).Push(gtx.Ops)
+			hlRect := clip.Rect{Max: image.Pt(dw, itemH)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			hlRect.Pop()
+			hlOff.Pop()
+		}
+
+		outerOff := op.Offset(image.Pt(radioCX-radioR, radioCY-radioR)).Push(gtx.Ops)
+		outerEll := clip.Ellipse{Max: image.Pt(radioDiam, radioDiam)}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.Foreground}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		outerEll.Pop()
+		outerOff.Pop()
+
+		innerR := radioR - 2
+		if innerR > 0 {
+			innerOff := op.Offset(image.Pt(radioCX-innerR, radioCY-innerR)).Push(gtx.Ops)
+			innerEll := clip.Ellipse{Max: image.Pt(innerR*2, innerR*2)}.Push(gtx.Ops)
+			innerColor := st.theme.DropdownBg
+			if st.saveMenu.saveAsExpanded {
+				innerColor = st.theme.Cursor
+			}
+			paint.ColorOp{Color: innerColor}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			innerEll.Pop()
+			innerOff.Pop()
+		}
+
+		tr.RenderGlyphs(gtx.Ops, gtx, radioLabel, radioX+radioDiam+4, textY, st.theme.TabDimFg)
+
+		sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
+		sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		sepRect.Pop()
+		sepOff.Pop()
+		curY += itemH
+	}
+
+	// --- Overwrite confirmation rows ---
+	if st.saveMenu.confirmOverwrite {
+		// Warning text row
+		{
+			iy := curY
+			textY := iy + (itemH-tr.LineHeightPx)/2
+			warning := "\"" + string(st.saveMenu.filename) + "\" exists"
+			maxChars := (dw - 16) / tr.CharWidth
+			if utf8.RuneCountInString(warning) > maxChars && maxChars > 3 {
+				runes := []rune(warning)
+				warning = string(runes[:maxChars-1]) + "…"
+			}
+			tr.RenderGlyphs(gtx.Ops, gtx, warning, dx+8, textY, finderTagColors[1])
+
+			sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
+			sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			sepRect.Pop()
+			sepOff.Pop()
+			curY += itemH
+		}
+
+		// Overwrite / Back split row
+		{
+			iy := curY
+			textY := iy + (itemH-tr.LineHeightPx)/2
+			halfW := dw / 2
+
+			overwriteHover := st.hoverX >= dx && st.hoverX < dx+halfW && st.hoverY >= iy && st.hoverY < iy+itemH
+			if overwriteHover {
+				hlOff := op.Offset(image.Pt(dx, iy)).Push(gtx.Ops)
+				hlRect := clip.Rect{Max: image.Pt(halfW, itemH)}.Push(gtx.Ops)
+				paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+				paint.PaintOp{}.Add(gtx.Ops)
+				hlRect.Pop()
+				hlOff.Pop()
+			}
+			tr.RenderGlyphs(gtx.Ops, gtx, "Overwrite", dx+8, textY, finderTagColors[1])
+
+			divOff := op.Offset(image.Pt(dx+halfW, iy+2)).Push(gtx.Ops)
+			divRect := clip.Rect{Max: image.Pt(1, itemH-4)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			divRect.Pop()
+			divOff.Pop()
+
+			backHover := st.hoverX >= dx+halfW && st.hoverX < dx+dw && st.hoverY >= iy && st.hoverY < iy+itemH
+			if backHover {
+				hlOff := op.Offset(image.Pt(dx+halfW+1, iy)).Push(gtx.Ops)
+				hlRect := clip.Rect{Max: image.Pt(halfW-1, itemH)}.Push(gtx.Ops)
+				paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+				paint.PaintOp{}.Add(gtx.Ops)
+				hlRect.Pop()
+				hlOff.Pop()
+			}
+			tr.RenderGlyphs(gtx.Ops, gtx, "Back", dx+halfW+8, textY, st.theme.Foreground)
+
+			sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
+			sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			sepRect.Pop()
+			sepOff.Pop()
+			curY += itemH
+		}
+	}
+
+	// --- Bottom row: Save | Discard | Cancel (always visible, 3-way split) ---
+	{
+		iy := curY
+		textY := iy + (itemH-tr.LineHeightPx)/2
+		thirdW := dw / 3
+
+		// Save button (left third)
+		saveFg := st.theme.Foreground
+		if !canSave {
+			saveFg = st.theme.TabDimFg
+		}
+		saveHover := canSave && st.hoverX >= dx && st.hoverX < dx+thirdW && st.hoverY >= iy && st.hoverY < iy+itemH
+		if saveHover {
+			hlOff := op.Offset(image.Pt(dx, iy)).Push(gtx.Ops)
+			hlRect := clip.Rect{Max: image.Pt(thirdW, itemH)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			hlRect.Pop()
+			hlOff.Pop()
+		}
+		tr.RenderGlyphs(gtx.Ops, gtx, "Save", dx+8, textY, saveFg)
+
+		// Divider 1
+		div1Off := op.Offset(image.Pt(dx+thirdW, iy+2)).Push(gtx.Ops)
+		div1Rect := clip.Rect{Max: image.Pt(1, itemH-4)}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		div1Rect.Pop()
+		div1Off.Pop()
+
+		// Discard button (middle third)
+		discardX := dx + thirdW + 1
+		discardW := thirdW - 1
+		discardHover := st.hoverX >= discardX && st.hoverX < discardX+discardW && st.hoverY >= iy && st.hoverY < iy+itemH
+		if discardHover {
+			hlOff := op.Offset(image.Pt(discardX, iy)).Push(gtx.Ops)
+			hlRect := clip.Rect{Max: image.Pt(discardW, itemH)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			hlRect.Pop()
+			hlOff.Pop()
+		}
+		tr.RenderGlyphs(gtx.Ops, gtx, "Discard", discardX+8, textY, st.theme.TabDimFg)
+
+		// Divider 2
+		div2X := dx + thirdW*2
+		div2Off := op.Offset(image.Pt(div2X, iy+2)).Push(gtx.Ops)
+		div2Rect := clip.Rect{Max: image.Pt(1, itemH-4)}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		div2Rect.Pop()
+		div2Off.Pop()
+
+		// Cancel button (right third)
+		cancelX := div2X + 1
+		cancelW := dw - thirdW*2 - 1
+		cancelHover := st.hoverX >= cancelX && st.hoverX < cancelX+cancelW && st.hoverY >= iy && st.hoverY < iy+itemH
+		if cancelHover {
+			hlOff := op.Offset(image.Pt(cancelX, iy)).Push(gtx.Ops)
+			hlRect := clip.Rect{Max: image.Pt(cancelW, itemH)}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			hlRect.Pop()
+			hlOff.Pop()
+		}
+		tr.RenderGlyphs(gtx.Ops, gtx, "Cancel", cancelX+8, textY, st.theme.Foreground)
+	}
+
+	// Border around dropdown
+	borderColor := st.theme.TabBorder
+	bOff := op.Offset(image.Pt(dx, dy)).Push(gtx.Ops)
+	bRect := clip.Rect{Max: image.Pt(dw, 1)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
+	bOff = op.Offset(image.Pt(dx, dy+dropdownH-1)).Push(gtx.Ops)
+	bRect = clip.Rect{Max: image.Pt(dw, 1)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
+	bOff = op.Offset(image.Pt(dx, dy)).Push(gtx.Ops)
+	bRect = clip.Rect{Max: image.Pt(1, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
+	bOff = op.Offset(image.Pt(dx+dw-1, dy)).Push(gtx.Ops)
+	bRect = clip.Rect{Max: image.Pt(1, dropdownH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bRect.Pop()
+	bOff.Pop()
 }
 
 func (st *appState) drawStatusLine(gtx layout.Context) {
@@ -389,4 +1260,15 @@ func (st *appState) drawStatusLine(gtx layout.Context) {
 	langWidth := len(lang) * sr.CharWidth
 	st.langLabelX = gtx.Constraints.Max.X - langWidth - 12
 	sr.RenderGlyphs(gtx.Ops, gtx, lang, st.langLabelX, textY, st.theme.StatusFg)
+
+	// Centered notification (e.g. "Saved to: ~/path")
+	if st.notification != "" && time.Now().Before(st.notificationUntil) {
+		notifW := utf8.RuneCountInString(st.notification) * sr.CharWidth
+		notifX := (gtx.Constraints.Max.X - notifW) / 2
+		sr.RenderGlyphs(gtx.Ops, gtx, st.notification, notifX, textY, st.theme.Foreground)
+		// Schedule a repaint so the notification disappears on time
+		gtx.Execute(op.InvalidateCmd{})
+	} else if st.notification != "" {
+		st.notification = ""
+	}
 }

@@ -31,8 +31,7 @@ func SaveFile(pt *buffer.PieceTable, path string) error {
 	}
 	tmpName := tmp.Name()
 
-	text := pt.Text()
-	_, err = tmp.WriteString(text)
+	_, err = pt.WriteTo(tmp)
 	if err != nil {
 		tmp.Close()
 		os.Remove(tmpName)

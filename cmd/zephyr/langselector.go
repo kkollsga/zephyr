@@ -94,7 +94,9 @@ func (st *appState) setLanguage(lang string) {
 	}
 	ts.highlighter = h
 	if ed != nil {
-		ts.highlighter.Parse([]byte(ed.Buffer.Text()))
+		source := ed.Buffer.TextBytes(ts.sourceBuf)
+		ts.sourceBuf = source
+		ts.highlighter.Parse(source)
 	}
 	ts.langLabel = lang
 }
@@ -104,26 +106,17 @@ func detectLanguage(path string) string {
 }
 
 func (st *appState) reparseHighlight() {
+	st.reparsePending = false
 	ts := st.activeTabState()
 	ed := st.activeEd()
 	if ts == nil || ed == nil {
 		return
 	}
+	edits := ed.Buffer.DrainEdits()
 	if ts.highlighter != nil {
-		ts.highlighter.Parse([]byte(ed.Buffer.Text()))
-	}
-	// Rebuild byte offset cache
-	n := ed.Buffer.LineCount()
-	if cap(ts.byteOffsets) >= n {
-		ts.byteOffsets = ts.byteOffsets[:n]
-	} else {
-		ts.byteOffsets = make([]int, n)
-	}
-	offset := 0
-	for i := 0; i < n; i++ {
-		ts.byteOffsets[i] = offset
-		line, _ := ed.Buffer.Line(i)
-		offset += len(line) + 1
+		source := ed.Buffer.TextBytes(ts.sourceBuf)
+		ts.sourceBuf = source
+		ts.highlighter.UpdateFromEdits(source, edits)
 	}
 	if st.findBar.Visible {
 		st.updateSearchResults()

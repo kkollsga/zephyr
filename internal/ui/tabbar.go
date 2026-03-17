@@ -8,9 +8,10 @@ import (
 
 // Tab represents an open editor tab.
 type Tab struct {
-	Editor    *editor.Editor
-	Title     string
-	LangLabel string // manually selected language label
+	Editor     *editor.Editor
+	Title      string
+	IsUntitled bool   // true for new tabs that haven't been saved to a file
+	LangLabel  string // manually selected language label
 }
 
 // TabBar manages open tabs.
@@ -56,8 +57,9 @@ func (tb *TabBar) OpenFile(path string) (*editor.Editor, error) {
 // OpenEditor adds an existing editor as a tab.
 func (tb *TabBar) OpenEditor(ed *editor.Editor, title string) {
 	tb.Tabs = append(tb.Tabs, &Tab{
-		Editor: ed,
-		Title:  title,
+		Editor:     ed,
+		Title:      title,
+		IsUntitled: ed.FilePath == "",
 	})
 	tb.ActiveIdx = len(tb.Tabs) - 1
 }
@@ -115,5 +117,25 @@ func (tb *TabBar) TabCount() int {
 func (tb *TabBar) SwitchToTab(idx int) {
 	if idx >= 0 && idx < len(tb.Tabs) {
 		tb.ActiveIdx = idx
+	}
+}
+
+// MoveTab moves a tab from index 'from' to index 'to', adjusting ActiveIdx.
+func (tb *TabBar) MoveTab(from, to int) {
+	if from == to || from < 0 || to < 0 || from >= len(tb.Tabs) || to >= len(tb.Tabs) {
+		return
+	}
+	tab := tb.Tabs[from]
+	// Remove from old position
+	tb.Tabs = append(tb.Tabs[:from], tb.Tabs[from+1:]...)
+	// Insert at new position
+	tb.Tabs = append(tb.Tabs[:to], append([]*Tab{tab}, tb.Tabs[to:]...)...)
+	// Update active index to follow the active tab
+	if tb.ActiveIdx == from {
+		tb.ActiveIdx = to
+	} else if from < tb.ActiveIdx && to >= tb.ActiveIdx {
+		tb.ActiveIdx--
+	} else if from > tb.ActiveIdx && to <= tb.ActiveIdx {
+		tb.ActiveIdx++
 	}
 }

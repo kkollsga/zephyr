@@ -2,8 +2,10 @@ package buffer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
 // PieceTable implements a piece table data structure for efficient text editing.
@@ -17,6 +19,9 @@ type PieceTable struct {
 	// Cached line starts (byte offsets). Invalidated on edit.
 	lineStarts []int
 	linesDirty bool
+
+	// Accumulated edit info for incremental tree-sitter updates.
+	pendingEdits []EditInfo
 }
 
 // NewFromString creates a PieceTable initialized with the given string.
@@ -86,6 +91,28 @@ func (pt *PieceTable) Insert(offset int, text string) error {
 		return nil
 	}
 
+	// Compute edit info before modifying pieces.
+	startRow, startCol := pt.offsetToPoint(offset)
+	newEndRow, newEndCol := startRow, startCol
+	lastNL := strings.LastIndexByte(text, '\n')
+	if lastNL == -1 {
+		newEndCol += len(text)
+	} else {
+		newEndRow += strings.Count(text, "\n")
+		newEndCol = len(text) - lastNL - 1
+	}
+	pt.pendingEdits = append(pt.pendingEdits, EditInfo{
+		StartByte:  offset,
+		OldEndByte: offset,
+		NewEndByte: offset + len(text),
+		StartRow:   startRow,
+		StartCol:   startCol,
+		OldEndRow:  startRow,
+		OldEndCol:  startCol,
+		NewEndRow:  newEndRow,
+		NewEndCol:  newEndCol,
+	})
+
 	addOffset := pt.add.Len()
 	pt.add.WriteString(text)
 	newPiece := Piece{Source: Add, Offset: addOffset, Length: len(text)}
@@ -130,6 +157,21 @@ func (pt *PieceTable) Delete(offset, length int) error {
 	if offset < 0 || length < 0 || offset+length > pt.Length() {
 		return fmt.Errorf("delete range [%d, %d) out of range [0, %d)", offset, offset+length, pt.Length())
 	}
+
+	// Compute edit info before modifying pieces.
+	startRow, startCol := pt.offsetToPoint(offset)
+	oldEndRow, oldEndCol := pt.offsetToPoint(offset + length)
+	pt.pendingEdits = append(pt.pendingEdits, EditInfo{
+		StartByte:  offset,
+		OldEndByte: offset + length,
+		NewEndByte: offset,
+		StartRow:   startRow,
+		StartCol:   startCol,
+		OldEndRow:  oldEndRow,
+		OldEndCol:  oldEndCol,
+		NewEndRow:  startRow,
+		NewEndCol:  startCol,
+	})
 
 	deleteEnd := offset + length
 	pos := 0
@@ -256,6 +298,106 @@ func (pt *PieceTable) Line(n int) (string, error) {
 	// Strip trailing newline
 	line = strings.TrimSuffix(line, "\n")
 	return line, nil
+}
+
+// RuneAtOffset returns the rune at the given byte offset and its byte size.
+// Uses Substring instead of Text() to avoid full-buffer allocation.
+func (pt *PieceTable) RuneAtOffset(offset int) (rune, int) {
+	if offset < 0 || offset >= pt.Length() {
+		return utf8.RuneError, 0
+	}
+	// A UTF-8 rune is at most 4 bytes
+	n := 4
+	if offset+n > pt.Length() {
+		n = pt.Length() - offset
+	}
+	s, err := pt.Substring(offset, n)
+	if err != nil || len(s) == 0 {
+		return utf8.RuneError, 0
+	}
+	return utf8.DecodeRuneInString(s)
+}
+
+// RuneBeforeOffset returns the rune just before the given byte offset and its byte size.
+// Uses Substring instead of Text() to avoid full-buffer allocation.
+func (pt *PieceTable) RuneBeforeOffset(offset int) (rune, int) {
+	if offset <= 0 || offset > pt.Length() {
+		return utf8.RuneError, 0
+	}
+	// A UTF-8 rune is at most 4 bytes
+	start := offset - 4
+	if start < 0 {
+		start = 0
+	}
+	s, err := pt.Substring(start, offset-start)
+	if err != nil || len(s) == 0 {
+		return utf8.RuneError, 0
+	}
+	return utf8.DecodeLastRuneInString(s)
+}
+
+// TextBytes writes the full text into the provided buffer, returning it.
+// If buf is too small (or nil), a new slice is allocated.
+// Avoids the double allocation of Text() + []byte conversion.
+func (pt *PieceTable) TextBytes(buf []byte) []byte {
+	n := pt.Length()
+	if cap(buf) < n {
+		buf = make([]byte, n)
+	} else {
+		buf = buf[:n]
+	}
+	offset := 0
+	addBuf := pt.add.String()
+	for _, p := range pt.pieces {
+		switch p.Source {
+		case Original:
+			copy(buf[offset:], pt.original[p.Offset:p.Offset+p.Length])
+		case Add:
+			copy(buf[offset:], addBuf[p.Offset:p.Offset+p.Length])
+		}
+		offset += p.Length
+	}
+	return buf
+}
+
+// WriteTo writes the full text directly to w without intermediate allocation.
+func (pt *PieceTable) WriteTo(w io.Writer) (int64, error) {
+	var total int64
+	addBuf := pt.add.String()
+	for _, p := range pt.pieces {
+		var s string
+		switch p.Source {
+		case Original:
+			s = pt.original[p.Offset : p.Offset+p.Length]
+		case Add:
+			s = addBuf[p.Offset : p.Offset+p.Length]
+		}
+		n, err := io.WriteString(w, s)
+		total += int64(n)
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
+}
+
+// LineStartOffset returns the byte offset of the given 0-based line.
+// Returns 0 for out-of-range lines.
+func (pt *PieceTable) LineStartOffset(line int) int {
+	pt.buildLineStarts()
+	if line < 0 || line >= len(pt.lineStarts) {
+		return 0
+	}
+	return pt.lineStarts[line]
+}
+
+// DrainEdits returns and clears accumulated edit info.
+// Used by the application layer to feed incremental tree-sitter updates.
+// The returned slice is only valid until the next Insert/Delete call.
+func (pt *PieceTable) DrainEdits() []EditInfo {
+	edits := pt.pendingEdits
+	pt.pendingEdits = edits[:0]
+	return edits
 }
 
 // splice replaces count elements at index with the new elements.

@@ -5,6 +5,8 @@ import (
 	"sort"
 
 	sitter "github.com/smacker/go-tree-sitter"
+
+	"github.com/kristianweb/zephyr/internal/buffer"
 )
 
 // Highlighter manages tree-sitter parsing and token extraction for a file.
@@ -81,6 +83,38 @@ func (h *Highlighter) Update(source []byte, edit sitter.EditInput) {
 	h.tree = h.parser.Parse(h.tree, source)
 }
 
+// UpdateMulti applies multiple sequential edits and reparses incrementally.
+func (h *Highlighter) UpdateMulti(source []byte, edits []sitter.EditInput) {
+	if h.tree != nil {
+		for _, edit := range edits {
+			h.tree.Edit(edit)
+		}
+	}
+	h.source = source
+	h.tree = h.parser.Parse(h.tree, source)
+}
+
+// UpdateFromEdits converts buffer.EditInfo slices to tree-sitter EditInputs
+// and performs an incremental reparse. If edits is empty, does a full parse.
+func (h *Highlighter) UpdateFromEdits(source []byte, edits []buffer.EditInfo) {
+	if len(edits) == 0 {
+		h.Parse(source)
+		return
+	}
+	sEdits := make([]sitter.EditInput, len(edits))
+	for i, e := range edits {
+		sEdits[i] = sitter.EditInput{
+			StartIndex:  uint32(e.StartByte),
+			OldEndIndex: uint32(e.OldEndByte),
+			NewEndIndex: uint32(e.NewEndByte),
+			StartPoint:  sitter.Point{Row: uint32(e.StartRow), Column: uint32(e.StartCol)},
+			OldEndPoint: sitter.Point{Row: uint32(e.OldEndRow), Column: uint32(e.OldEndCol)},
+			NewEndPoint: sitter.Point{Row: uint32(e.NewEndRow), Column: uint32(e.NewEndCol)},
+		}
+	}
+	h.UpdateMulti(source, sEdits)
+}
+
 // Tokens returns all highlighted tokens in the source.
 func (h *Highlighter) Tokens() []Token {
 	if h.tree == nil || h.query == nil {
@@ -121,6 +155,44 @@ func (h *Highlighter) Tokens() []Token {
 	return tokens
 }
 
+// TokensInRange returns highlighted tokens that overlap the given row range.
+// Uses tree-sitter's SetPointRange for efficient querying of visible lines only.
+// Results are in document order (tree-sitter guarantees this with SetPointRange).
+func (h *Highlighter) TokensInRange(startRow, endRow int) []Token {
+	if h.tree == nil || h.query == nil {
+		return nil
+	}
+
+	cursor := sitter.NewQueryCursor()
+	cursor.Exec(h.query, h.tree.RootNode())
+	cursor.SetPointRange(
+		sitter.Point{Row: uint32(startRow), Column: 0},
+		sitter.Point{Row: uint32(endRow + 1), Column: 0},
+	)
+
+	var tokens []Token
+	for {
+		match, ok := cursor.NextMatch()
+		if !ok {
+			break
+		}
+		for _, capture := range match.Captures {
+			name := h.query.CaptureNameForId(capture.Index)
+			tokenType := CaptureNameToTokenType(name)
+			if tokenType == "" {
+				continue
+			}
+			tokens = append(tokens, Token{
+				StartByte: int(capture.Node.StartByte()),
+				EndByte:   int(capture.Node.EndByte()),
+				Type:      tokenType,
+			})
+		}
+	}
+
+	return tokens
+}
+
 // TokensForLineRange returns tokens that overlap the given byte range.
 func (h *Highlighter) TokensForLineRange(startByte, endByte int) []Token {
 	all := h.Tokens()
@@ -145,8 +217,26 @@ func (h *Highlighter) Language() string {
 	return ""
 }
 
+// Evict releases the source buffer and parsed tree to free memory.
+// The parser and query are retained so a subsequent Parse can restore them.
+func (h *Highlighter) Evict() {
+	if h.tree != nil {
+		h.tree.Close()
+		h.tree = nil
+	}
+	h.source = nil
+}
+
+// NeedsParse returns true if the highlighter has been evicted and needs a full reparse.
+func (h *Highlighter) NeedsParse() bool {
+	return h.tree == nil
+}
+
 // Close releases resources.
 func (h *Highlighter) Close() {
+	if h.tree != nil {
+		h.tree.Close()
+	}
 	if h.parser != nil {
 		h.parser.Close()
 	}
