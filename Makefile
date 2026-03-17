@@ -7,9 +7,11 @@ build:
 	go build -o $(BINARY) ./cmd/zephyr
 
 app: build
+	@-pkill -x zephyr 2>/dev/null; sleep 0.2
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp $(BINARY) $(APP)/Contents/MacOS/
 	cp Info.plist $(APP)/Contents/
+	cp assets/icon.icns $(APP)/Contents/Resources/
 	codesign --force --sign - $(APP)
 
 run: build

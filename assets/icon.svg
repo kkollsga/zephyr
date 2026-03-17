@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#14202E"/>
+      <stop offset="100%" stop-color="#0A3A50"/>
+    </linearGradient>
+    <linearGradient id="zGrad" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#88CCBE"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Full-bleed square background — macOS applies its own rounded mask. -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Z letter — gradient fill, rounded corners via stroke trick -->
+  <path d="
+    M 170 235
+    L 680 235
+    L 680 325
+    L 325 700
+    L 680 700
+    L 680 789
+    L 170 789
+    L 170 700
+    L 525 325
+    L 170 325
+    Z
+  " fill="url(#zGrad)" stroke="url(#zGrad)" stroke-width="26" stroke-linejoin="round" paint-order="stroke"/>
+
+  <!-- Wind: flowing multi-strand lines -->
+
+  <!-- Top cluster -->
+  <path d="M 718 250 C 790 244 890 208 968 196"
+        stroke="#4EC9B0" stroke-width="11" stroke-linecap="round" fill="none" opacity="0.78"/>
+  <path d="M 718 282 C 790 278 870 250 942 240"
+        stroke="#4EC9B0" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.52"/>
+  <path d="M 718 308 C 780 305 845 284 910 276"
+        stroke="#4EC9B0" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.32"/>
+
+  <!-- Middle cluster (most prominent) -->
+  <path d="M 668 484 C 770 474 880 448 988 434"
+        stroke="#4EC9B0" stroke-width="13" stroke-linecap="round" fill="none" opacity="0.62"/>
+  <path d="M 678 518 C 775 510 870 490 965 480"
+        stroke="#4EC9B0" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.40"/>
+  <path d="M 698 550 C 780 544 855 528 940 520"
+        stroke="#4EC9B0" stroke-width="4.5" stroke-linecap="round" fill="none" opacity="0.24"/>
+
+  <!-- Bottom cluster -->
+  <path d="M 718 738 C 790 734 870 724 952 718"
+        stroke="#4EC9B0" stroke-width="9" stroke-linecap="round" fill="none" opacity="0.48"/>
+  <path d="M 718 764 C 790 762 860 754 930 750"
+        stroke="#4EC9B0" stroke-width="5.5" stroke-linecap="round" fill="none" opacity="0.28"/>
+</svg>

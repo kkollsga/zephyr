@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"path/filepath"
 	"sort"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -60,4 +61,94 @@ func LanguageNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// DetectLanguage returns the language name for a file path based on extension.
+func DetectLanguage(path string) string {
+	if path == "" {
+		return "Plain Text"
+	}
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".go":
+		return "Go"
+	case ".py":
+		return "Python"
+	case ".js":
+		return "JavaScript"
+	case ".ts":
+		return "TypeScript"
+	case ".rs":
+		return "Rust"
+	case ".c", ".h":
+		return "C"
+	case ".cpp", ".hpp", ".cc":
+		return "C++"
+	case ".java":
+		return "Java"
+	case ".rb":
+		return "Ruby"
+	case ".lua":
+		return "Lua"
+	case ".md":
+		return "Markdown"
+	case ".json":
+		return "JSON"
+	case ".yaml", ".yml":
+		return "YAML"
+	case ".toml":
+		return "TOML"
+	case ".html", ".htm":
+		return "HTML"
+	case ".css":
+		return "CSS"
+	case ".sh", ".bash", ".zsh":
+		return "Shell"
+	case ".txt":
+		return "Plain Text"
+	default:
+		return "Plain Text"
+	}
+}
+
+// ExtensionForLanguage returns a file extension for a language name.
+func ExtensionForLanguage(lang string) string {
+	switch lang {
+	case "Go":
+		return ".go"
+	case "Python":
+		return ".py"
+	case "JavaScript":
+		return ".js"
+	case "TypeScript":
+		return ".ts"
+	case "Rust":
+		return ".rs"
+	case "C":
+		return ".c"
+	case "C++":
+		return ".cpp"
+	case "Java":
+		return ".java"
+	case "Ruby":
+		return ".rb"
+	case "Lua":
+		return ".lua"
+	case "Markdown":
+		return ".md"
+	case "JSON":
+		return ".json"
+	case "YAML":
+		return ".yaml"
+	case "TOML":
+		return ".toml"
+	case "HTML":
+		return ".html"
+	case "CSS":
+		return ".css"
+	case "Shell":
+		return ".sh"
+	default:
+		return ".txt"
+	}
 }

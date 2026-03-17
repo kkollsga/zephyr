@@ -29,6 +29,7 @@ type TextRenderer struct {
 	Style  TextStyle
 	// CharWidth and LineHeightPx are computed after the first layout.
 	CharWidth    int
+	CharAdvance  float64 // exact fractional advance per character
 	LineHeightPx int
 }
 
@@ -63,6 +64,7 @@ func (tr *TextRenderer) ComputeMetrics(gtx layout.Context) {
 	params := tr.textParams(gtx)
 	tr.Shaper.LayoutString(params, "M")
 	for g, ok := tr.Shaper.NextGlyph(); ok; g, ok = tr.Shaper.NextGlyph() {
+		tr.CharAdvance = float64(g.Advance) / 64.0
 		tr.CharWidth = g.Advance.Round()
 		ascent := g.Ascent.Round()
 		descent := g.Descent.Round()
@@ -73,8 +75,15 @@ func (tr *TextRenderer) ComputeMetrics(gtx layout.Context) {
 	if tr.CharWidth == 0 {
 		px := gtx.Metric.Sp(tr.Style.FontSize)
 		tr.CharWidth = px
+		tr.CharAdvance = float64(px)
 		tr.LineHeightPx = int(float32(px) * tr.Style.LineHeight)
 	}
+}
+
+// ColX returns the pixel X offset for a given display column,
+// using the exact fractional advance to prevent sub-pixel drift.
+func (tr *TextRenderer) ColX(col int) int {
+	return int(math.Round(float64(col) * tr.CharAdvance))
 }
 
 // ColorSpan defines a color for a range of columns in a line.
@@ -106,7 +115,7 @@ func (tr *TextRenderer) RenderLine(ops *op.Ops, gtx layout.Context, lineText str
 		c := tr.colorForCol(col, spans)
 		if c != currentColor {
 			if runStartByte < i {
-				px := x + runStart*tr.CharWidth
+				px := x + tr.ColX(runStart)
 				tr.renderText(ops, gtx, lineText[runStartByte:i], px, y, currentColor)
 			}
 			runStart = col
@@ -117,7 +126,7 @@ func (tr *TextRenderer) RenderLine(ops *op.Ops, gtx layout.Context, lineText str
 		col++
 	}
 	if runStartByte < len(lineText) {
-		px := x + runStart*tr.CharWidth
+		px := x + tr.ColX(runStart)
 		tr.renderText(ops, gtx, lineText[runStartByte:], px, y, currentColor)
 	}
 }

@@ -22,6 +22,10 @@ type Theme struct {
 	StatusBg      color.NRGBA
 	StatusFg      color.NRGBA
 
+	// Find/replace highlight colors
+	FindMatch   color.NRGBA
+	FindCurrent color.NRGBA
+
 	// Syntax token colors
 	Keyword  color.NRGBA
 	String   color.NRGBA
@@ -31,6 +35,29 @@ type Theme struct {
 	Number   color.NRGBA
 	Operator color.NRGBA
 	Variable color.NRGBA
+
+	// UI element colors
+	TabBarBg       color.NRGBA
+	TabActiveBg    color.NRGBA
+	TabBorder      color.NRGBA
+	TabDimFg       color.NRGBA
+	TabModifiedDot color.NRGBA
+	TabCloseBtn    color.NRGBA
+	TabCloseHover  color.NRGBA
+	TabPlusHover   color.NRGBA
+	TitleFg        color.NRGBA
+	SubtitleFg     color.NRGBA
+	StatusBorder   color.NRGBA
+	GutterSep      color.NRGBA
+	ScrollbarThumb color.NRGBA
+	FindBarBg      color.NRGBA
+	FindBarBorder  color.NRGBA
+	FindBarInputBg color.NRGBA
+	FindBarFocus   color.NRGBA
+	FindBarText    color.NRGBA
+	FindBarDim     color.NRGBA
+	DropdownBg     color.NRGBA
+	DropdownSel    color.NRGBA
 }
 
 // Appearance represents the system appearance mode.
@@ -43,17 +70,19 @@ const (
 
 // themeJSON is the JSON representation of a theme.
 type themeJSON struct {
-	Name          string          `json:"name"`
-	Background    string          `json:"background"`
-	Foreground    string          `json:"foreground"`
-	Gutter        string          `json:"gutter"`
-	GutterBg      string          `json:"gutterBg"`
-	Cursor        string          `json:"cursor"`
-	Selection     string          `json:"selection"`
-	LineHighlight string          `json:"lineHighlight"`
-	StatusBg      string          `json:"statusBg"`
-	StatusFg      string          `json:"statusFg"`
+	Name          string            `json:"name"`
+	Background    string            `json:"background"`
+	Foreground    string            `json:"foreground"`
+	Gutter        string            `json:"gutter"`
+	GutterBg      string            `json:"gutterBg"`
+	Cursor        string            `json:"cursor"`
+	Selection     string            `json:"selection"`
+	LineHighlight string            `json:"lineHighlight"`
+	StatusBg      string            `json:"statusBg"`
+	StatusFg      string            `json:"statusFg"`
 	Tokens        map[string]string `json:"tokens"`
+	Find          map[string]string `json:"find"`
+	UI            map[string]string `json:"ui"`
 }
 
 // LoadThemeFromFile loads a theme from a JSON file.
@@ -108,6 +137,44 @@ func LoadThemeFromJSON(data []byte) (Theme, error) {
 	}
 	if c, ok := tj.Tokens["variable"]; ok {
 		t.Variable = parseColor(c)
+	}
+
+	// Find colors
+	if c, ok := tj.Find["match"]; ok {
+		t.FindMatch = parseColor(c)
+	}
+	if c, ok := tj.Find["current"]; ok {
+		t.FindCurrent = parseColor(c)
+	}
+
+	// UI element colors
+	uiFields := map[string]*color.NRGBA{
+		"tabBarBg":       &t.TabBarBg,
+		"tabActiveBg":    &t.TabActiveBg,
+		"tabBorder":      &t.TabBorder,
+		"tabDimFg":       &t.TabDimFg,
+		"tabModifiedDot": &t.TabModifiedDot,
+		"tabCloseBtn":    &t.TabCloseBtn,
+		"tabCloseHover":  &t.TabCloseHover,
+		"tabPlusHover":   &t.TabPlusHover,
+		"titleFg":        &t.TitleFg,
+		"subtitleFg":     &t.SubtitleFg,
+		"statusBorder":   &t.StatusBorder,
+		"gutterSep":      &t.GutterSep,
+		"scrollbarThumb": &t.ScrollbarThumb,
+		"findBarBg":      &t.FindBarBg,
+		"findBarBorder":  &t.FindBarBorder,
+		"findBarInputBg": &t.FindBarInputBg,
+		"findBarFocus":   &t.FindBarFocus,
+		"findBarText":    &t.FindBarText,
+		"findBarDim":     &t.FindBarDim,
+		"dropdownBg":     &t.DropdownBg,
+		"dropdownSel":    &t.DropdownSel,
+	}
+	for key, ptr := range uiFields {
+		if c, ok := tj.UI[key]; ok {
+			*ptr = parseColor(c)
+		}
 	}
 
 	return t, nil

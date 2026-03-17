@@ -3,6 +3,7 @@ package render
 import (
 	"image"
 	"image/color"
+	"math"
 	"time"
 
 	"gioui.org/op"
@@ -12,23 +13,25 @@ import (
 
 // CursorRenderer draws the text cursor and selection highlights.
 type CursorRenderer struct {
-	Color      color.NRGBA
-	Width      int // cursor width in pixels (typically 2)
-	CharWidth  int
-	LineHeight int
-	BlinkOn    bool
-	lastBlink  time.Time
+	Color       color.NRGBA
+	Width       int // cursor width in pixels (typically 2)
+	CharWidth   int
+	CharAdvance float64
+	LineHeight  int
+	BlinkOn     bool
+	lastBlink   time.Time
 }
 
 // NewCursorRenderer creates a cursor renderer.
-func NewCursorRenderer(c color.NRGBA, charWidth, lineHeight int) *CursorRenderer {
+func NewCursorRenderer(c color.NRGBA, charWidth int, charAdvance float64, lineHeight int) *CursorRenderer {
 	return &CursorRenderer{
-		Color:      c,
-		Width:      2,
-		CharWidth:  charWidth,
-		LineHeight: lineHeight,
-		BlinkOn:    true,
-		lastBlink:  time.Now(),
+		Color:       c,
+		Width:       2,
+		CharWidth:   charWidth,
+		CharAdvance: charAdvance,
+		LineHeight:  lineHeight,
+		BlinkOn:     true,
+		lastBlink:   time.Now(),
 	}
 }
 
@@ -56,7 +59,7 @@ func (cr *CursorRenderer) RenderCursor(ops *op.Ops, line, col, firstLine, gutter
 		return
 	}
 
-	x := gutterWidth + col*cr.CharWidth
+	x := gutterWidth + int(math.Round(float64(col)*cr.CharAdvance))
 	y := (line - firstLine) * cr.LineHeight
 	// Cursor height is ~70% of line height, top-aligned with text
 	cursorH := cr.LineHeight * 70 / 100
@@ -90,8 +93,8 @@ func (cr *CursorRenderer) RenderSelection(ops *op.Ops, selColor color.NRGBA,
 			ec = endCol
 		}
 
-		x1 := gutterWidth + sc*cr.CharWidth
-		x2 := gutterWidth + ec*cr.CharWidth
+		x1 := gutterWidth + int(math.Round(float64(sc)*cr.CharAdvance))
+		x2 := gutterWidth + int(math.Round(float64(ec)*cr.CharAdvance))
 
 		rect := clip.Rect{
 			Min: image.Pt(x1, visY),
