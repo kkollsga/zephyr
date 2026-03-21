@@ -56,14 +56,17 @@ func (st *appState) toggleCheckbox(cb mdCheckbox) {
 
 	// Find the [ ] or [x] near the source offset
 	searchStart := cb.sourceOffset
-	if searchStart > len(src) {
+	if searchStart >= len(src) {
 		return
 	}
-	// Search forward from the list item start for the checkbox pattern
 	idx := -1
-	for i := searchStart; i < len(src)-2 && i < searchStart+40; i++ {
+	limit := searchStart + 40
+	if limit > len(src)-2 {
+		limit = len(src) - 2
+	}
+	for i := searchStart; i < limit; i++ {
 		if src[i] == '[' && (src[i+1] == ' ' || src[i+1] == 'x' || src[i+1] == 'X') && src[i+2] == ']' {
-			idx = i
+			idx = i + 1 // position of the char inside brackets
 			break
 		}
 	}
@@ -71,16 +74,9 @@ func (st *appState) toggleCheckbox(cb mdCheckbox) {
 		return
 	}
 
-	// Toggle: [ ] -> [x] or [x] -> [ ]
-	newChar := byte('x')
-	if cb.checked {
-		newChar = byte(' ')
-	}
-
-	// Find the line and column for the buffer edit
-	line := 0
-	col := 0
-	for i := 0; i < idx+1 && i < len(src); i++ {
+	// Convert byte offset to line:col
+	line, col := 0, 0
+	for i := 0; i < idx; i++ {
 		if src[i] == '\n' {
 			line++
 			col = 0
@@ -89,11 +85,22 @@ func (st *appState) toggleCheckbox(cb mdCheckbox) {
 		}
 	}
 
-	// Replace the single character inside the brackets
+	// Save and restore cursor position
+	savedLine, savedCol := ed.Cursor.Line, ed.Cursor.Col
+
 	ed.Cursor.Line = line
 	ed.Cursor.Col = col
+	ed.Selection.Clear()
 	ed.DeleteForward()
-	ed.InsertText(string(newChar))
+	if cb.checked {
+		ed.InsertText(" ")
+	} else {
+		ed.InsertText("x")
+	}
+
+	// Restore cursor
+	ed.Cursor.Line = savedLine
+	ed.Cursor.Col = savedCol
 
 	// Re-parse and refresh
 	ts.mdDoc = render.ParseMarkdown(ed.Buffer.TextBytes(nil))
@@ -392,7 +399,10 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 			}
 
 		case render.BlockListItem:
-			indent := block.Level * 20
+			indent := 0
+			if block.Level >= 0 {
+				indent = (block.Level + 1) * 20
+			}
 			listRend := mr.body
 			if block.Level > 0 {
 				listRend = mr.bodySmall
@@ -421,51 +431,70 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 			if y+blockH > 0 && y < editorH {
 				textX := editorX + indent
 
+				// Render bullet marker first for list-style checkboxes (- [ ])
+				if hasCheckbox && block.Marker != "" {
+					listRend.RenderGlyphs(gtx.Ops, gtx, block.Marker, textX, y, theme.MdAccent)
+					textX += (len(block.Marker) + 1) * listRend.CharWidth
+				}
+
 				if hasCheckbox {
-					// Draw checkbox
-					cbSize := listRend.LineHeightPx * 3 / 4
-					if cbSize < 10 {
-						cbSize = 10
+					// Flat checkbox: simple square, 2px border
+					cbSize := listRend.LineHeightPx - 4
+					if cbSize < 8 {
+						cbSize = 8
 					}
 					cbX := textX
-					cbY := y + (listRend.LineHeightPx-cbSize)/2
+					cbY := y + 2 // vertically center in line
 
-					cbHovered := st.hoverX >= cbX && st.hoverX < cbX+cbSize &&
+					cbHovered := st.hoverX >= cbX && st.hoverX < cbX+cbSize+4 &&
 						st.hoverY-st.tabBarHeight >= cbY && st.hoverY-st.tabBarHeight < cbY+cbSize
 
-					cbColor := theme.TabDimFg
-					if cbHovered {
-						cbColor = theme.MdAccent
-					}
-
 					if checkboxChecked {
-						// Filled rounded rect for checked state
-						chkOff := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
-						chkRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize, cbSize)}, 3).Push(gtx.Ops)
-						paint.ColorOp{Color: theme.MdAccent}.Add(gtx.Ops)
+						// Border square with checkmark
+						color := theme.MdAccent
+						if cbHovered {
+							color = theme.MdHeading
+						}
+						// Border
+						off := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
+						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize, cbSize)}, 2).Push(gtx.Ops)
+						paint.ColorOp{Color: color}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
-						chkRect.Pop()
-						chkOff.Pop()
-						// Checkmark "✓" centered
-						mr.code.RenderGlyphs(gtx.Ops, gtx, "✓", cbX+cbSize/5, cbY, theme.Background)
-					} else {
-						// Empty rounded rect border
-						chkOff := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
-						chkRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize, cbSize)}, 3).Push(gtx.Ops)
-						paint.ColorOp{Color: cbColor}.Add(gtx.Ops)
-						paint.PaintOp{}.Add(gtx.Ops)
-						chkRect.Pop()
-						chkOff.Pop()
-						// Inner cutout to make it a border
-						innerOff := op.Offset(image.Pt(cbX+2, cbY+2)).Push(gtx.Ops)
-						innerRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize-4, cbSize-4)}, 2).Push(gtx.Ops)
+						r.Pop()
+						off.Pop()
+						inOff := op.Offset(image.Pt(cbX+2, cbY+2)).Push(gtx.Ops)
+						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize-4, cbSize-4)}, 1).Push(gtx.Ops)
 						paint.ColorOp{Color: theme.Background}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
-						innerRect.Pop()
-						innerOff.Pop()
+						inR.Pop()
+						inOff.Pop()
+						// Checkmark glyph centered in box (use h5 renderer for larger glyph)
+						cr := mr.h5
+						glyphX := cbX + (cbSize-cr.CharWidth)/2
+						glyphY := cbY + (cbSize-cr.LineHeightPx)/2
+						cr.RenderGlyphs(gtx.Ops, gtx, "✓", glyphX, glyphY, color)
+					} else {
+						// Border-only square: draw outer, then punch inner with background
+						color := theme.TabDimFg
+						if cbHovered {
+							color = theme.MdAccent
+						}
+						off := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
+						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize, cbSize)}, 2).Push(gtx.Ops)
+						paint.ColorOp{Color: color}.Add(gtx.Ops)
+						paint.PaintOp{}.Add(gtx.Ops)
+						r.Pop()
+						off.Pop()
+						// Punch out inner
+						inOff := op.Offset(image.Pt(cbX+2, cbY+2)).Push(gtx.Ops)
+						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize-4, cbSize-4)}, 1).Push(gtx.Ops)
+						paint.ColorOp{Color: theme.Background}.Add(gtx.Ops)
+						paint.PaintOp{}.Add(gtx.Ops)
+						inR.Pop()
+						inOff.Pop()
 					}
 
-					textX += cbSize + listRend.CharWidth/2
+					textX += cbSize + listRend.CharWidth
 
 					// Register hit area
 					ts.mdCheckboxes = append(ts.mdCheckboxes, mdCheckbox{
@@ -473,8 +502,8 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 						sourceOffset: block.SourceOffset,
 						checked:      checkboxChecked,
 					})
-				} else {
-					// Regular marker
+				} else if block.Marker != "" {
+					// Regular marker (skip for standalone checkboxes with Level -1)
 					listRend.RenderGlyphs(gtx.Ops, gtx, block.Marker, textX, y, theme.MdAccent)
 					textX += (len(block.Marker) + 1) * listRend.CharWidth
 				}

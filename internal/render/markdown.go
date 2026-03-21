@@ -179,6 +179,29 @@ func walkBlocks(n ast.Node, source []byte, blocks *[]Block, depth int) {
 		case *ast.Paragraph:
 			b := Block{Kind: BlockParagraph}
 			b.Spans = collectInlines(node, source)
+			srcOff := nodeStartByte(node, source)
+			b.SourceOffset = srcOff
+			// Detect standalone [ ] or [x] at start of paragraph
+			if plain := spansPlainPrefix(b.Spans); len(plain) >= 3 &&
+				plain[0] == '[' && (plain[1] == ' ' || plain[1] == 'x' || plain[1] == 'X') && plain[2] == ']' {
+				cb := 1
+				if plain[1] != ' ' {
+					cb = 2
+				}
+				b.Kind = BlockListItem
+				// Check raw source for leading spaces to determine indent
+				indent := 0
+				for i := srcOff - 1; i >= 0 && i < len(source) && source[i] == ' '; i-- {
+					indent++
+				}
+				if indent > 0 {
+					b.Level = 0 // indented, no marker
+				} else {
+					b.Level = -1 // no indent, no marker
+				}
+				b.Spans = trimLeadingChars(b.Spans, 3)
+				b.Spans = append([]InlineSpan{{Checkbox: cb}}, b.Spans...)
+			}
 			*blocks = append(*blocks, b)
 
 		case *ast.FencedCodeBlock:
@@ -331,6 +354,38 @@ func collectPlainText(n ast.Node, source []byte) string {
 		}
 	}
 	return buf.String()
+}
+
+// spansPlainPrefix returns the first few characters of the concatenated span text.
+func spansPlainPrefix(spans []InlineSpan) string {
+	var b strings.Builder
+	for _, s := range spans {
+		b.WriteString(s.Text)
+		if b.Len() >= 4 {
+			break
+		}
+	}
+	return b.String()
+}
+
+// trimLeadingChars removes the first n characters from the span text,
+// potentially consuming or shortening the first span(s).
+func trimLeadingChars(spans []InlineSpan, n int) []InlineSpan {
+	for n > 0 && len(spans) > 0 {
+		t := spans[0].Text
+		if len(t) <= n {
+			n -= len(t)
+			spans = spans[1:]
+		} else {
+			spans[0].Text = t[n:]
+			n = 0
+		}
+	}
+	// Trim leading space from the remaining first span
+	if len(spans) > 0 {
+		spans[0].Text = strings.TrimLeft(spans[0].Text, " ")
+	}
+	return spans
 }
 
 // itoa converts an int to a string without importing strconv.
