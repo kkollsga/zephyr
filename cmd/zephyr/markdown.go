@@ -438,67 +438,71 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 				}
 
 				if hasCheckbox {
-					// Flat checkbox: simple square, 2px border
-					cbSize := listRend.LineHeightPx - 4
-					if cbSize < 8 {
-						cbSize = 8
+					lh := listRend.LineHeightPx
+					// Small thin box, vertically centered
+					boxSize := lh * 1 / 2
+					if boxSize < 8 {
+						boxSize = 8
 					}
-					cbX := textX
-					cbY := y + 2 // vertically center in line
+					hitSize := lh            // larger hit target
+					cbX := textX + (hitSize-boxSize)/2  // center box in hit area
+					cbY := y + (lh-boxSize)/2
 
-					cbHovered := st.hoverX >= cbX && st.hoverX < cbX+cbSize+4 &&
-						st.hoverY-st.tabBarHeight >= cbY && st.hoverY-st.tabBarHeight < cbY+cbSize
+					hoverX := st.hoverX
+					hoverY := st.hoverY - st.tabBarHeight
+					cbHovered := hoverX >= textX && hoverX < textX+hitSize &&
+						hoverY >= y && hoverY < y+lh
 
 					if checkboxChecked {
-						// Border square with checkmark
-						color := theme.MdAccent
+						checkColor := color.NRGBA{R: 60, G: 180, B: 80, A: 255} // green
+						borderColor := theme.TabDimFg
 						if cbHovered {
-							color = theme.MdHeading
+							checkColor = theme.MdAccent
+							borderColor = theme.MdAccent
 						}
-						// Border
+						// Thin 1px border in check color
 						off := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
-						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize, cbSize)}, 2).Push(gtx.Ops)
-						paint.ColorOp{Color: color}.Add(gtx.Ops)
+						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize, boxSize)}, 3).Push(gtx.Ops)
+						paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
 						r.Pop()
 						off.Pop()
-						inOff := op.Offset(image.Pt(cbX+2, cbY+2)).Push(gtx.Ops)
-						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize-4, cbSize-4)}, 1).Push(gtx.Ops)
+						inOff := op.Offset(image.Pt(cbX+1, cbY+1)).Push(gtx.Ops)
+						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize-2, boxSize-2)}, 2).Push(gtx.Ops)
 						paint.ColorOp{Color: theme.Background}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
 						inR.Pop()
 						inOff.Pop()
-						// Checkmark glyph centered in box (use h5 renderer for larger glyph)
-						cr := mr.h5
-						glyphX := cbX + (cbSize-cr.CharWidth)/2
-						glyphY := cbY + (cbSize-cr.LineHeightPx)/2
-						cr.RenderGlyphs(gtx.Ops, gtx, "✓", glyphX, glyphY, color)
+						// Bold checkmark — h4 bold for larger glyph
+						cr := mr.h4
+						glyphX := cbX + (boxSize-cr.CharWidth)/2 + cr.CharWidth/8
+						glyphY := cbY + (boxSize-cr.LineHeightPx)/2 - 1
+						cr.RenderGlyphs(gtx.Ops, gtx, "✓", glyphX, glyphY, checkColor)
 					} else {
-						// Border-only square: draw outer, then punch inner with background
-						color := theme.TabDimFg
+						borderColor := theme.TabDimFg
 						if cbHovered {
-							color = theme.MdAccent
+							borderColor = theme.MdAccent
 						}
+						// Thin 1px border
 						off := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
-						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize, cbSize)}, 2).Push(gtx.Ops)
-						paint.ColorOp{Color: color}.Add(gtx.Ops)
+						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize, boxSize)}, 3).Push(gtx.Ops)
+						paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
 						r.Pop()
 						off.Pop()
-						// Punch out inner
-						inOff := op.Offset(image.Pt(cbX+2, cbY+2)).Push(gtx.Ops)
-						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(cbSize-4, cbSize-4)}, 1).Push(gtx.Ops)
+						inOff := op.Offset(image.Pt(cbX+1, cbY+1)).Push(gtx.Ops)
+						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize-2, boxSize-2)}, 2).Push(gtx.Ops)
 						paint.ColorOp{Color: theme.Background}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
 						inR.Pop()
 						inOff.Pop()
 					}
 
-					textX += cbSize + listRend.CharWidth
+					textX += hitSize
 
-					// Register hit area
+					// Register hit area (full line height)
 					ts.mdCheckboxes = append(ts.mdCheckboxes, mdCheckbox{
-						x: cbX, y: cbY + st.tabBarHeight, w: cbSize, h: cbSize,
+						x: textX - hitSize, y: y + st.tabBarHeight, w: hitSize, h: lh,
 						sourceOffset: block.SourceOffset,
 						checked:      checkboxChecked,
 					})
