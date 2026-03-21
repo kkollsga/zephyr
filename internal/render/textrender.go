@@ -21,6 +21,9 @@ type TextStyle struct {
 	FontSize   unit.Sp
 	LineHeight float32 // multiplier, e.g. 1.5
 	Foreground color.NRGBA
+	Typeface   string      // font face name, e.g. "Menlo, monospace"
+	Weight     font.Weight // e.g. font.Bold
+	FontStyle  font.Style  // e.g. font.Italic
 }
 
 // TextRenderer renders lines of monospaced text with per-character coloring.
@@ -50,8 +53,16 @@ func fixedToFloat(i fixed.Int26_6) float32 {
 }
 
 func (tr *TextRenderer) textParams(gtx layout.Context) text.Parameters {
+	face := font.Typeface("Menlo, monospace")
+	if tr.Style.Typeface != "" {
+		face = font.Typeface(tr.Style.Typeface)
+	}
 	return text.Parameters{
-		Font:     font.Font{Typeface: "Menlo, monospace"},
+		Font: font.Font{
+			Typeface: face,
+			Weight:   tr.Style.Weight,
+			Style:    tr.Style.FontStyle,
+		},
 		PxPerEm:  spToFixed(gtx.Metric, tr.Style.FontSize),
 		MaxWidth: gtx.Constraints.Max.X,
 	}

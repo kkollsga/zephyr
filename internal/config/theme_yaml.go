@@ -7,10 +7,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FontConfig holds the font families for different contexts.
+type FontConfig struct {
+	Monospace string // editor, code blocks (e.g. "Menlo, monospace")
+	Heading   string // headings in markdown read mode
+	Body      string // body text in markdown read mode
+}
+
+// DefaultFontConfig returns the default font configuration.
+func DefaultFontConfig() FontConfig {
+	return FontConfig{
+		Monospace: "Menlo, monospace",
+		Heading:   "Menlo, monospace",
+		Body:      "Menlo, monospace",
+	}
+}
+
 // ThemeBundle holds both dark and light variants from a single theme file.
 type ThemeBundle struct {
 	Name     string
 	Subtitle string // custom tagline, e.g. "The caffeinated editor"
+	Fonts    FontConfig
 	Dark     Theme
 	Light    Theme
 }
@@ -23,10 +40,23 @@ func (b ThemeBundle) Theme(dark bool) Theme {
 	return b.Light
 }
 
+// fontsYAML is the YAML representation of font configuration.
+type fontsYAML struct {
+	Monospace string `yaml:"monospace"`
+	Heading   string `yaml:"heading"`
+	Body      string `yaml:"body"`
+}
+
 // themeYAML is the top-level YAML structure for a unified theme file.
+// DefaultThemeVersion is bumped when the built-in default theme changes.
+// EnsureDefaultThemes regenerates default.yaml when the on-disk version is older.
+const DefaultThemeVersion = 2
+
 type themeYAML struct {
+	Version  int          `yaml:"version"`
 	Name     string       `yaml:"name"`
 	Subtitle string       `yaml:"subtitle"`
+	Fonts    fontsYAML    `yaml:"fonts"`
 	Dark     themeVariant `yaml:"dark"`
 	Light    themeVariant `yaml:"light"`
 }
@@ -62,9 +92,21 @@ func LoadBundleFromYAML(data []byte) (ThemeBundle, error) {
 	if err := yaml.Unmarshal(data, &ty); err != nil {
 		return ThemeBundle{}, err
 	}
+	fonts := DefaultFontConfig()
+	if ty.Fonts.Monospace != "" {
+		fonts.Monospace = ty.Fonts.Monospace
+	}
+	if ty.Fonts.Heading != "" {
+		fonts.Heading = ty.Fonts.Heading
+	}
+	if ty.Fonts.Body != "" {
+		fonts.Body = ty.Fonts.Body
+	}
+
 	return ThemeBundle{
 		Name:     ty.Name,
 		Subtitle: ty.Subtitle,
+		Fonts:    fonts,
 		Dark:     variantToTheme(ty.Name, ty.Dark),
 		Light:    variantToTheme(ty.Name, ty.Light),
 	}, nil
@@ -133,11 +175,21 @@ func variantToTheme(name string, v themeVariant) Theme {
 		"find-bar-dim":     &t.FindBarDim,
 		"dropdown-bg":      &t.DropdownBg,
 		"dropdown-sel":     &t.DropdownSel,
+		"md-heading":       &t.MdHeading,
+		"md-accent":        &t.MdAccent,
 	}
 	for key, ptr := range uiFields {
 		if c, ok := v.UI[key]; ok {
 			*ptr = parseColor(c)
 		}
+	}
+
+	// Fallback for new fields not present in older theme files
+	if t.MdHeading.A == 0 {
+		t.MdHeading = color.NRGBA{R: 200, G: 80, B: 80, A: 255}
+	}
+	if t.MdAccent.A == 0 {
+		t.MdAccent = color.NRGBA{R: 100, G: 150, B: 210, A: 255}
 	}
 
 	return t

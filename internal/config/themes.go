@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ThemeMeta describes a theme file found on disk.
@@ -63,16 +65,25 @@ func LoadThemeByName(name string) (Theme, error) {
 }
 
 // EnsureDefaultThemes writes the built-in default.yaml to the theme directory
-// if it doesn't already exist.
+// if it doesn't exist or its version is older than the embedded default.
 func EnsureDefaultThemes() error {
 	dir := ThemeDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	path := filepath.Join(dir, "default.yaml")
-	if _, err := os.Stat(path); err == nil {
-		return nil // already exists
+
+	// Check if existing file needs updating
+	if data, err := os.ReadFile(path); err == nil {
+		var header struct {
+			Version int `yaml:"version"`
+		}
+		if yaml.Unmarshal(data, &header) == nil && header.Version >= DefaultThemeVersion {
+			return nil // up to date
+		}
+		// Outdated version — regenerate
 	}
+
 	return os.WriteFile(path, defaultThemeYAML, 0644)
 }
 

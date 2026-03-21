@@ -36,30 +36,47 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		return
 	}
 
-	// Update viewport
+	// Status bar height
 	statusH := 0
 	if st.statusRend != nil {
 		statusH = st.statusRend.LineHeightPx + 6
 	}
-	ts.viewport.TotalLines = ed.Buffer.LineCount()
-	if st.textRend.LineHeightPx > 0 {
-		ts.viewport.VisibleLines = (gtx.Constraints.Max.Y - statusH - st.tabBarHeight - editorTopPad) / st.textRend.LineHeightPx
-	}
-	// Only scroll to reveal cursor when it has actually moved (not during
-	// trackpad/mouse-wheel scrolling, which should move the viewport freely).
-	if ed.Cursor.Line != ts.lastCursorLine || ed.Cursor.Col != ts.lastCursorCol {
-		ts.viewport.ScrollToRevealCursor(ed.Cursor.Line)
-		ts.lastCursorLine = ed.Cursor.Line
-		ts.lastCursorCol = ed.Cursor.Col
-		if st.scrollbarRend != nil {
-			st.scrollbarRend.NotifyScroll()
+	editorH := gtx.Constraints.Max.Y - st.tabBarHeight - statusH
+
+	// Skip viewport update in markdown read mode
+	if ts.mode != viewMarkdownRead {
+		ts.viewport.TotalLines = ed.Buffer.LineCount()
+		if st.textRend.LineHeightPx > 0 {
+			ts.viewport.VisibleLines = (gtx.Constraints.Max.Y - statusH - st.tabBarHeight - editorTopPad) / st.textRend.LineHeightPx
+		}
+		if ed.Cursor.Line != ts.lastCursorLine || ed.Cursor.Col != ts.lastCursorCol {
+			ts.viewport.ScrollToRevealCursor(ed.Cursor.Line)
+			ts.lastCursorLine = ed.Cursor.Line
+			ts.lastCursorCol = ed.Cursor.Col
+			if st.scrollbarRend != nil {
+				st.scrollbarRend.NotifyScroll()
+			}
 		}
 	}
 
 	// Offset everything below the tab bar and clip to the editor area.
-	editorH := gtx.Constraints.Max.Y - st.tabBarHeight - statusH
 	tabOff := op.Offset(image.Pt(0, st.tabBarHeight)).Push(gtx.Ops)
 	editorClip := clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, editorH)}.Push(gtx.Ops)
+
+	// Markdown preview mode — skip gutter, cursor, etc.
+	if ts.mode == viewMarkdownRead {
+		st.drawMarkdownPreview(gtx, ts)
+		editorClip.Pop()
+		tabOff.Pop()
+		st.lastMaxY = gtx.Constraints.Max.Y
+		st.lastMaxX = gtx.Constraints.Max.X
+		st.drawStatusLine(gtx)
+		// Save menu must render on top even in read mode
+		if st.saveMenu.visible {
+			st.drawSaveMenu(gtx)
+		}
+		return
+	}
 
 	// Gutter
 	firstLine, lastLine := ts.viewport.VisibleRange()
@@ -1267,6 +1284,39 @@ func (st *appState) drawStatusLine(gtx layout.Context) {
 	langWidth := len(lang) * sr.CharWidth
 	st.langLabelX = gtx.Constraints.Max.X - langWidth - 12
 	sr.RenderGlyphs(gtx.Ops, gtx, lang, st.langLabelX, textY, st.theme.StatusFg)
+
+	// Markdown mode toggle (Edit / Read) — left of language label
+	if lang == "Markdown" && ts != nil {
+		modeLabel := "Edit"
+		if ts.mode == viewMarkdownRead {
+			modeLabel = "Read"
+		}
+		modePad := sr.CharWidth
+		modeW := len(modeLabel)*sr.CharWidth + modePad*2
+		modeX := st.langLabelX - modeW - sr.CharWidth
+		modeY := y
+
+		// Subtle pill background
+		pillColor := st.theme.TabBorder
+		pillOff := op.Offset(image.Pt(modeX, modeY+1)).Push(gtx.Ops)
+		pillRect := clip.UniformRRect(image.Rectangle{
+			Max: image.Pt(modeW, statusH-2),
+		}, 3).Push(gtx.Ops)
+		paint.ColorOp{Color: pillColor}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		pillRect.Pop()
+		pillOff.Pop()
+
+		// Label
+		sr.RenderGlyphs(gtx.Ops, gtx, modeLabel, modeX+modePad, textY, st.theme.Foreground)
+
+		// Store hit area for click detection
+		st.mdToggleX = modeX
+		st.mdToggleW = modeW
+	} else {
+		st.mdToggleX = 0
+		st.mdToggleW = 0
+	}
 
 	// Centered notification (e.g. "Saved to: ~/path")
 	if st.notification != "" && time.Now().Before(st.notificationUntil) {

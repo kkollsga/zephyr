@@ -48,13 +48,21 @@ func (st *appState) newTab() {
 
 func (st *appState) switchTab(idx int) {
 	// Evict highlight resources from the old tab to save memory.
-	if ts := st.activeTabState(); ts != nil && ts.highlighter != nil {
-		ts.highlighter.Evict()
-		ts.sourceBuf = nil
+	if ts := st.activeTabState(); ts != nil {
+		if ts.highlighter != nil {
+			ts.highlighter.Evict()
+			ts.sourceBuf = nil
+		}
 	}
 
 	st.tabBar.SwitchToTab(idx)
 	ts := st.activeTabState() // ensure state exists
+
+	// Force viewport sync for the new tab
+	if ts != nil {
+		ts.lastCursorLine = -1
+		ts.lastCursorCol = -1
+	}
 
 	// Reparse the new tab if its tree was evicted.
 	if ts != nil && ts.highlighter != nil && ts.highlighter.NeedsParse() {
@@ -555,8 +563,7 @@ func (st *appState) forceCloseTab(idx int) {
 	}
 	st.tabBar.ForceCloseTab(idx)
 	if st.tabBar.TabCount() == 0 {
-		st.gracefulExit()
-		return
+		os.Exit(0)
 	}
 	st.updateWindowTitle()
 }

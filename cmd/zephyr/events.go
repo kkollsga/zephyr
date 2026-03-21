@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/f32"
@@ -25,8 +26,18 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 	// Compute dynamic scroll range based on viewport position.
 	scrollRange := pointer.ScrollRange{Min: -10000, Max: 10000}
 	if ts := st.activeTabState(); ts != nil && st.textRend != nil && st.textRend.LineHeightPx > 0 {
-		up, down := ts.viewport.ScrollablePixels(st.textRend.LineHeightPx)
-		scrollRange = pointer.ScrollRange{Min: -up, Max: down}
+		if ts.mode == viewMarkdownRead {
+			up := int(ts.mdScrollY)
+			editorH := st.lastMaxY - st.tabBarHeight
+			down := ts.mdTotalH - editorH - up
+			if down < 0 {
+				down = 0
+			}
+			scrollRange = pointer.ScrollRange{Min: -up, Max: down}
+		} else {
+			up, down := ts.viewport.ScrollablePixels(st.textRend.LineHeightPx)
+			scrollRange = pointer.ScrollRange{Min: -up, Max: down}
+		}
 	}
 
 	for {
@@ -168,6 +179,21 @@ func (st *appState) handleKey(ke key.Event) {
 		return
 	}
 
+	// In markdown read mode, only handle mode toggle and tab management
+	if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+		switch {
+		case ke.Name == "E" && ke.Modifiers == key.ModShortcut:
+			st.toggleMarkdownPreview()
+		case ke.Name == "T" && ke.Modifiers == key.ModShortcut:
+			st.newTab()
+		case ke.Name == "W" && ke.Modifiers == key.ModShortcut:
+			st.closeCurrentTab()
+		case ke.Name == "Q" && ke.Modifiers == key.ModShortcut:
+			st.startQuitFlow()
+		}
+		return
+	}
+
 	switch {
 	// Tab management
 	case ke.Name == "T" && ke.Modifiers == key.ModShortcut:
@@ -240,6 +266,8 @@ func (st *appState) handleKey(ke key.Event) {
 				st.updateWindowTitle()
 			}
 		}
+	case ke.Name == "E" && ke.Modifiers == key.ModShortcut:
+		st.toggleMarkdownPreview()
 	case ke.Name == "S" && ke.Modifiers == key.ModShortcut|key.ModShift:
 		// Cmd+Shift+S = Save As
 		if st.tabBar.ActiveIdx >= 0 {
@@ -316,6 +344,10 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		if int(pe.Position.Y) < st.tabBarHeight {
 			st.checkIncomingTabTransfer()
 		}
+		// Invalidate for hover effects in markdown read mode
+		if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+			st.window.Invalidate()
+		}
 
 	case pointer.Press:
 		// Save menu takes priority over everything
@@ -328,6 +360,26 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		if int(pe.Position.Y) < st.tabBarHeight || st.overflowOpen {
 			st.handleTabBarPress(int(pe.Position.X), int(pe.Position.Y))
 			return
+		}
+
+		// Code block copy buttons and checkboxes in markdown read mode
+		if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+			px, py := int(pe.Position.X), int(pe.Position.Y)
+			for _, btn := range ts.mdCopyBtns {
+				if px >= btn.x && px < btn.x+btn.w && py >= btn.y && py < btn.y+btn.h {
+					clipboard.Set(btn.code)
+					st.notification = "Copied to clipboard"
+					st.notificationUntil = time.Now().Add(2 * time.Second)
+					st.window.Invalidate()
+					return
+				}
+			}
+			for _, cb := range ts.mdCheckboxes {
+				if px >= cb.x && px < cb.x+cb.w && py >= cb.y && py < cb.y+cb.h {
+					st.toggleCheckbox(cb)
+					return
+				}
+			}
 		}
 
 		sr := st.statusRend
@@ -364,6 +416,15 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		// Find bar clicks — consume click if inside the bar
 		if st.findBar.Visible && st.tabRend != nil {
 			if st.handleFindBarClick(int(pe.Position.X), int(pe.Position.Y)) {
+				return
+			}
+		}
+
+		// Markdown Edit/Read toggle button
+		if st.mdToggleW > 0 && int(pe.Position.Y) >= statusY {
+			px := int(pe.Position.X)
+			if px >= st.mdToggleX && px < st.mdToggleX+st.mdToggleW {
+				st.toggleMarkdownPreview()
 				return
 			}
 		}
@@ -426,7 +487,23 @@ func (st *appState) handlePointer(pe pointer.Event) {
 			st.scrollAccum += pe.Scroll.Y
 			pixels := int(st.scrollAccum)
 			if pixels != 0 {
-				ts.viewport.ScrollByPixels(pixels, st.textRend.LineHeightPx)
+				if ts.mode == viewMarkdownRead {
+					ts.mdScrollY += float64(pixels)
+					if ts.mdScrollY < 0 {
+						ts.mdScrollY = 0
+					}
+					editorH := st.lastMaxY - st.tabBarHeight
+					maxScroll := float64(ts.mdTotalH - editorH)
+					if maxScroll < 0 {
+						maxScroll = 0
+					}
+					if ts.mdScrollY > maxScroll {
+						ts.mdScrollY = maxScroll
+					}
+					st.window.Invalidate()
+				} else {
+					ts.viewport.ScrollByPixels(pixels, st.textRend.LineHeightPx)
+				}
 				st.scrollAccum -= float32(pixels)
 				if st.scrollbarRend != nil {
 					st.scrollbarRend.NotifyScroll()

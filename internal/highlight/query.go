@@ -225,3 +225,25 @@ var rustHighlightQuery = `
 
 (identifier) @variable
 `
+
+var markdownHighlightQuery = `
+(atx_heading) @keyword
+
+(fenced_code_block) @function
+(code_fence_content) @function
+(info_string) @type
+
+(block_quote) @comment
+(block_quote_marker) @comment
+
+(list_marker_minus) @operator
+(list_marker_plus) @operator
+(list_marker_star) @operator
+(list_marker_dot) @number
+
+(thematic_break) @operator
+
+(pipe_table_header) @keyword
+(pipe_table_delimiter_row) @operator
+(pipe_table_cell) @variable
+`

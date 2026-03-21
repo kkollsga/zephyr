@@ -36,6 +36,10 @@ type Theme struct {
 	Operator color.NRGBA
 	Variable color.NRGBA
 
+	// Markdown preview colors
+	MdHeading color.NRGBA // headings and blockquote bar
+	MdAccent  color.NRGBA // bold, italic, inline code text
+
 	// UI element colors
 	TabBarBg       color.NRGBA
 	TabActiveBg    color.NRGBA

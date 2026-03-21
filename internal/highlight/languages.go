@@ -7,6 +7,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/javascript"
+	tree_sitter_markdown "github.com/smacker/go-tree-sitter/markdown/tree-sitter-markdown"
 	"github.com/smacker/go-tree-sitter/python"
 	"github.com/smacker/go-tree-sitter/rust"
 )
@@ -27,6 +28,7 @@ func init() {
 	Register(".js", &LanguageInfo{Name: "JavaScript", Language: javascript.GetLanguage(), Query: jsHighlightQuery})
 	Register(".jsx", &LanguageInfo{Name: "JavaScript", Language: javascript.GetLanguage(), Query: jsHighlightQuery})
 	Register(".rs", &LanguageInfo{Name: "Rust", Language: rust.GetLanguage(), Query: rustHighlightQuery})
+	Register(".md", &LanguageInfo{Name: "Markdown", Language: tree_sitter_markdown.GetLanguage(), Query: markdownHighlightQuery})
 }
 
 // Register adds a language to the registry.

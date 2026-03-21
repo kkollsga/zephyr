@@ -16,6 +16,7 @@ func DefaultBundle() ThemeBundle {
 		return ThemeBundle{
 			Name:     "Default",
 			Subtitle: "The caffeinated editor",
+			Fonts:    DefaultFontConfig(),
 			Dark:     DarkTheme(),
 			Light:    LightTheme(),
 		}
@@ -52,6 +53,9 @@ func DarkTheme() Theme {
 		Number:   nrgba(181, 206, 168, 255), // light green
 		Operator: nrgba(212, 212, 212, 255), // foreground
 		Variable: nrgba(156, 220, 254, 255), // light blue
+
+		MdHeading: nrgba(220, 100, 100, 255), // soft red
+		MdAccent:  nrgba(130, 170, 220, 255), // light navy blue
 
 		TabBarBg:       nrgba(46, 46, 46, 255),
 		TabActiveBg:    nrgba(30, 30, 30, 255),
@@ -102,6 +106,9 @@ func LightTheme() Theme {
 		Number:   nrgba(9, 136, 90, 255),   // green
 		Operator: nrgba(30, 30, 30, 255),   // foreground
 		Variable: nrgba(0, 16, 128, 255),   // blue
+
+		MdHeading: nrgba(160, 40, 40, 255),   // dark red
+		MdAccent:  nrgba(30, 70, 130, 255),   // navy blue
 
 		TabBarBg:       nrgba(236, 236, 236, 255),
 		TabActiveBg:    nrgba(255, 255, 255, 255),

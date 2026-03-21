@@ -24,6 +24,14 @@ func main() {
 	app.Main()
 }
 
+// viewMode tracks whether a tab is in edit or preview mode.
+type viewMode int
+
+const (
+	viewEdit         viewMode = iota
+	viewMarkdownRead          // rendered markdown preview
+)
+
 // tabState holds per-tab state that isn't part of the editor itself.
 type tabState struct {
 	viewport       *render.Viewport
@@ -32,6 +40,14 @@ type tabState struct {
 	lastCursorLine int // tracks cursor to detect movement; -1 = uninitialized
 	lastCursorCol  int
 	sourceBuf      []byte // reusable buffer for tree-sitter source
+
+	// Markdown preview state
+	mode       viewMode
+	mdDoc      *render.MarkdownDoc // parsed markdown for read mode
+	mdScrollY  float64             // pixel scroll offset for read mode
+	mdTotalH   int                 // total rendered height for scroll clamping
+	mdCopyBtns  []codeCopyBtn       // code block copy button hit areas
+	mdCheckboxes []mdCheckbox      // task list checkbox hit areas
 }
 
 type appState struct {
@@ -61,6 +77,10 @@ type appState struct {
 	darkMode        bool   // true = dark theme, false = light theme
 	themeName       string              // active theme bundle name
 	themeBundle     config.ThemeBundle   // loaded theme bundle
+	fontCfg         config.FontConfig   // font configuration from theme
+	mdRend          *mdRenderers        // cached markdown preview renderers
+	mdToggleX       int                 // left edge of Edit/Read toggle button
+	mdToggleW       int                 // width of the toggle button
 	themeMenuReady  bool                // true once native theme menu has been set up
 
 	tabBarHeight   int      // computed from display scale to match native titlebar
@@ -225,6 +245,7 @@ func run() {
 		darkMode:    cfg.DarkMode,
 		themeName:   cfg.Theme,
 		themeBundle: bundle,
+		fontCfg:     bundle.Fonts,
 	}
 
 	// Init tab state for first tab
@@ -332,10 +353,12 @@ func (st *appState) initRenderers(gtx layout.Context) {
 		return
 	}
 	st.shaper = text.NewShaper()
+	mono := st.fontCfg.Monospace
 	st.textRend = render.NewTextRenderer(st.shaper, render.TextStyle{
 		FontSize:   13,
 		LineHeight: 1.4,
 		Foreground: st.theme.Foreground,
+		Typeface:   mono,
 	})
 	st.textRend.ComputeMetrics(gtx)
 
@@ -352,6 +375,7 @@ func (st *appState) initRenderers(gtx layout.Context) {
 		FontSize:   11,
 		LineHeight: 1.4,
 		Foreground: st.theme.StatusFg,
+		Typeface:   mono,
 	})
 	st.statusRend.ComputeMetrics(gtx)
 
@@ -359,6 +383,7 @@ func (st *appState) initRenderers(gtx layout.Context) {
 		FontSize:   11,
 		LineHeight: 1.3,
 		Foreground: st.theme.Foreground,
+		Typeface:   mono,
 	})
 	st.tabRend.ComputeMetrics(gtx)
 
@@ -366,6 +391,7 @@ func (st *appState) initRenderers(gtx layout.Context) {
 		FontSize:   18,
 		LineHeight: 1.0,
 		Foreground: st.theme.Foreground,
+		Typeface:   mono,
 	})
 	st.plusRend.ComputeMetrics(gtx)
 
@@ -389,7 +415,8 @@ func (st *appState) initRenderers(gtx layout.Context) {
 func (st *appState) applyTheme(theme config.Theme) {
 	st.theme = theme
 	st.colorMap = render.TokenColorMap(theme)
-	st.shaper = nil // forces initRenderers to re-run next frame
+	st.shaper = nil  // forces initRenderers to re-run next frame
+	st.mdRend = nil  // rebuild markdown renderers with new theme
 	st.window.Invalidate()
 }
 
@@ -409,6 +436,7 @@ func (st *appState) selectThemeBundle(name string) {
 	}
 	st.themeName = name
 	st.themeBundle = bundle
+	st.fontCfg = bundle.Fonts
 	st.applyTheme(bundle.Theme(st.darkMode))
 	updateWindowBackground(st.theme.TabBarBg)
 	updateThemeMenuCheck(name)

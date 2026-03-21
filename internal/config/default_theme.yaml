@@ -1,5 +1,10 @@
+version: 2
 name: Default
 subtitle: The caffeinated editor
+fonts:
+  monospace: "Menlo, monospace"
+  heading: "Menlo, monospace"
+  body: "Menlo, monospace"
 
 dark:
   background: "#1e1e1e"
@@ -45,6 +50,8 @@ dark:
     find-bar-dim: "#8c8c8c"
     dropdown-bg: "#252526f5"
     dropdown-sel: "#04395e"
+    md-heading: "#dc6464"
+    md-accent: "#82aadc"
 
 light:
   background: "#ffffff"
@@ -90,3 +97,5 @@ light:
     find-bar-dim: "#787878"
     dropdown-bg: "#f2f2f2f5"
     dropdown-sel: "#007acc3c"
+    md-heading: "#a02828"
+    md-accent: "#1e4682"
