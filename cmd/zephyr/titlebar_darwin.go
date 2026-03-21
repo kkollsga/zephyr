@@ -248,8 +248,129 @@ void getWindowFrame(double *outX, double *outY, double *outW, double *outH) {
 	}
 	*outX = 0; *outY = 0; *outW = 0; *outH = 0;
 }
+
+// --- Theme menu support ---
+
+static char _selectedTheme[256] = {0};  // selected theme name (check-and-reset)
+static NSMenu *_themeSubmenu = nil;
+static NSString *_activeThemeName = nil;
+
+// Returns the selected theme name and resets it. Caller must free() the result.
+const char* checkAndResetSelectedTheme(void) {
+	if (_selectedTheme[0] == '\0') return NULL;
+	// Copy and reset
+	static char buf[256];
+	strncpy(buf, _selectedTheme, sizeof(buf)-1);
+	buf[sizeof(buf)-1] = '\0';
+	_selectedTheme[0] = '\0';
+	return buf;
+}
+
+@interface ZephyrThemeHandler : NSObject
+- (void)themeSelected:(NSMenuItem *)sender;
+@end
+
+@implementation ZephyrThemeHandler
+- (void)themeSelected:(NSMenuItem *)sender {
+	const char *name = [sender.title UTF8String];
+	strncpy(_selectedTheme, name, sizeof(_selectedTheme)-1);
+	_selectedTheme[sizeof(_selectedTheme)-1] = '\0';
+}
+@end
+
+static ZephyrThemeHandler *_themeHandler = nil;
+
+void setupThemeMenu(const char **themeNames, int count, const char *activeTheme) {
+	// Copy strings before dispatch_async — the caller frees them immediately.
+	NSMutableArray *names = [NSMutableArray arrayWithCapacity:count];
+	for (int i = 0; i < count; i++) {
+		[names addObject:[NSString stringWithUTF8String:themeNames[i]]];
+	}
+	NSString *active = [NSString stringWithUTF8String:activeTheme];
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (!_themeHandler) {
+			_themeHandler = [[ZephyrThemeHandler alloc] init];
+		}
+
+		_activeThemeName = active;
+
+		// Find or create the View menu
+		NSMenu *mainMenu = [NSApp mainMenu];
+		if (!mainMenu) {
+			mainMenu = [[NSMenu alloc] initWithTitle:@""];
+			[NSApp setMainMenu:mainMenu];
+		}
+
+		// Look for existing "View" menu
+		NSMenuItem *viewMenuItem = nil;
+		for (NSMenuItem *item in [mainMenu itemArray]) {
+			if ([item.title isEqualToString:@"View"]) {
+				viewMenuItem = item;
+				break;
+			}
+		}
+		if (!viewMenuItem) {
+			viewMenuItem = [[NSMenuItem alloc] initWithTitle:@"View" action:nil keyEquivalent:@""];
+			NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+			[viewMenuItem setSubmenu:viewMenu];
+			[mainMenu addItem:viewMenuItem];
+		}
+
+		NSMenu *viewMenu = [viewMenuItem submenu];
+
+		// Remove old Theme submenu if exists
+		NSInteger themeIdx = [viewMenu indexOfItemWithTitle:@"Theme"];
+		if (themeIdx >= 0) {
+			[viewMenu removeItemAtIndex:themeIdx];
+		}
+
+		// Create Theme submenu
+		_themeSubmenu = [[NSMenu alloc] initWithTitle:@"Theme"];
+		for (NSString *name in names) {
+			NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:name
+			                                             action:@selector(themeSelected:)
+			                                      keyEquivalent:@""];
+			[item setTarget:_themeHandler];
+			if ([name isEqualToString:_activeThemeName]) {
+				[item setState:NSControlStateValueOn];
+			}
+			[_themeSubmenu addItem:item];
+		}
+
+		NSMenuItem *themeItem = [[NSMenuItem alloc] initWithTitle:@"Theme" action:nil keyEquivalent:@""];
+		[themeItem setSubmenu:_themeSubmenu];
+		[viewMenu addItem:themeItem];
+	});
+}
+
+void updateThemeMenuSelection(const char *activeTheme) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (!_themeSubmenu) return;
+		NSString *active = [NSString stringWithUTF8String:activeTheme];
+		for (NSMenuItem *item in [_themeSubmenu itemArray]) {
+			[item setState:[item.title isEqualToString:active] ? NSControlStateValueOn : NSControlStateValueOff];
+		}
+	});
+}
+
+void setWindowBgColor(double r, double g, double b) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		for (NSWindow *window in [NSApp windows]) {
+			if ([window isVisible] && window.contentView) {
+				window.backgroundColor = [NSColor colorWithRed:r green:g blue:b alpha:1.0];
+				break;
+			}
+		}
+	});
+}
 */
 import "C"
+
+import (
+	"image/color"
+	"unsafe"
+)
 
 func setupTitlebar() {
 	C.registerTitlebarObserver()
@@ -307,3 +428,43 @@ func startWindowDrag() {
 // correctly across Retina (2×) and non-Retina (1×) displays.
 // The three buttons span ~54pt; we add a small margin.
 const trafficLightPaddingDp = 76
+
+// updateWindowBackground sets the native macOS window background color
+// to match the current theme's tab bar color.
+func updateWindowBackground(c color.NRGBA) {
+	C.setWindowBgColor(C.double(float64(c.R)/255.0), C.double(float64(c.G)/255.0), C.double(float64(c.B)/255.0))
+}
+
+// setupThemeMenu creates the View > Theme submenu in the macOS menu bar.
+func setupThemeMenu(themeNames []string, activeTheme string) {
+	if len(themeNames) == 0 {
+		return
+	}
+	cNames := make([]*C.char, len(themeNames))
+	for i, name := range themeNames {
+		cNames[i] = C.CString(name)
+	}
+	cActive := C.CString(activeTheme)
+	C.setupThemeMenu(&cNames[0], C.int(len(themeNames)), cActive)
+	for _, cn := range cNames {
+		C.free(unsafe.Pointer(cn))
+	}
+	C.free(unsafe.Pointer(cActive))
+}
+
+// checkThemeSelection returns the name of a theme the user selected from
+// the menu, or "" if none. Resets after reading.
+func checkThemeSelection() string {
+	cs := C.checkAndResetSelectedTheme()
+	if cs == nil {
+		return ""
+	}
+	return C.GoString(cs)
+}
+
+// updateThemeMenuCheck updates the checkmark in the Theme submenu.
+func updateThemeMenuCheck(activeTheme string) {
+	cs := C.CString(activeTheme)
+	C.updateThemeMenuSelection(cs)
+	C.free(unsafe.Pointer(cs))
+}

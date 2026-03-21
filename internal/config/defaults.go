@@ -1,6 +1,27 @@
 package config
 
-import "image/color"
+import (
+	_ "embed"
+	"image/color"
+)
+
+//go:embed default_theme.yaml
+var defaultThemeYAML []byte
+
+// DefaultBundle returns the built-in theme bundle parsed from the embedded YAML.
+// Falls back to hardcoded DarkTheme/LightTheme if parsing fails.
+func DefaultBundle() ThemeBundle {
+	bundle, err := LoadBundleFromYAML(defaultThemeYAML)
+	if err != nil {
+		return ThemeBundle{
+			Name:     "Default",
+			Subtitle: "The caffeinated editor",
+			Dark:     DarkTheme(),
+			Light:    LightTheme(),
+		}
+	}
+	return bundle
+}
 
 func nrgba(r, g, b, a uint8) color.NRGBA {
 	return color.NRGBA{R: r, G: g, B: b, A: a}

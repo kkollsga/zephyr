@@ -128,6 +128,16 @@ func (st *appState) handleTabBarPress(x, y int) {
 		return
 	}
 
+	// Check theme toggle icon (upper-right corner)
+	if st.lastMaxX > 0 {
+		toggleX := st.themeToggleX(st.lastMaxX)
+		_, hitW := st.themeToggleSize()
+		if x >= toggleX && x < toggleX+hitW {
+			st.toggleTheme()
+			return
+		}
+	}
+
 	// Click on empty tab bar space → close dropdown and start native window drag
 	st.overflowOpen = false
 	if y >= 0 && y < st.tabBarHeight {

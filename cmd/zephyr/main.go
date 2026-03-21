@@ -58,6 +58,10 @@ type appState struct {
 	scrollAccum     float32 // accumulated fractional scroll delta
 	window          *app.Window
 	lastWindowTitle string  // dedup title updates to avoid Configure() thrash
+	darkMode        bool   // true = dark theme, false = light theme
+	themeName       string              // active theme bundle name
+	themeBundle     config.ThemeBundle   // loaded theme bundle
+	themeMenuReady  bool                // true once native theme menu has been set up
 
 	tabBarHeight   int      // computed from display scale to match native titlebar
 	trafficLightPx int     // traffic light padding in pixels (scaled from Dp)
@@ -196,18 +200,31 @@ func run() {
 		tabBar.OpenEditor(ed, "Untitled")
 	}
 
-	theme := config.DarkTheme()
+	// Load config and theme bundle
+	config.EnsureDefaultThemes()
+	cfg := config.LoadConfig()
+
+	bundle, err := config.LoadBundleByName(cfg.Theme)
+	if err != nil {
+		bundle = config.DefaultBundle()
+		cfg.Theme = "default"
+	}
+	theme := bundle.Theme(cfg.DarkMode)
+
 	w := &app.Window{}
 
 	st := &appState{
-		tabBar:    tabBar,
-		tabStates: make(map[*editor.Editor]*tabState),
-		theme:     theme,
-		colorMap:  render.TokenColorMap(theme),
-		tag:       new(bool),
-		langSel:   ui.NewLanguageSelector(),
-		findBar:   ui.NewFindReplaceBar(),
-		window:    w,
+		tabBar:      tabBar,
+		tabStates:   make(map[*editor.Editor]*tabState),
+		theme:       theme,
+		colorMap:    render.TokenColorMap(theme),
+		tag:         new(bool),
+		langSel:     ui.NewLanguageSelector(),
+		findBar:     ui.NewFindReplaceBar(),
+		window:      w,
+		darkMode:    cfg.DarkMode,
+		themeName:   cfg.Theme,
+		themeBundle: bundle,
 	}
 
 	// Init tab state for first tab
@@ -246,6 +263,12 @@ func run() {
 			st.initRenderers(gtx)
 			setUnsavedFlag(st.hasUnsavedChanges())
 
+			// Defer theme menu setup until the titlebar/window is ready
+			if !st.themeMenuReady && titlebarReady() {
+				st.initThemeMenu()
+				st.themeMenuReady = true
+			}
+
 			// Check if graceful exit delay has elapsed
 			if st.exitPending && !time.Now().Before(st.exitDeadline) {
 				os.Exit(0)
@@ -253,6 +276,9 @@ func run() {
 
 			if closeRequested() && !st.quitInProgress && !st.exitPending {
 				st.startQuitFlow()
+			}
+			if sel := checkThemeSelection(); sel != "" && sel != st.themeName {
+				st.selectThemeBundle(sel)
 			}
 			if !st.exitPending {
 				st.handleEvents(gtx, w)
@@ -365,4 +391,47 @@ func (st *appState) applyTheme(theme config.Theme) {
 	st.colorMap = render.TokenColorMap(theme)
 	st.shaper = nil // forces initRenderers to re-run next frame
 	st.window.Invalidate()
+}
+
+// toggleTheme switches between dark and light mode within the current bundle.
+func (st *appState) toggleTheme() {
+	st.darkMode = !st.darkMode
+	st.applyTheme(st.themeBundle.Theme(st.darkMode))
+	updateWindowBackground(st.theme.TabBarBg)
+	st.persistThemeConfig()
+}
+
+// selectThemeBundle switches to a different theme bundle by name.
+func (st *appState) selectThemeBundle(name string) {
+	bundle, err := config.LoadBundleByName(name)
+	if err != nil {
+		return
+	}
+	st.themeName = name
+	st.themeBundle = bundle
+	st.applyTheme(bundle.Theme(st.darkMode))
+	updateWindowBackground(st.theme.TabBarBg)
+	updateThemeMenuCheck(name)
+	st.persistThemeConfig()
+}
+
+// initThemeMenu sets up the native macOS View > Theme menu.
+func (st *appState) initThemeMenu() {
+	metas := config.ListThemes()
+	names := make([]string, len(metas))
+	for i, m := range metas {
+		names[i] = m.Name
+	}
+	if len(names) == 0 {
+		names = []string{"default"}
+	}
+	setupThemeMenu(names, st.themeName)
+}
+
+// persistThemeConfig saves the current theme name and dark mode preference.
+func (st *appState) persistThemeConfig() {
+	cfg := config.LoadConfig()
+	cfg.Theme = st.themeName
+	cfg.DarkMode = st.darkMode
+	config.SaveConfig(cfg)
 }

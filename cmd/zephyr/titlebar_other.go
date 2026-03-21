@@ -2,6 +2,8 @@
 
 package main
 
+import "image/color"
+
 func setupTitlebar() {}
 
 func titlebarReady() bool { return true }
@@ -21,3 +23,11 @@ func globalMousePosition() (x, y float64) { return 0, 0 }
 func windowFrame() (x, y, w, h float64) { return 0, 0, 0, 0 }
 
 const trafficLightPaddingDp = 0
+
+func updateWindowBackground(c color.NRGBA) {}
+
+func setupThemeMenu(themeNames []string, activeTheme string) {}
+
+func checkThemeSelection() string { return "" }
+
+func updateThemeMenuCheck(activeTheme string) {}

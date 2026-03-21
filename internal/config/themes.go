@@ -22,7 +22,7 @@ func ThemeDir() string {
 	return filepath.Join(cfgDir, "zephyr", "themes")
 }
 
-// ListThemes scans the theme directory for .json files and returns metadata.
+// ListThemes scans the theme directory for .yaml files and returns metadata.
 func ListThemes() []ThemeMeta {
 	dir := ThemeDir()
 	entries, err := os.ReadDir(dir)
@@ -31,49 +31,49 @@ func ListThemes() []ThemeMeta {
 	}
 	var themes []ThemeMeta
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() {
 			continue
 		}
-		name := strings.TrimSuffix(e.Name(), ".json")
-		themes = append(themes, ThemeMeta{
-			Name: name,
-			Path: filepath.Join(dir, e.Name()),
-		})
+		name := e.Name()
+		if strings.HasSuffix(name, ".yaml") {
+			themes = append(themes, ThemeMeta{
+				Name: strings.TrimSuffix(name, ".yaml"),
+				Path: filepath.Join(dir, name),
+			})
+		} else if strings.HasSuffix(name, ".yml") {
+			themes = append(themes, ThemeMeta{
+				Name: strings.TrimSuffix(name, ".yml"),
+				Path: filepath.Join(dir, name),
+			})
+		}
 	}
 	return themes
 }
 
-// LoadThemeByName loads a theme by name from the theme directory.
+// LoadBundleByName loads a theme bundle by name from the theme directory.
+func LoadBundleByName(name string) (ThemeBundle, error) {
+	path := filepath.Join(ThemeDir(), name+".yaml")
+	return LoadBundleFromFile(path)
+}
+
+// LoadThemeByName loads a theme by name from the theme directory (legacy JSON).
 func LoadThemeByName(name string) (Theme, error) {
 	path := filepath.Join(ThemeDir(), name+".json")
 	return LoadThemeFromFile(path)
 }
 
-// EnsureDefaultThemes writes the built-in dark.json and light.json to the
-// theme directory if they don't already exist.
+// EnsureDefaultThemes writes the built-in default.yaml to the theme directory
+// if it doesn't already exist.
 func EnsureDefaultThemes() error {
 	dir := ThemeDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	defaults := map[string]Theme{
-		"dark":  DarkTheme(),
-		"light": LightTheme(),
+	path := filepath.Join(dir, "default.yaml")
+	if _, err := os.Stat(path); err == nil {
+		return nil // already exists
 	}
-	for name, theme := range defaults {
-		path := filepath.Join(dir, name+".json")
-		if _, err := os.Stat(path); err == nil {
-			continue // already exists
-		}
-		data, err := marshalThemeJSON(theme)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(path, data, 0644); err != nil {
-			return err
-		}
-	}
-	return nil
+	return os.WriteFile(path, defaultThemeYAML, 0644)
 }
 
 // marshalThemeJSON converts a Theme to its JSON representation.

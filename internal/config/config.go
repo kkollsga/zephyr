@@ -11,6 +11,7 @@ type Config struct {
 	FontSize   float64 `json:"fontSize"`
 	TabSize    int     `json:"tabSize"`
 	Theme      string  `json:"theme"`
+	DarkMode   bool    `json:"darkMode"`
 	LineHeight float64 `json:"lineHeight"`
 	WordWrap   bool    `json:"wordWrap"`
 }
@@ -20,7 +21,8 @@ func DefaultConfig() Config {
 	return Config{
 		FontSize:   14,
 		TabSize:    4,
-		Theme:      "dark",
+		Theme:      "default",
+		DarkMode:   true,
 		LineHeight: 1.5,
 		WordWrap:   false,
 	}

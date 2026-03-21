@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"time"
 	"unicode/utf8"
 
@@ -379,13 +380,19 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 	if titleX+titleW < gtx.Constraints.Max.X-20 {
 		tr.RenderGlyphs(gtx.Ops, gtx, titleText, titleX, textY, st.theme.TitleFg)
 
-		subtitleText := "The caffeinated editor"
+		subtitleText := st.themeBundle.Subtitle
+		if subtitleText == "" {
+			subtitleText = "The caffeinated editor"
+		}
 		subtitleX := titleX + titleW + tr.CharWidth
 		subtitleW := len(subtitleText) * tr.CharWidth
 		if subtitleX+subtitleW < gtx.Constraints.Max.X-20 {
 			tr.RenderGlyphs(gtx.Ops, gtx, subtitleText, subtitleX, textY, st.theme.SubtitleFg)
 		}
 	}
+
+	// Theme toggle icon (sun/moon) in upper right
+	st.drawThemeToggle(gtx, inTabBar)
 
 	// Bottom border
 	tabBorderRect := clip.Rect{
@@ -1271,4 +1278,135 @@ func (st *appState) drawStatusLine(gtx layout.Context) {
 	} else if st.notification != "" {
 		st.notification = ""
 	}
+}
+
+// themeToggleSize returns the icon radius and hit-area width for the theme toggle.
+func (st *appState) themeToggleSize() (radius, hitW int) {
+	radius = st.tabBarHeight / 5
+	if radius < 5 {
+		radius = 5
+	}
+	hitW = st.tabBarHeight // square hit area
+	return
+}
+
+// themeToggleX returns the left edge X of the theme toggle hit area.
+func (st *appState) themeToggleX(maxX int) int {
+	_, hitW := st.themeToggleSize()
+	return maxX - hitW
+}
+
+// drawThemeToggle draws a subtle sun or moon icon in the upper-right corner of the tab bar.
+func (st *appState) drawThemeToggle(gtx layout.Context, inTabBar bool) {
+	r, hitW := st.themeToggleSize()
+	toggleX := st.themeToggleX(gtx.Constraints.Max.X)
+	cx := toggleX + hitW/2
+	cy := st.tabBarHeight / 2
+
+	// Hover detection
+	hovered := inTabBar && st.hoverX >= toggleX && st.hoverX < toggleX+hitW
+
+	// Use a subtle, dim color; brighten on hover
+	fg := st.theme.TabDimFg
+	if hovered {
+		fg = st.theme.Foreground
+	}
+
+	if st.darkMode {
+		// Draw sun icon: circle + rays
+		st.drawSunIcon(gtx, cx, cy, r, fg)
+	} else {
+		// Draw moon icon: crescent
+		st.drawMoonIcon(gtx, cx, cy, r, fg)
+	}
+}
+
+// drawSunIcon draws a simple sun: a filled circle with small ray lines around it.
+func (st *appState) drawSunIcon(gtx layout.Context, cx, cy, r int, fg color.NRGBA) {
+	// Center circle (60% of radius)
+	cr := r * 6 / 10
+	if cr < 3 {
+		cr = 3
+	}
+	sunCircle := clip.Ellipse{
+		Min: image.Pt(cx-cr, cy-cr),
+		Max: image.Pt(cx+cr, cy+cr),
+	}.Push(gtx.Ops)
+	paint.ColorOp{Color: fg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	sunCircle.Pop()
+
+	// Rays: 8 small rectangles around the circle
+	rayLen := r * 4 / 10
+	if rayLen < 2 {
+		rayLen = 2
+	}
+	rayW := 1
+	if r > 8 {
+		rayW = 2
+	}
+	innerR := cr + 2
+	for i := 0; i < 8; i++ {
+		angle := float64(i) * math.Pi / 4
+		cos := math.Cos(angle)
+		sin := math.Sin(angle)
+		x1 := cx + int(float64(innerR)*cos)
+		y1 := cy + int(float64(innerR)*sin)
+		x2 := cx + int(float64(innerR+rayLen)*cos)
+		y2 := cy + int(float64(innerR+rayLen)*sin)
+
+		// Draw ray as a small filled rect rotated to the angle
+		// Use a simple 1-2px rect between the two points
+		minX := x1
+		maxX := x2
+		if minX > maxX {
+			minX, maxX = maxX, minX
+		}
+		minY := y1
+		maxY := y2
+		if minY > maxY {
+			minY, maxY = maxY, minY
+		}
+		// Ensure minimum size
+		if maxX-minX < rayW {
+			maxX = minX + rayW
+		}
+		if maxY-minY < rayW {
+			maxY = minY + rayW
+		}
+		rayRect := clip.Rect{
+			Min: image.Pt(minX, minY),
+			Max: image.Pt(maxX, maxY),
+		}.Push(gtx.Ops)
+		paint.ColorOp{Color: fg}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		rayRect.Pop()
+	}
+}
+
+// drawMoonIcon draws a crescent moon using two overlapping circles.
+func (st *appState) drawMoonIcon(gtx layout.Context, cx, cy, r int, fg color.NRGBA) {
+	// We approximate a crescent by drawing the main moon circle,
+	// then "erasing" with a background-colored circle offset to the upper-right.
+
+	// Moon circle
+	moonCircle := clip.Ellipse{
+		Min: image.Pt(cx-r, cy-r),
+		Max: image.Pt(cx+r, cy+r),
+	}.Push(gtx.Ops)
+	paint.ColorOp{Color: fg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	moonCircle.Pop()
+
+	// Cutout circle (offset to upper-right, slightly smaller)
+	cutR := r * 8 / 10
+	offX := r * 5 / 10
+	offY := -r * 3 / 10
+	cutCircle := clip.Ellipse{
+		Min: image.Pt(cx+offX-cutR, cy+offY-cutR),
+		Max: image.Pt(cx+offX+cutR, cy+offY+cutR),
+	}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabBarBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	cutCircle.Pop()
 }
