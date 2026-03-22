@@ -36,6 +36,55 @@ func (gr *GutterRenderer) Width(maxLineNum int) int {
 	return (digits + 2) * gr.CharWidth
 }
 
+// EstimateWidth returns the expected gutter width for the given line count.
+func (gr *GutterRenderer) EstimateWidth(totalLines int) int {
+	return gr.Width(totalLines)
+}
+
+// RenderLineNumber draws a single line number at the given Y position.
+func (gr *GutterRenderer) RenderLineNumber(gtx layout.Context, ops *op.Ops, lineNum, totalLines, y int) {
+	width := gr.Width(totalLines)
+	maxDigits := len(fmt.Sprintf("%d", totalLines))
+	numStr := fmt.Sprintf("%*d", maxDigits, lineNum)
+	xOffset := width - (len(numStr)+1)*gr.CharWidth
+
+	params := text.Parameters{
+		Font:     font.Font{Typeface: "Menlo, monospace"},
+		PxPerEm:  spToFixed(gtx.Metric, gr.FontSize),
+		MaxWidth: 1 << 30,
+	}
+
+	gr.Shaper.LayoutString(params, numStr)
+	var glyphs []text.Glyph
+	var lineX fixed.Int26_6
+	var lineY int32
+	first := true
+	for g, ok := gr.Shaper.NextGlyph(); ok; g, ok = gr.Shaper.NextGlyph() {
+		if first {
+			lineX = g.X
+			lineY = g.Y
+			first = false
+		}
+		glyphs = append(glyphs, g)
+	}
+	if len(glyphs) == 0 {
+		return
+	}
+
+	lineOff := f32.Point{
+		X: float32(xOffset) + fixedToFloat(lineX),
+		Y: float32(y) + float32(lineY),
+	}
+
+	aff := op.Affine(f32.Affine2D{}.Offset(lineOff)).Push(ops)
+	pathSpec := gr.Shaper.Shape(glyphs)
+	cl := clip.Outline{Path: pathSpec}.Op().Push(ops)
+	paint.ColorOp{Color: gr.FgColor}.Add(ops)
+	paint.PaintOp{}.Add(ops)
+	cl.Pop()
+	aff.Pop()
+}
+
 // RenderGutter draws line numbers for visible lines.
 // extraOffsets: [0] = topPad (vertical padding), [1] = pixelOffset (sub-line scroll).
 func (gr *GutterRenderer) RenderGutter(gtx layout.Context, ops *op.Ops, firstLine, lastLine, totalLines int, extraOffsets ...int) int {

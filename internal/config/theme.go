@@ -49,6 +49,9 @@ type Theme struct {
 	TabCloseBtn    color.NRGBA
 	TabCloseHover  color.NRGBA
 	TabPlusHover   color.NRGBA
+	TabAccent      color.NRGBA // accent line at top of active tab
+	TabBarGradTop  color.NRGBA // tab bar gradient top color
+	TabBarGradBot  color.NRGBA // tab bar gradient bottom color
 	TitleFg        color.NRGBA
 	SubtitleFg     color.NRGBA
 	StatusBorder   color.NRGBA
@@ -161,6 +164,9 @@ func LoadThemeFromJSON(data []byte) (Theme, error) {
 		"tabCloseBtn":    &t.TabCloseBtn,
 		"tabCloseHover":  &t.TabCloseHover,
 		"tabPlusHover":   &t.TabPlusHover,
+		"tabAccent":      &t.TabAccent,
+		"tabBarGradTop":  &t.TabBarGradTop,
+		"tabBarGradBot":  &t.TabBarGradBot,
 		"titleFg":        &t.TitleFg,
 		"subtitleFg":     &t.SubtitleFg,
 		"statusBorder":   &t.StatusBorder,
@@ -179,6 +185,17 @@ func LoadThemeFromJSON(data []byte) (Theme, error) {
 		if c, ok := tj.UI[key]; ok {
 			*ptr = parseColor(c)
 		}
+	}
+
+	// Fallback for new fields not present in older theme files
+	if t.TabAccent.A == 0 {
+		t.TabAccent = color.NRGBA{R: 0x4e, G: 0xc9, B: 0xb0, A: 255}
+	}
+	if t.TabBarGradTop.A == 0 {
+		t.TabBarGradTop = t.TabBarBg
+	}
+	if t.TabBarGradBot.A == 0 {
+		t.TabBarGradBot = t.TabBarBg
 	}
 
 	return t, nil

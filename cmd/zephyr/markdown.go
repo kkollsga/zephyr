@@ -208,8 +208,9 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 	if charW == 0 {
 		charW = 8
 	}
-	editorX := charW * 2 // left margin
-	maxW := gtx.Constraints.Max.X - editorX - charW*2
+	editorX := charW * 5 // left margin — generous for readability
+	rightMargin := charW * 5
+	maxW := gtx.Constraints.Max.X - editorX - rightMargin
 	if maxW < charW {
 		maxW = charW
 	}
@@ -222,22 +223,27 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 	for _, block := range ts.mdDoc.Blocks {
 		var blockH int
 
-		// Top spacing based on blank lines in source and block type
+		// Top spacing — tuned to match the SVG mockup's tighter layout.
 		bodyH := mr.body.LineHeightPx
 		blanks := block.BlankLinesBefore
 		switch {
 		case prevKind < 0:
-			// first block
+			// first block — small top margin
 			if block.Kind == render.BlockHeading {
-				y += bodyH / 2
+				y += bodyH / 3
 			}
 		case block.Kind == render.BlockHeading:
-			y += bodyH * 3 / 4
+			// Large gap above headings to clearly separate sections
+			y += bodyH * 2
 		case block.Kind == render.BlockListItem && prevKind == render.BlockListItem && blanks == 0:
-			// tight list items: no extra gap
+			// Tight list items
+			y += bodyH / 4
+		case block.Kind == render.BlockCodeBlock:
+			y += bodyH * 3 / 4
+		case prevKind == render.BlockCodeBlock:
+			y += bodyH * 3 / 4
 		case blanks >= 2:
-			// 2+ blank lines: scale proportionally (1 blank=1x, 2 blanks=1.5x, etc.)
-			y += bodyH/2 + (blanks-1)*bodyH/2
+			y += bodyH + (blanks-1)*bodyH/3
 		case blanks == 1:
 			y += bodyH / 2
 		default:
@@ -251,18 +257,38 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 			lines := splitAndWrap(text, maxW, hr.CharWidth)
 			blockH = len(lines) * hr.LineHeightPx
 
+			// Add separator line below H1/H2 — tight below, space comes from next block's margin
+			sepH := 0
+			if block.Level <= 2 {
+				sepH = bodyH / 3
+				blockH += sepH
+			}
+
 			if y+blockH > 0 && y < editorH {
 				for i, line := range lines {
 					hr.RenderGlyphs(gtx.Ops, gtx, line, editorX, y+i*hr.LineHeightPx, theme.MdHeading)
 				}
+				// Horizontal rule under H1/H2
+				if block.Level <= 2 {
+					lineY := y + blockH - sepH/3
+					lineRect := clip.Rect{
+						Min: image.Pt(editorX, lineY),
+						Max: image.Pt(editorX+maxW, lineY+1),
+					}.Push(gtx.Ops)
+					paint.ColorOp{Color: theme.GutterSep}.Add(gtx.Ops)
+					paint.PaintOp{}.Add(gtx.Ops)
+					lineRect.Pop()
+				}
 			}
 
 		case render.BlockParagraph:
+			// Estimate height for scroll (approximate with plain text wrapping)
 			lines := splitAndWrap(spansToPlain(block.Spans), maxW, mr.body.CharWidth)
 			blockH = len(lines) * mr.body.LineHeightPx
 
 			if y+blockH > 0 && y < editorH {
-				st.renderStyledLines(gtx, mr, block.Spans, lines, editorX, y, theme)
+				// Render with pixel-precise positioning; update blockH with actual height
+				blockH = st.renderStyledParagraph(gtx, mr, block.Spans, maxW, editorX, y, theme)
 			}
 
 		case render.BlockCodeBlock:
@@ -272,24 +298,13 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 				codeCharW = 8
 			}
 
-			// Compute code block width: fit content, clamp to [minW, maxW]
-			minCodeW := maxW / 3
-			maxCodeW := maxW
-			codeContentW := padding * 2
+			// Header row height for language label + copy button
+			headerH := mr.code.LineHeightPx + padding
+			hasHeader := block.CodeLang != ""
+
+			// Code blocks span the full content width
 			rawLines := strings.Split(block.CodeText, "\n")
-			for _, l := range rawLines {
-				lw := len(l)*codeCharW + padding*2
-				if lw > codeContentW {
-					codeContentW = lw
-				}
-			}
-			codeBoxW := codeContentW
-			if codeBoxW < minCodeW {
-				codeBoxW = minCodeW
-			}
-			if codeBoxW > maxCodeW {
-				codeBoxW = maxCodeW
-			}
+			codeBoxW := maxW
 
 			// Wrap lines that exceed the box
 			wrapCols := (codeBoxW - padding*2) / codeCharW
@@ -311,90 +326,121 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 				}
 			}
 
-			blockH = len(codeLines)*mr.code.LineHeightPx + padding*2
+			codeAreaH := len(codeLines)*mr.code.LineHeightPx + padding*2
+			if hasHeader {
+				blockH = headerH + codeAreaH
+			} else {
+				blockH = codeAreaH
+			}
 
 			if y+blockH > 0 && y < editorH {
-				// Background
 				bgColor := shiftColor(theme.Background, 15)
+				headerBg := shiftColor(theme.Background, 25)
+
+				// Full block background with rounded corners
 				bgOff := op.Offset(image.Pt(editorX, y)).Push(gtx.Ops)
 				bgRect := clip.UniformRRect(image.Rectangle{
 					Max: image.Pt(codeBoxW, blockH),
-				}, 4).Push(gtx.Ops)
+				}, 6).Push(gtx.Ops)
 				paint.ColorOp{Color: bgColor}.Add(gtx.Ops)
 				paint.PaintOp{}.Add(gtx.Ops)
 				bgRect.Pop()
 				bgOff.Pop()
 
-				// Code text (use syntax token colors for visual distinction)
+				if hasHeader {
+					// Header row background (top portion, clipped to rounded top)
+					hdrOff := op.Offset(image.Pt(editorX, y)).Push(gtx.Ops)
+					hdrClip := clip.UniformRRect(image.Rectangle{
+						Max: image.Pt(codeBoxW, headerH),
+					}, 6).Push(gtx.Ops)
+					paint.ColorOp{Color: headerBg}.Add(gtx.Ops)
+					paint.PaintOp{}.Add(gtx.Ops)
+					hdrClip.Pop()
+					hdrOff.Pop()
+					// Fill the bottom of the header (below the rounded corners)
+					hdrBotOff := op.Offset(image.Pt(editorX, y+6)).Push(gtx.Ops)
+					hdrBotRect := clip.Rect{Max: image.Pt(codeBoxW, headerH-6)}.Push(gtx.Ops)
+					paint.ColorOp{Color: headerBg}.Add(gtx.Ops)
+					paint.PaintOp{}.Add(gtx.Ops)
+					hdrBotRect.Pop()
+					hdrBotOff.Pop()
+
+					// Language label in header
+					langY := y + (headerH-mr.code.LineHeightPx)/2
+					mr.code.RenderGlyphs(gtx.Ops, gtx, block.CodeLang, editorX+padding, langY, theme.StatusFg)
+				}
+
+				// Subtle "Copy" text — in header row if present, else top-right of code area
+				{
+					copyText := "Copy"
+					copyTextW := len(copyText) * mr.code.CharWidth
+					copyPadX := 8
+					copyPadY := 3
+					copyBtnW := copyTextW + copyPadX*2
+					copyBtnH := mr.code.LineHeightPx + copyPadY*2
+					copyBtnX := editorX + codeBoxW - copyBtnW - padding
+					copyBtnY := y + padding/2
+					if hasHeader {
+						copyBtnY = y + (headerH-copyBtnH)/2
+					}
+					copyBg := bgColor
+					if hasHeader {
+						copyBg = headerBg
+					}
+
+					copyHovered := st.hoverX >= copyBtnX && st.hoverX < copyBtnX+copyBtnW &&
+						st.hoverY-st.tabBarHeight >= copyBtnY && st.hoverY-st.tabBarHeight < copyBtnY+copyBtnH
+
+					pillFg := theme.TabDimFg
+					if copyHovered {
+						pillBg := shiftColor(copyBg, 20)
+						pillOff := op.Offset(image.Pt(copyBtnX, copyBtnY)).Push(gtx.Ops)
+						pillRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(copyBtnW, copyBtnH)}, 3).Push(gtx.Ops)
+						paint.ColorOp{Color: pillBg}.Add(gtx.Ops)
+						paint.PaintOp{}.Add(gtx.Ops)
+						pillRect.Pop()
+						pillOff.Pop()
+						pillFg = theme.Foreground
+					}
+
+					mr.code.RenderGlyphs(gtx.Ops, gtx, copyText, copyBtnX+copyPadX, copyBtnY+copyPadY, pillFg)
+
+					ts.mdCopyBtns = append(ts.mdCopyBtns, codeCopyBtn{
+						x: copyBtnX, y: copyBtnY + st.tabBarHeight, w: copyBtnW, h: copyBtnH,
+						code: block.CodeText,
+					})
+				}
+
+				// Code text — offset below header if present, with basic syntax coloring
+				codeStartY := y
+				if hasHeader {
+					codeStartY = y + headerH
+				}
 				for i, line := range codeLines {
-					mr.code.RenderGlyphs(gtx.Ops, gtx, line, editorX+padding, y+padding+i*mr.code.LineHeightPx, theme.Foreground)
+					lineColor := codeLineColor(line, block.CodeLang, theme)
+					mr.code.RenderGlyphs(gtx.Ops, gtx, line, editorX+padding, codeStartY+padding+i*mr.code.LineHeightPx, lineColor)
 				}
-
-				// Language label (top-left, subtle)
-				if block.CodeLang != "" {
-					mr.code.RenderGlyphs(gtx.Ops, gtx, block.CodeLang, editorX+padding, y+2, theme.TabDimFg)
-				}
-
-				// Copy icon (upper-right corner of code block)
-				s := mr.code.LineHeightPx * 2 / 5 // small icon
-				if s < 6 {
-					s = 6
-				}
-				copyW := s*2 + 4
-				copyH := s*2 + 4
-				copyX := editorX + codeBoxW - copyW - 6
-				copyY := y + 6
-
-				copyHovered := st.hoverX >= copyX && st.hoverX < copyX+copyW &&
-					st.hoverY-st.tabBarHeight >= copyY && st.hoverY-st.tabBarHeight < copyY+copyH
-
-				iconColor := theme.TabDimFg
-				if copyHovered {
-					iconColor = theme.MdAccent
-				}
-
-				// Draw clipboard icon: two overlapping small rects
-				ix := copyX + (copyW-s)/2
-				iy := copyY + (copyH-s)/2
-				iconOff := s / 3
-
-				// Back rect (offset up-left)
-				drawRoundedBorder(gtx.Ops, ix-iconOff, iy-iconOff, s, s, 1, iconColor)
-				// Front rect (filled with code bg to occlude back)
-				fillOff := op.Offset(image.Pt(ix, iy)).Push(gtx.Ops)
-				fillRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(s, s)}, 1).Push(gtx.Ops)
-				paint.ColorOp{Color: bgColor}.Add(gtx.Ops)
-				paint.PaintOp{}.Add(gtx.Ops)
-				fillRect.Pop()
-				fillOff.Pop()
-				// Front rect border
-				drawRoundedBorder(gtx.Ops, ix, iy, s, s, 1, iconColor)
-
-				// Register hit area
-				ts.mdCopyBtns = append(ts.mdCopyBtns, codeCopyBtn{
-					x: copyX, y: copyY + st.tabBarHeight, w: copyW, h: copyH,
-					code: block.CodeText,
-				})
 			}
 
 		case render.BlockBlockquote:
-			// Render children as paragraph text with a left bar
+			// Render children as italic text with a colored left bar
 			childText := blocksToPlain(block.Children)
-			lines := splitAndWrap(childText, maxW-24, mr.body.CharWidth)
-			blockH = len(lines) * mr.body.LineHeightPx
+			lines := splitAndWrap(childText, maxW-24, mr.ital.CharWidth)
+			blockH = len(lines) * mr.ital.LineHeightPx
 
 			if y+blockH > 0 && y < editorH {
-				// Left bar
+				// Left bar (4px wide, accent color)
 				barRect := clip.Rect{
 					Min: image.Pt(editorX, y),
-					Max: image.Pt(editorX+3, y+blockH),
+					Max: image.Pt(editorX+4, y+blockH),
 				}.Push(gtx.Ops)
 				paint.ColorOp{Color: theme.MdHeading}.Add(gtx.Ops)
 				paint.PaintOp{}.Add(gtx.Ops)
 				barRect.Pop()
 
+				// Italic text in subdued color
 				for i, line := range lines {
-					mr.body.RenderGlyphs(gtx.Ops, gtx, line, editorX+20, y+i*mr.body.LineHeightPx, theme.MdHeading)
+					mr.ital.RenderGlyphs(gtx.Ops, gtx, line, editorX+20, y+i*mr.ital.LineHeightPx, theme.StatusFg)
 				}
 			}
 
@@ -431,18 +477,12 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 			if y+blockH > 0 && y < editorH {
 				textX := editorX + indent
 
-				// Render bullet marker first for list-style checkboxes (- [ ])
-				if hasCheckbox && block.Marker != "" {
-					listRend.RenderGlyphs(gtx.Ops, gtx, block.Marker, textX, y, theme.MdAccent)
-					textX += (len(block.Marker) + 1) * listRend.CharWidth
-				}
-
 				if hasCheckbox {
 					lh := listRend.LineHeightPx
-					// Small thin box, vertically centered
-					boxSize := lh * 1 / 2
-					if boxSize < 8 {
-						boxSize = 8
+					// Checkbox box size — slightly larger for visual weight
+					boxSize := lh * 3 / 5
+					if boxSize < 10 {
+						boxSize = 10
 					}
 					hitSize := lh            // larger hit target
 					cbX := textX + (hitSize-boxSize)/2  // center box in hit area
@@ -454,44 +494,48 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 						hoverY >= y && hoverY < y+lh
 
 					if checkboxChecked {
-						checkColor := color.NRGBA{R: 60, G: 180, B: 80, A: 255} // green
-						borderColor := theme.TabDimFg
+						// Filled teal box with white checkmark
+						fillColor := theme.Type // teal (#4ec9b0 dark / #267f99 light)
 						if cbHovered {
-							checkColor = theme.MdAccent
-							borderColor = theme.MdAccent
+							fillColor = theme.MdAccent
 						}
-						// Thin 1px border in check color
+						// Filled rounded rect
 						off := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
 						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize, boxSize)}, 3).Push(gtx.Ops)
-						paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
+						paint.ColorOp{Color: fillColor}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
 						r.Pop()
 						off.Pop()
-						inOff := op.Offset(image.Pt(cbX+1, cbY+1)).Push(gtx.Ops)
-						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize-2, boxSize-2)}, 2).Push(gtx.Ops)
-						paint.ColorOp{Color: theme.Background}.Add(gtx.Ops)
-						paint.PaintOp{}.Add(gtx.Ops)
-						inR.Pop()
-						inOff.Pop()
-						// Bold checkmark — h4 bold for larger glyph
-						cr := mr.h4
-						glyphX := cbX + (boxSize-cr.CharWidth)/2 + cr.CharWidth/8
-						glyphY := cbY + (boxSize-cr.LineHeightPx)/2 - 1
-						cr.RenderGlyphs(gtx.Ops, gtx, "✓", glyphX, glyphY, checkColor)
+						// White checkmark — draw two lines forming a centered check
+						checkColor := theme.Background
+						sw := max(boxSize/6, 2) // stroke width
+						// Checkmark centered in box:
+						// Bottom of check at ~65% height, top-left at ~45%, top-right at ~25%
+						// Horizontal: left start ~20%, bottom ~40%, right end ~80%
+						cx := cbX
+						cy := cbY
+						x1, y1 := cx+boxSize*20/100, cy+boxSize*50/100  // left start
+						x2, y2 := cx+boxSize*40/100, cy+boxSize*72/100  // bottom vertex
+						x3, y3 := cx+boxSize*80/100, cy+boxSize*28/100  // right end
+						drawThickLine(gtx.Ops, x1, y1, x2, y2, sw, checkColor)
+						drawThickLine(gtx.Ops, x2, y2, x3, y3, sw, checkColor)
 					} else {
+						// Empty bordered box
 						borderColor := theme.TabDimFg
 						if cbHovered {
 							borderColor = theme.MdAccent
 						}
-						// Thin 1px border
+						bw := max(boxSize/8, 1) // border width
+						// Outer rect
 						off := op.Offset(image.Pt(cbX, cbY)).Push(gtx.Ops)
 						r := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize, boxSize)}, 3).Push(gtx.Ops)
 						paint.ColorOp{Color: borderColor}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
 						r.Pop()
 						off.Pop()
-						inOff := op.Offset(image.Pt(cbX+1, cbY+1)).Push(gtx.Ops)
-						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize-2, boxSize-2)}, 2).Push(gtx.Ops)
+						// Inner rect (cut out to make border)
+						inOff := op.Offset(image.Pt(cbX+bw, cbY+bw)).Push(gtx.Ops)
+						inR := clip.UniformRRect(image.Rectangle{Max: image.Pt(boxSize-bw*2, boxSize-bw*2)}, 2).Push(gtx.Ops)
 						paint.ColorOp{Color: theme.Background}.Add(gtx.Ops)
 						paint.PaintOp{}.Add(gtx.Ops)
 						inR.Pop()
@@ -725,16 +769,16 @@ func wrapText(text string, maxW, charW int) []string {
 	return lines
 }
 
-// renderStyledLines renders paragraph lines using per-span bold/italic renderers.
-func (st *appState) renderStyledLines(gtx layout.Context, mr *mdRenderers, spans []render.InlineSpan, lines []string, x, y int, theme config.Theme) {
-	if len(lines) == 0 || mr.body.CharWidth == 0 {
-		return
+// renderStyledParagraph renders paragraph spans with pixel-based positioning
+// and word-level wrapping. Returns the total height in pixels.
+func (st *appState) renderStyledParagraph(gtx layout.Context, mr *mdRenderers, spans []render.InlineSpan, maxPixelW, x, y int, theme config.Theme) int {
+	if mr.body.CharWidth == 0 {
+		return mr.body.LineHeightPx
 	}
 
-	charW := mr.body.CharWidth
-	lineIdx := 0
-	lineCol := 0
+	pixelX := 0 // current X offset from x
 	lineY := y
+	lineH := mr.body.LineHeightPx
 
 	for _, span := range spans {
 		text := span.Text
@@ -758,55 +802,53 @@ func (st *appState) renderStyledLines(gtx layout.Context, mr *mdRenderers, spans
 		}
 
 		for len(text) > 0 {
-			if lineIdx >= len(lines) {
-				return
-			}
-
-			// Handle newlines first
-			nlIdx := strings.IndexByte(text, '\n')
-			if nlIdx == 0 {
-				lineCol = 0
-				lineIdx++
-				lineY += mr.body.LineHeightPx
+			// Handle leading newline
+			if text[0] == '\n' {
+				pixelX = 0
+				lineY += lineH
 				text = text[1:]
 				continue
 			}
 
-			// Determine chunk to render on current line
-			line := lines[lineIdx]
-			remaining := len(line) - lineCol
-			if remaining <= 0 {
-				// Advance to next line
-				lineCol = 0
-				lineIdx++
-				lineY += mr.body.LineHeightPx
-				continue
+			// Find next newline to scope this segment
+			nlIdx := strings.IndexByte(text, '\n')
+			segment := text
+			if nlIdx >= 0 {
+				segment = text[:nlIdx]
 			}
 
-			chunk := text
-			if nlIdx >= 0 && nlIdx < len(chunk) {
-				chunk = chunk[:nlIdx]
-			}
-			if len(chunk) > remaining {
-				chunk = chunk[:remaining]
+			// Word-wrap within this segment
+			for len(segment) > 0 {
+				// Find next word (including trailing space)
+				spIdx := strings.IndexByte(segment, ' ')
+				word := segment
+				if spIdx >= 0 {
+					word = segment[:spIdx+1]
+				}
+
+				wordW := r.MeasureString(gtx, word)
+
+				// Wrap to next line if this word overflows
+				if pixelX > 0 && pixelX+wordW > maxPixelW {
+					pixelX = 0
+					lineY += lineH
+				}
+
+				r.RenderGlyphs(gtx.Ops, gtx, word, x+pixelX, lineY, fg)
+				pixelX += wordW
+
+				segment = segment[len(word):]
 			}
 
-			if len(chunk) > 0 {
-				px := x + lineCol*charW
-				r.RenderGlyphs(gtx.Ops, gtx, chunk, px, lineY, fg)
-				lineCol += len(chunk)
-			}
-
-			text = text[len(chunk):]
-
-			// Advance line if full
-			if lineCol >= len(line) && lineIdx < len(lines)-1 {
-				lineCol = 0
-				lineIdx++
-				lineY += mr.body.LineHeightPx
+			if nlIdx >= 0 {
+				text = text[nlIdx:] // let the loop handle the '\n'
+			} else {
+				text = ""
 			}
 		}
 	}
+
+	return lineY - y + lineH
 }
 
 // shiftColor brightens or darkens a color by delta.
@@ -829,6 +871,73 @@ func shiftColor(c color.NRGBA, delta uint8) color.NRGBA {
 		return color.NRGBA{R: add(c.R, delta), G: add(c.G, delta), B: add(c.B, delta), A: c.A}
 	}
 	return color.NRGBA{R: sub(c.R, delta), G: sub(c.G, delta), B: sub(c.B, delta), A: c.A}
+}
+
+// drawThickLine draws a thick line between two points using a filled rectangle.
+// For diagonal lines, it uses a simple approximation with horizontal segments.
+func drawThickLine(ops *op.Ops, x1, y1, x2, y2, thickness int, c color.NRGBA) {
+	if y1 == y2 {
+		// Horizontal line
+		minX, maxX := x1, x2
+		if x1 > x2 {
+			minX, maxX = x2, x1
+		}
+		r := clip.Rect{Min: image.Pt(minX, y1-thickness/2), Max: image.Pt(maxX, y1-thickness/2+thickness)}.Push(ops)
+		paint.ColorOp{Color: c}.Add(ops)
+		paint.PaintOp{}.Add(ops)
+		r.Pop()
+		return
+	}
+	// Diagonal: step through y values and draw horizontal segments
+	dy := y2 - y1
+	dx := x2 - x1
+	steps := dy
+	if steps < 0 {
+		steps = -steps
+	}
+	if steps == 0 {
+		steps = 1
+	}
+	for i := 0; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		cx := x1 + int(t*float64(dx))
+		cy := y1 + int(t*float64(dy))
+		r := clip.Rect{
+			Min: image.Pt(cx-thickness/2, cy),
+			Max: image.Pt(cx-thickness/2+thickness, cy+1),
+		}.Push(ops)
+		paint.ColorOp{Color: c}.Add(ops)
+		paint.PaintOp{}.Add(ops)
+		r.Pop()
+	}
+}
+
+// codeLineColor returns the syntax color for a line of code in a fenced code block.
+// Provides basic highlighting for comments and strings.
+func codeLineColor(line, lang string, theme config.Theme) color.NRGBA {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return theme.Foreground
+	}
+	// Comment patterns by language family
+	switch {
+	case strings.HasPrefix(trimmed, "//"):
+		return theme.Comment
+	case strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "#!"):
+		// Shell, Python, Ruby, YAML, etc.
+		return theme.Comment
+	case strings.HasPrefix(trimmed, "--"):
+		// SQL, Lua, Haskell
+		return theme.Comment
+	case strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, " *") || strings.HasPrefix(trimmed, "*/"):
+		return theme.Comment
+	case strings.HasPrefix(trimmed, ";"):
+		// Assembly, INI comments
+		if lang == "asm" || lang == "ini" || lang == "toml" {
+			return theme.Comment
+		}
+	}
+	return theme.Foreground
 }
 
 // drawRoundedBorder draws a 1px border of a rounded rectangle using 4 edge rects.

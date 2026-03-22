@@ -249,6 +249,82 @@ void getWindowFrame(double *outX, double *outY, double *outW, double *outH) {
 	*outX = 0; *outY = 0; *outW = 0; *outH = 0;
 }
 
+// --- Word Wrap menu support ---
+
+static volatile bool _wordWrapToggled = false;
+static NSMenuItem *_wordWrapItem = nil;
+
+bool checkAndResetWordWrapToggled(void) {
+	if (_wordWrapToggled) {
+		_wordWrapToggled = false;
+		return true;
+	}
+	return false;
+}
+
+void updateWordWrapCheck(bool checked) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (_wordWrapItem) {
+			[_wordWrapItem setState:checked ? NSControlStateValueOn : NSControlStateValueOff];
+		}
+	});
+}
+
+@interface ZephyrWordWrapHandler : NSObject
+- (void)toggleWordWrap:(NSMenuItem *)sender;
+@end
+
+@implementation ZephyrWordWrapHandler
+- (void)toggleWordWrap:(NSMenuItem *)sender {
+	_wordWrapToggled = true;
+}
+@end
+
+static ZephyrWordWrapHandler *_wordWrapHandler = nil;
+
+void setupWordWrapMenuItem(bool checked) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (!_wordWrapHandler) {
+			_wordWrapHandler = [[ZephyrWordWrapHandler alloc] init];
+		}
+
+		NSMenu *mainMenu = [NSApp mainMenu];
+		if (!mainMenu) return;
+
+		// Find or create the View menu
+		NSMenuItem *viewMenuItem = nil;
+		for (NSMenuItem *item in [mainMenu itemArray]) {
+			if ([item.title isEqualToString:@"View"]) {
+				viewMenuItem = item;
+				break;
+			}
+		}
+		if (!viewMenuItem) {
+			viewMenuItem = [[NSMenuItem alloc] initWithTitle:@"View" action:nil keyEquivalent:@""];
+			NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+			[viewMenuItem setSubmenu:viewMenu];
+			[mainMenu addItem:viewMenuItem];
+		}
+
+		NSMenu *viewMenu = [viewMenuItem submenu];
+
+		// Check if Word Wrap item already exists
+		if ([viewMenu indexOfItemWithTitle:@"Word Wrap"] >= 0) return;
+
+		// Add Word Wrap item with Option+Z shortcut
+		_wordWrapItem = [[NSMenuItem alloc] initWithTitle:@"Word Wrap"
+		                                          action:@selector(toggleWordWrap:)
+		                                   keyEquivalent:@"z"];
+		[_wordWrapItem setKeyEquivalentModifierMask:NSEventModifierFlagOption];
+		[_wordWrapItem setTarget:_wordWrapHandler];
+		[_wordWrapItem setState:checked ? NSControlStateValueOn : NSControlStateValueOff];
+
+		// Insert at the beginning of the View menu (before Theme)
+		[viewMenu insertItem:_wordWrapItem atIndex:0];
+		[viewMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+	});
+}
+
 // --- Theme menu support ---
 
 static char _selectedTheme[256] = {0};  // selected theme name (check-and-reset)
@@ -424,10 +500,7 @@ func startWindowDrag() {
 
 // trafficLightPaddingDp is the horizontal space (in Dp) reserved for the
 // macOS close/minimize/zoom buttons plus a margin so tabs don't crowd them.
-// This is converted to pixels via gtx.Dp() at each call site so it scales
-// correctly across Retina (2×) and non-Retina (1×) displays.
-// The three buttons span ~54pt; we add a small margin.
-const trafficLightPaddingDp = 76
+const trafficLightPaddingDp = 74
 
 // updateWindowBackground sets the native macOS window background color
 // to match the current theme's tab bar color.
@@ -460,6 +533,21 @@ func checkThemeSelection() string {
 		return ""
 	}
 	return C.GoString(cs)
+}
+
+// setupWordWrapMenu creates the View > Word Wrap menu item.
+func setupWordWrapMenu(checked bool) {
+	C.setupWordWrapMenuItem(C.bool(checked))
+}
+
+// wordWrapToggled returns true if the user clicked the Word Wrap menu item.
+func wordWrapToggled() bool {
+	return bool(C.checkAndResetWordWrapToggled())
+}
+
+// updateWordWrapMenuCheck syncs the Word Wrap menu checkmark.
+func updateWordWrapMenuCheck(checked bool) {
+	C.updateWordWrapCheck(C.bool(checked))
 }
 
 // updateThemeMenuCheck updates the checkmark in the Theme submenu.

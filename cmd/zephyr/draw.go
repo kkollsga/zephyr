@@ -9,11 +9,13 @@ import (
 	"unicode/utf8"
 
 	"gioui.org/app"
+	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 
+	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/highlight"
 	"github.com/kristianweb/zephyr/internal/render"
 )
@@ -45,12 +47,34 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 
 	// Skip viewport update in markdown read mode
 	if ts.mode != viewMarkdownRead {
-		ts.viewport.TotalLines = ed.Buffer.LineCount()
+		if st.wordWrap && st.textRend != nil && st.textRend.CharWidth > 0 {
+			// Compute wrap map for word wrap mode
+			textAreaW := gtx.Constraints.Max.X - st.gutterRend.EstimateWidth(ed.Buffer.LineCount()) - st.textRend.CharWidth*2
+			wrapCols := textAreaW / st.textRend.CharWidth
+			if wrapCols < 10 {
+				wrapCols = 10
+			}
+			lines := make([]string, ed.Buffer.LineCount())
+			for j := 0; j < ed.Buffer.LineCount(); j++ {
+				lines[j], _ = ed.Buffer.Line(j)
+			}
+			ts.wrapMap = buildWrapMap(lines, wrapCols, 4)
+			ts.viewport.TotalLines = ts.wrapMap.visualLines()
+		} else {
+			ts.wrapMap = nil
+			ts.viewport.TotalLines = ed.Buffer.LineCount()
+		}
 		if st.textRend.LineHeightPx > 0 {
 			ts.viewport.VisibleLines = (gtx.Constraints.Max.Y - statusH - st.tabBarHeight - editorTopPad) / st.textRend.LineHeightPx
 		}
 		if ed.Cursor.Line != ts.lastCursorLine || ed.Cursor.Col != ts.lastCursorCol {
-			ts.viewport.ScrollToRevealCursor(ed.Cursor.Line)
+			if ts.wrapMap != nil {
+				dispCol := runeColToDisplayCol2(ed, ed.Cursor.Line, ed.Cursor.Col, 4)
+				visualLine, _ := ts.wrapMap.bufferToVisual(ed.Cursor.Line, dispCol)
+				ts.viewport.ScrollToRevealCursor(visualLine)
+			} else {
+				ts.viewport.ScrollToRevealCursor(ed.Cursor.Line)
+			}
 			ts.lastCursorLine = ed.Cursor.Line
 			ts.lastCursorCol = ed.Cursor.Col
 			if st.scrollbarRend != nil {
@@ -78,9 +102,61 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		return
 	}
 
-	// Gutter
 	firstLine, lastLine := ts.viewport.VisibleRange()
-	gutterWidth := st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ts.viewport.TotalLines, editorTopPad, ts.viewport.PixelOffset)
+	gutterWidth := st.gutterRend.Width(ed.Buffer.LineCount())
+
+	if ts.wrapMap != nil {
+		st.drawEditorWrapped(gtx, w, ed, ts, firstLine, lastLine, gutterWidth, editorH)
+	} else {
+		st.drawEditorNormal(gtx, w, ed, ts, firstLine, lastLine, gutterWidth)
+	}
+
+	// Scrollbar (under overlays, fades out when idle)
+	if st.scrollbarRend != nil && st.scrollbarRend.Update() {
+		st.scrollbarRend.Render(gtx.Ops,
+			gtx.Constraints.Max.X, editorH,
+			ts.viewport.FirstLine, ts.viewport.PixelOffset,
+			ts.viewport.VisibleLines, ts.viewport.TotalLines,
+			st.textRend.LineHeightPx,
+		)
+	}
+
+	// Find bar overlay (top-right of editor area)
+	if st.findBar.Visible {
+		st.drawFindBar(gtx, editorH)
+	}
+
+	// Scrollbar match indicator strip
+	if st.findBar.Visible && len(st.findBar.Matches) > 0 && ts.viewport.TotalLines > 0 {
+		st.drawMatchIndicator(gtx, editorH, ts.viewport.TotalLines)
+	}
+
+	editorClip.Pop()
+	tabOff.Pop()
+
+	// Status line
+	st.lastMaxY = gtx.Constraints.Max.Y
+	st.lastMaxX = gtx.Constraints.Max.X
+	st.drawStatusLine(gtx)
+
+	// Unified save menu dropdown
+	if st.saveMenu.visible {
+		st.drawSaveMenu(gtx)
+	}
+
+	// Language selector dropdown
+	if st.langSel.Visible {
+		st.drawLangSelector(gtx)
+	}
+
+	// Request redraws for cursor blink and scrollbar fade animations
+	gtx.Execute(op.InvalidateCmd{})
+}
+
+// drawEditorNormal renders the editor in non-wrapped mode (original path).
+func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *editor.Editor, ts *tabState, firstLine, lastLine, gutterWidth int) {
+	// Gutter
+	st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ed.Buffer.LineCount(), editorTopPad, ts.viewport.PixelOffset)
 
 	// Gutter right separator
 	sepRect := clip.Rect{
@@ -129,10 +205,10 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		}
 	}
 
-	// Visible text lines — use PieceTable's cached lineStarts
+	// Visible text lines
 	byteOffset := ed.Buffer.LineStartOffset(firstLine)
 
-	for i := firstLine; i <= lastLine && i < ts.viewport.TotalLines; i++ {
+	for i := firstLine; i <= lastLine && i < ed.Buffer.LineCount(); i++ {
 		line, err := ed.Buffer.Line(i)
 		if err != nil {
 			continue
@@ -154,7 +230,6 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 				darkText := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
 				dispStart := runeColToDisplayCol(line, cm.Col, 4)
 				dispEnd := dispStart + matchDisplayLen(line, cm.Col, cm.Length, 4)
-				// Prepend so it takes priority over syntax color spans
 				spans = append([]render.ColorSpan{{Start: dispStart, End: dispEnd, Color: darkText}}, spans...)
 			}
 		}
@@ -186,47 +261,149 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	st.cursorRend.RenderCursor(gtx.Ops, ed.Cursor.Line, ed.Cursor.Col, firstLine, gutterWidth+st.textRend.CharWidth)
 
 	padOff.Pop()
+}
 
-	// Scrollbar (under overlays, fades out when idle)
-	if st.scrollbarRend != nil && st.scrollbarRend.Update() {
-		st.scrollbarRend.Render(gtx.Ops,
-			gtx.Constraints.Max.X, editorH,
-			ts.viewport.FirstLine, ts.viewport.PixelOffset,
-			ts.viewport.VisibleLines, ts.viewport.TotalLines,
-			st.textRend.LineHeightPx,
-		)
+// drawEditorWrapped renders the editor with word wrapping enabled.
+// firstLine/lastLine are visual line indices from the viewport.
+func (st *appState) drawEditorWrapped(gtx layout.Context, w *app.Window, ed *editor.Editor, ts *tabState, firstVis, lastVis, gutterWidth, editorH int) {
+	wm := ts.wrapMap
+	totalBufLines := ed.Buffer.LineCount()
+
+	// Gutter background
+	gRect := clip.Rect{Max: image.Pt(gutterWidth, gtx.Constraints.Max.Y)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.GutterBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	gRect.Pop()
+
+	// Gutter separator
+	sepRect := clip.Rect{
+		Min: image.Pt(gutterWidth-1, 0),
+		Max: image.Pt(gutterWidth, gtx.Constraints.Max.Y),
+	}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.GutterSep}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	sepRect.Pop()
+
+	// Map visual range to buffer line range for syntax highlighting
+	bufFirst, _ := wm.bufferLineForVisual(firstVis)
+	bufLast, _ := wm.bufferLineForVisual(lastVis)
+	if bufLast >= totalBufLines {
+		bufLast = totalBufLines - 1
 	}
 
-	// Find bar overlay (top-right of editor area)
-	if st.findBar.Visible {
-		st.drawFindBar(gtx, editorH)
+	var allTokens []highlight.Token
+	if ts.highlighter != nil {
+		allTokens = ts.highlighter.TokensInRange(bufFirst, bufLast)
 	}
 
-	// Scrollbar match indicator strip
-	if st.findBar.Visible && len(st.findBar.Matches) > 0 && ts.viewport.TotalLines > 0 {
-		st.drawMatchIndicator(gtx, editorH, ts.viewport.TotalLines)
+	textX := gutterWidth + st.textRend.CharWidth
+
+	// Render buffer lines, iterating by buffer line for correct byte tracking
+	byteOffset := ed.Buffer.LineStartOffset(bufFirst)
+
+	for bufLine := bufFirst; bufLine <= bufLast && bufLine < totalBufLines; bufLine++ {
+		line, err := ed.Buffer.Line(bufLine)
+		if err != nil {
+			byteOffset += 1
+			continue
+		}
+		expanded := expandTabs(line, 4)
+
+		// Compute color spans for the full buffer line
+		var spans []render.ColorSpan
+		if len(allTokens) > 0 {
+			lineStart := byteOffset
+			lineEnd := byteOffset + len(line)
+			lineTokens := tokensForRange(allTokens, lineStart, lineEnd)
+			spans = render.TokensToColorSpans(lineTokens, lineStart, lineEnd, line, st.colorMap, st.theme.Foreground, 4)
+		}
+
+		numSegs := wm.segmentCount(bufLine)
+		for seg := 0; seg < numSegs; seg++ {
+			visLine := wm.entries[bufLine].visualStart + seg
+			if visLine < firstVis {
+				continue
+			}
+			if visLine > lastVis {
+				break
+			}
+
+			y := (visLine-firstVis)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
+
+			// Gutter: line number only on first segment
+			if seg == 0 {
+				st.gutterRend.RenderLineNumber(gtx, gtx.Ops, bufLine+1, totalBufLines, y)
+			}
+
+			// Extract segment text
+			segStart, segEnd := wm.segmentRange(bufLine, seg)
+			if segEnd < 0 || segEnd > len(expanded) {
+				segEnd = len(expanded)
+			}
+			if segStart > len(expanded) {
+				segStart = len(expanded)
+			}
+			segment := ""
+			if segStart < segEnd {
+				segment = expanded[segStart:segEnd]
+			}
+
+			// Adjust color spans for segment offset
+			var segSpans []render.ColorSpan
+			for _, sp := range spans {
+				adjStart := sp.Start - segStart
+				adjEnd := sp.End - segStart
+				if adjEnd <= 0 || adjStart >= len(segment) {
+					continue
+				}
+				if adjStart < 0 {
+					adjStart = 0
+				}
+				if adjEnd > len(segment) {
+					adjEnd = len(segment)
+				}
+				segSpans = append(segSpans, render.ColorSpan{Start: adjStart, End: adjEnd, Color: sp.Color})
+			}
+
+			st.textRend.RenderLine(gtx.Ops, gtx, segment, textX, y, segSpans)
+		}
+
+		byteOffset += len(line) + 1
 	}
 
-	editorClip.Pop()
-	tabOff.Pop()
+	// Cursor and selection with visual line coordinates
+	padOff := op.Offset(image.Pt(0, editorTopPad-ts.viewport.PixelOffset)).Push(gtx.Ops)
 
-	// Status line
-	st.lastMaxY = gtx.Constraints.Max.Y
-	st.lastMaxX = gtx.Constraints.Max.X
-	st.drawStatusLine(gtx)
-
-	// Unified save menu dropdown
-	if st.saveMenu.visible {
-		st.drawSaveMenu(gtx)
+	// Selection
+	if ed.Selection.Active && !ed.Selection.IsEmpty() && !st.findBar.Visible {
+		start, end := ed.Selection.Ordered()
+		startDisp := runeColToDisplayCol2(ed, start.Line, start.Col, 4)
+		endDisp := runeColToDisplayCol2(ed, end.Line, end.Col, 4)
+		startVis, startVisCol := wm.bufferToVisual(start.Line, startDisp)
+		endVis, endVisCol := wm.bufferToVisual(end.Line, endDisp)
+		st.cursorRend.RenderSelection(gtx.Ops, st.theme.Selection,
+			startVis, startVisCol, endVis, endVisCol,
+			firstVis, gutterWidth+st.textRend.CharWidth, gtx.Constraints.Max.Y,
+			func(visLine int) int {
+				bufLine, segIdx := wm.bufferLineForVisual(visLine)
+				segStart, segEnd := wm.segmentRange(bufLine, segIdx)
+				if segEnd < 0 {
+					l, _ := ed.Buffer.Line(bufLine)
+					return len(expandTabs(l, 4)) - segStart
+				}
+				return segEnd - segStart
+			})
 	}
 
-	// Language selector dropdown
-	if st.langSel.Visible {
-		st.drawLangSelector(gtx)
+	// Cursor
+	if st.cursorRend.UpdateBlink() {
+		w.Invalidate()
 	}
+	cursorDisp := runeColToDisplayCol2(ed, ed.Cursor.Line, ed.Cursor.Col, 4)
+	cursorVis, cursorVisCol := wm.bufferToVisual(ed.Cursor.Line, cursorDisp)
+	st.cursorRend.RenderCursor(gtx.Ops, cursorVis, cursorVisCol, firstVis, gutterWidth+st.textRend.CharWidth)
 
-	// Request redraws for cursor blink and scrollbar fade animations
-	gtx.Execute(op.InvalidateCmd{})
+	padOff.Pop()
 }
 
 func (st *appState) drawTabBar(gtx layout.Context) {
@@ -238,9 +415,14 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 	// Compute overflow before drawing
 	st.computeOverflow(gtx.Constraints.Max.X)
 
-	// Tab bar background
+	// Tab bar background gradient (top → bottom)
 	bgRect := clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, st.tabBarHeight)}.Push(gtx.Ops)
-	paint.ColorOp{Color: st.theme.TabBarBg}.Add(gtx.Ops)
+	paint.LinearGradientOp{
+		Stop1:  f32.Pt(0, 0),
+		Color1: st.theme.TabBarGradTop,
+		Stop2:  f32.Pt(0, float32(st.tabBarHeight)),
+		Color2: st.theme.TabBarGradBot,
+	}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	bgRect.Pop()
 
@@ -411,14 +593,8 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 	// Theme toggle icon (sun/moon) in upper right
 	st.drawThemeToggle(gtx, inTabBar)
 
-	// Bottom border
-	tabBorderRect := clip.Rect{
-		Min: image.Pt(0, st.tabBarHeight-1),
-		Max: image.Pt(gtx.Constraints.Max.X, st.tabBarHeight),
-	}.Push(gtx.Ops)
-	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
-	paint.PaintOp{}.Add(gtx.Ops)
-	tabBorderRect.Pop()
+	// Bottom border — only under inactive (non-active) regions.
+	// The active tab blends seamlessly into the editor background.
 
 	// Overflow dropdown (drawn on top of everything; auto-shown during drag)
 	showDropdown := st.overflowOpen
@@ -436,15 +612,34 @@ func (st *appState) drawSingleTab(gtx layout.Context, i, tabX, textY, radius int
 	tabW := st.tabWidth(title)
 	dotR := gtx.Dp(3)
 
-	// Active tab background with rounded top corners.
+	// Active tab background with rounded top corners and accent line.
 	if i == st.tabBar.ActiveIdx {
-		activeRect := clip.UniformRRect(image.Rectangle{
+		tabRect := image.Rectangle{
 			Min: image.Pt(tabX, 0),
 			Max: image.Pt(tabX+tabW, st.tabBarHeight+radius),
-		}, radius).Push(gtx.Ops)
+		}
+
+		// Draw accent line first, then overlay the tab background below it.
+		// The accent occupies the top strip of the rounded tab shape.
+		accentH := gtx.Dp(3)
+		if accentH < 2 {
+			accentH = 2
+		}
+
+		// Accent: fill the entire tab shape with accent color
+		accentClip := clip.UniformRRect(tabRect, radius).Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabAccent}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		accentClip.Pop()
+
+		// Tab background: overlay starting below the accent strip
+		bgRect := clip.Rect{
+			Min: image.Pt(tabX, accentH),
+			Max: image.Pt(tabX+tabW, st.tabBarHeight+radius),
+		}.Push(gtx.Ops)
 		paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
-		activeRect.Pop()
+		bgRect.Pop()
 	}
 
 	// Tab title

@@ -31,3 +31,9 @@ func setupThemeMenu(themeNames []string, activeTheme string) {}
 func checkThemeSelection() string { return "" }
 
 func updateThemeMenuCheck(activeTheme string) {}
+
+func setupWordWrapMenu(checked bool) {}
+
+func wordWrapToggled() bool { return false }
+
+func updateWordWrapMenuCheck(checked bool) {}

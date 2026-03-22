@@ -1,10 +1,10 @@
-version: 2
+version: 4
 name: Default
 subtitle: The caffeinated editor
 fonts:
   monospace: "Menlo, monospace"
-  heading: "Menlo, monospace"
-  body: "Menlo, monospace"
+  heading: "Helvetica Neue, sans-serif"
+  body: "Helvetica Neue, sans-serif"
 
 dark:
   background: "#1e1e1e"
@@ -29,6 +29,9 @@ dark:
     match: "#645a1e"
     current: "#ffdc32"
   ui:
+    tab-accent: "#4ec9b0"
+    tab-bar-grad-top: "#3a3a3a"
+    tab-bar-grad-bot: "#2e2e2e"
     tab-bar-bg: "#2e2e2e"
     tab-active-bg: "#1e1e1e"
     tab-border: "#444444"
@@ -54,13 +57,13 @@ dark:
     md-accent: "#82aadc"
 
 light:
-  background: "#ffffff"
+  background: "#fafaf7"
   foreground: "#1e1e1e"
   gutter: "#969696"
-  gutter-bg: "#ffffff"
+  gutter-bg: "#fafaf7"
   cursor: "#1e1e1e"
   selection: "#add6ff80"
-  line-highlight: "#f5f5f5"
+  line-highlight: "#f4f3ef"
   status-bg: "#f0f0f0"
   status-fg: "#646464"
   tokens:
@@ -76,8 +79,11 @@ light:
     match: "#ffeb78"
     current: "#ffd200c8"
   ui:
+    tab-accent: "#267f99"
+    tab-bar-grad-top: "#f6f6f6"
+    tab-bar-grad-bot: "#ececec"
     tab-bar-bg: "#ececec"
-    tab-active-bg: "#ffffff"
+    tab-active-bg: "#fafaf7"
     tab-border: "#c8c8c8"
     tab-dim-fg: "#787878"
     tab-modified-dot: "#b49632"

@@ -97,6 +97,21 @@ func (tr *TextRenderer) ColX(col int) int {
 	return int(math.Round(float64(col) * tr.CharAdvance))
 }
 
+// MeasureString returns the pixel width of a string using actual glyph advances.
+func (tr *TextRenderer) MeasureString(gtx layout.Context, s string) int {
+	if len(s) == 0 {
+		return 0
+	}
+	params := tr.textParams(gtx)
+	params.MaxWidth = 1 << 30
+	tr.Shaper.LayoutString(params, s)
+	total := fixed.Int26_6(0)
+	for g, ok := tr.Shaper.NextGlyph(); ok; g, ok = tr.Shaper.NextGlyph() {
+		total += g.Advance
+	}
+	return total.Round()
+}
+
 // ColorSpan defines a color for a range of columns in a line.
 type ColorSpan struct {
 	Start int
@@ -146,6 +161,8 @@ func (tr *TextRenderer) RenderLine(ops *op.Ops, gtx layout.Context, lineText str
 // use glyph document coordinates for positioning, call Shape for vector outlines.
 func (tr *TextRenderer) renderText(ops *op.Ops, gtx layout.Context, s string, x, y int, c color.NRGBA) {
 	params := tr.textParams(gtx)
+	// Prevent the shaper from wrapping text — we handle line breaking ourselves.
+	params.MaxWidth = 1 << 30
 
 	tr.Shaper.LayoutString(params, s)
 

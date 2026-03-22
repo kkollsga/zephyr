@@ -48,6 +48,9 @@ type tabState struct {
 	mdTotalH   int                 // total rendered height for scroll clamping
 	mdCopyBtns  []codeCopyBtn       // code block copy button hit areas
 	mdCheckboxes []mdCheckbox      // task list checkbox hit areas
+
+	// Word wrap
+	wrapMap *wrapMap // visual line mapping (nil when wrap is off)
 }
 
 type appState struct {
@@ -82,6 +85,8 @@ type appState struct {
 	mdToggleX       int                 // left edge of Edit/Read toggle button
 	mdToggleW       int                 // width of the toggle button
 	themeMenuReady  bool                // true once native theme menu has been set up
+	wordWrap        bool                // true when word wrap is enabled
+	wrapMenuReady   bool                // true once native word wrap menu has been set up
 
 	tabBarHeight   int      // computed from display scale to match native titlebar
 	trafficLightPx int     // traffic light padding in pixels (scaled from Dp)
@@ -246,6 +251,7 @@ func run() {
 		themeName:   cfg.Theme,
 		themeBundle: bundle,
 		fontCfg:     bundle.Fonts,
+		wordWrap:    cfg.WordWrap,
 	}
 
 	// Init tab state for first tab
@@ -284,10 +290,14 @@ func run() {
 			st.initRenderers(gtx)
 			setUnsavedFlag(st.hasUnsavedChanges())
 
-			// Defer theme menu setup until the titlebar/window is ready
+			// Defer menu setup until the titlebar/window is ready
 			if !st.themeMenuReady && titlebarReady() {
 				st.initThemeMenu()
 				st.themeMenuReady = true
+			}
+			if !st.wrapMenuReady && titlebarReady() {
+				setupWordWrapMenu(st.wordWrap)
+				st.wrapMenuReady = true
 			}
 
 			// Check if graceful exit delay has elapsed
@@ -300,6 +310,9 @@ func run() {
 			}
 			if sel := checkThemeSelection(); sel != "" && sel != st.themeName {
 				st.selectThemeBundle(sel)
+			}
+			if wordWrapToggled() {
+				st.toggleWordWrap()
 			}
 			if !st.exitPending {
 				st.handleEvents(gtx, w)
@@ -404,10 +417,9 @@ func (st *appState) initRenderers(gtx layout.Context) {
 
 	st.scrollbarRend = render.NewScrollbarRenderer(st.theme.ScrollbarThumb)
 
-	// Match the native macOS titlebar height (28dp) plus a little padding.
-	// On Retina (2×) this is ~76px; on 1× it's ~38px.
+	// Match the native macOS titlebar height (~28pt).
 	st.dp = gtx.Dp
-	st.tabBarHeight = gtx.Dp(32)
+	st.tabBarHeight = gtx.Dp(28)
 	st.trafficLightPx = gtx.Dp(trafficLightPaddingDp)
 }
 
@@ -462,4 +474,13 @@ func (st *appState) persistThemeConfig() {
 	cfg.Theme = st.themeName
 	cfg.DarkMode = st.darkMode
 	config.SaveConfig(cfg)
+}
+
+// toggleWordWrap toggles word wrap on/off and persists the setting.
+func (st *appState) toggleWordWrap() {
+	st.wordWrap = !st.wordWrap
+	cfg := config.LoadConfig()
+	cfg.WordWrap = st.wordWrap
+	config.SaveConfig(cfg)
+	updateWordWrapMenuCheck(st.wordWrap)
 }

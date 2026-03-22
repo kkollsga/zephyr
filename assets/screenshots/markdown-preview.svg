@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
+      <feDropShadow dx="0" dy="8" stdDeviation="20" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+    <clipPath id="windowClip">
+      <rect x="40" y="30" width="1120" height="720" rx="12"/>
+    </clipPath>
+    <linearGradient id="tabBarGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3a3a"/>
+      <stop offset="100%" stop-color="#2e2e2e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Backdrop -->
+  <rect width="1200" height="780" fill="#0d1117" rx="0"/>
+
+  <!-- Window shadow -->
+  <rect x="40" y="30" width="1120" height="720" rx="12" fill="#111" filter="url(#shadow)"/>
+
+  <!-- Window content clipped -->
+  <g clip-path="url(#windowClip)">
+
+    <!-- Tab bar -->
+    <rect x="40" y="30" width="1120" height="38" fill="url(#tabBarGrad)"/>
+    <line x1="40" y1="67" x2="1160" y2="67" stroke="#444444" stroke-width="1"/>
+
+    <!-- Traffic lights -->
+    <circle cx="62" cy="49" r="6.5" fill="#ff5f57"/>
+    <circle cx="82" cy="49" r="6.5" fill="#febc2e"/>
+    <circle cx="102" cy="49" r="6.5" fill="#28c840"/>
+
+    <!-- Tab 1: inactive -->
+    <text x="128" y="54" fill="#8c8c8c" font-size="12" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">main.go</text>
+    <text x="210" y="54" fill="#8c8c8c" font-size="10">×</text>
+
+    <line x1="224" y1="38" x2="224" y2="60" stroke="#444" stroke-width="1"/>
+
+    <!-- Tab 2: active (README.md) -->
+    <rect x="236" y="30" width="160" height="44" rx="6" fill="#1e1e1e"/>
+    <rect x="236" y="30" width="160" height="2" fill="#4ec9b0"/>
+    <text x="250" y="54" fill="#d4d4d4" font-size="12" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">README.md</text>
+    <text x="380" y="54" fill="#8c8c8c" font-size="10">×</text>
+
+    <!-- Plus button -->
+    <text x="412" y="55" fill="#969696" font-size="17" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">+</text>
+
+    <!-- App title -->
+    <text x="446" y="54" fill="#a0a0a0" font-size="12">Zephyr</text>
+    <text x="502" y="54" fill="#5a5a5a" font-size="12">The caffeinated editor</text>
+
+    <!-- Markdown preview area -->
+    <rect x="40" y="68" width="1120" height="614" fill="#1e1e1e"/>
+
+    <!-- Content area with padding -->
+    <!-- H1: Project Title -->
+    <text x="100" y="118" fill="#dc6464" font-size="28" font-weight="bold" font-family="'SF Pro Display', 'Helvetica Neue', sans-serif">Zephyr</text>
+    <line x1="100" y1="128" x2="1100" y2="128" stroke="#333" stroke-width="1"/>
+
+    <!-- Paragraph -->
+    <text x="100" y="158" fill="#d4d4d4" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">A fast, GPU-accelerated text editor for macOS, written in Go.</text>
+
+    <!-- H2 -->
+    <text x="100" y="208" fill="#dc6464" font-size="22" font-weight="bold" font-family="'SF Pro Display', 'Helvetica Neue', sans-serif">Features</text>
+    <line x1="100" y1="218" x2="1100" y2="218" stroke="#333" stroke-width="1"/>
+
+    <!-- Task list with checkboxes -->
+    <rect x="110" y="238" width="16" height="16" rx="3" fill="#4ec9b0"/>
+    <path d="M 114 246 L 117 250 L 123 242" stroke="#1e1e1e" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="136" y="251" fill="#d4d4d4" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">GPU-accelerated rendering via Gio</text>
+
+    <rect x="110" y="266" width="16" height="16" rx="3" fill="#4ec9b0"/>
+    <path d="M 114 274 L 117 278 L 123 270" stroke="#1e1e1e" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="136" y="279" fill="#d4d4d4" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">Tree-sitter syntax highlighting for 17+ languages</text>
+
+    <rect x="110" y="294" width="16" height="16" rx="3" fill="#4ec9b0"/>
+    <path d="M 114 302 L 117 306 L 123 298" stroke="#1e1e1e" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="136" y="307" fill="#d4d4d4" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">Tabbed editing with macOS integration</text>
+
+    <rect x="110" y="322" width="16" height="16" rx="3" fill="none" stroke="#6e6e6e" stroke-width="1.5"/>
+    <text x="136" y="335" fill="#d4d4d4" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">Fuzzy file finder</text>
+
+    <rect x="110" y="350" width="16" height="16" rx="3" fill="none" stroke="#6e6e6e" stroke-width="1.5"/>
+    <text x="136" y="363" fill="#d4d4d4" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">Lua plugin API</text>
+
+    <!-- H2: Quick Start -->
+    <text x="100" y="410" fill="#dc6464" font-size="22" font-weight="bold" font-family="'SF Pro Display', 'Helvetica Neue', sans-serif">Quick Start</text>
+    <line x1="100" y1="420" x2="1100" y2="420" stroke="#333" stroke-width="1"/>
+
+    <!-- Code block -->
+    <rect x="100" y="436" width="1000" height="100" rx="6" fill="#282828"/>
+    <rect x="100" y="436" width="1000" height="26" rx="6" fill="#333"/>
+    <rect x="100" y="454" width="1000" height="8" fill="#333"/>
+    <text x="114" y="454" fill="#969696" font-size="11" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">bash</text>
+    <!-- Copy button -->
+    <rect x="1060" y="442" width="28" height="18" rx="3" fill="#444"/>
+    <text x="1066" y="455" fill="#969696" font-size="10" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">Copy</text>
+
+    <text font-size="13">
+      <tspan x="118" y="482" fill="#6a9955"># Build and run</tspan>
+      <tspan x="118" y="504" fill="#d4d4d4">make build</tspan>
+      <tspan x="118" y="526" fill="#d4d4d4">open Zephyr.app</tspan>
+    </text>
+
+    <!-- Blockquote -->
+    <rect x="100" y="554" width="4" height="46" rx="2" fill="#dc6464"/>
+    <text x="118" y="572" fill="#969696" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif" font-style="italic">Zephyr is designed to be fast, lightweight, and native to macOS.</text>
+    <text x="118" y="592" fill="#969696" font-size="14" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif" font-style="italic">Built with Go and GPU-accelerated via the Gio framework.</text>
+
+    <!-- Scrollbar -->
+    <rect x="1148" y="74" width="8" height="200" rx="4" fill="#646464" opacity="0.7"/>
+
+    <!-- Status bar -->
+    <rect x="40" y="682" width="1120" height="38" fill="#191919"/>
+    <line x1="40" y1="682" x2="1160" y2="682" stroke="#2d2d2d" stroke-width="1"/>
+    <text y="706" font-size="11.5" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">
+      <tspan x="56" fill="#969696">Preview</tspan>
+      <!-- Markdown mode toggle pill -->
+    </text>
+    <!-- Read pill -->
+    <rect x="1020" y="688" width="42" height="22" rx="4" fill="#444444"/>
+    <text x="1028" y="704" fill="#d4d4d4" font-size="11" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">Read</text>
+    <text x="1080" y="706" fill="#4ec9b0" font-size="11.5" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">Markdown</text>
+
+  </g>
+
+  <!-- Window border -->
+  <rect x="40" y="30" width="1120" height="720" rx="12" fill="none" stroke="#444" stroke-width="0.5"/>
+</svg>

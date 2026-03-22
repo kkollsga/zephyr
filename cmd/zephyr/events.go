@@ -43,7 +43,7 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 	for {
 		ev, ok := gtx.Source.Event(
 			key.FocusFilter{Target: st.tag},
-			key.Filter{Focus: st.tag, Optional: key.ModShortcut | key.ModShift},
+			key.Filter{Focus: st.tag, Optional: key.ModShortcut | key.ModShift | key.ModAlt},
 			key.Filter{Focus: st.tag, Name: key.NameTab},
 			key.Filter{Focus: st.tag, Name: key.NameTab, Optional: key.ModShift},
 			pointer.Filter{Target: st.tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll | pointer.Move, ScrollY: scrollRange},
@@ -179,7 +179,7 @@ func (st *appState) handleKey(ke key.Event) {
 		return
 	}
 
-	// In markdown read mode, only handle mode toggle and tab management
+	// In markdown read mode, handle mode toggle, tab management, and copy
 	if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
 		switch {
 		case ke.Name == "E" && ke.Modifiers == key.ModShortcut:
@@ -190,6 +190,17 @@ func (st *appState) handleKey(ke key.Event) {
 			st.closeCurrentTab()
 		case ke.Name == "Q" && ke.Modifiers == key.ModShortcut:
 			st.startQuitFlow()
+		case ke.Name == "C" && ke.Modifiers == key.ModShortcut:
+			// Copy full document text in read mode
+			if ed := st.activeEd(); ed != nil {
+				src := string(ed.Buffer.TextBytes(nil))
+				clipboard.Set(src)
+				st.notification = "Copied to clipboard"
+				st.notificationUntil = time.Now().Add(2 * time.Second)
+				st.window.Invalidate()
+			}
+		case ke.Name == "F" && ke.Modifiers == key.ModShortcut:
+			st.openFindBar(false)
 		}
 		return
 	}
@@ -200,6 +211,8 @@ func (st *appState) handleKey(ke key.Event) {
 		st.newTab()
 	case ke.Name == "W" && ke.Modifiers == key.ModShortcut:
 		st.closeCurrentTab()
+	case ke.Name == "Z" && ke.Modifiers == key.ModAlt:
+		st.toggleWordWrap()
 
 	case ke.Name == key.NameLeftArrow && ke.Modifiers == 0:
 		ed.Selection.Clear()
@@ -518,12 +531,24 @@ func (st *appState) pointerToLineCol(pos f32.Point) (line, col int) {
 	if ts == nil {
 		return 0, 0
 	}
-	gutterWidth := st.gutterRend.Width(ts.viewport.TotalLines)
-	col = int(math.Floor(float64(int(pos.X)-gutterWidth-st.textRend.CharWidth) / st.textRend.CharAdvance))
-	if col < 0 {
-		col = 0
+	ed := st.activeEd()
+	gutterWidth := st.gutterRend.Width(ed.Buffer.LineCount())
+	dispCol := int(math.Floor(float64(int(pos.X)-gutterWidth-st.textRend.CharWidth) / st.textRend.CharAdvance))
+	if dispCol < 0 {
+		dispCol = 0
 	}
 	adjustedY := int(pos.Y) - st.tabBarHeight - editorTopPad
+
+	if ts.wrapMap != nil {
+		visLine := ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
+		bufLine, segIdx := ts.wrapMap.bufferLineForVisual(visLine)
+		segStart, _ := ts.wrapMap.segmentRange(bufLine, segIdx)
+		col = dispCol + segStart
+		line = bufLine
+		return
+	}
+
+	col = dispCol
 	line = ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
 	return
 }

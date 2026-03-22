@@ -18,8 +18,8 @@ type FontConfig struct {
 func DefaultFontConfig() FontConfig {
 	return FontConfig{
 		Monospace: "Menlo, monospace",
-		Heading:   "Menlo, monospace",
-		Body:      "Menlo, monospace",
+		Heading:   "Helvetica Neue, sans-serif",
+		Body:      "Helvetica Neue, sans-serif",
 	}
 }
 
@@ -50,7 +50,7 @@ type fontsYAML struct {
 // themeYAML is the top-level YAML structure for a unified theme file.
 // DefaultThemeVersion is bumped when the built-in default theme changes.
 // EnsureDefaultThemes regenerates default.yaml when the on-disk version is older.
-const DefaultThemeVersion = 2
+const DefaultThemeVersion = 4
 
 type themeYAML struct {
 	Version  int          `yaml:"version"`
@@ -162,6 +162,9 @@ func variantToTheme(name string, v themeVariant) Theme {
 		"tab-close-btn":    &t.TabCloseBtn,
 		"tab-close-hover":  &t.TabCloseHover,
 		"tab-plus-hover":   &t.TabPlusHover,
+		"tab-accent":       &t.TabAccent,
+		"tab-bar-grad-top": &t.TabBarGradTop,
+		"tab-bar-grad-bot": &t.TabBarGradBot,
 		"title-fg":         &t.TitleFg,
 		"subtitle-fg":      &t.SubtitleFg,
 		"status-border":    &t.StatusBorder,
@@ -190,6 +193,15 @@ func variantToTheme(name string, v themeVariant) Theme {
 	}
 	if t.MdAccent.A == 0 {
 		t.MdAccent = color.NRGBA{R: 100, G: 150, B: 210, A: 255}
+	}
+	if t.TabAccent.A == 0 {
+		t.TabAccent = color.NRGBA{R: 0x4e, G: 0xc9, B: 0xb0, A: 255}
+	}
+	if t.TabBarGradTop.A == 0 {
+		t.TabBarGradTop = t.TabBarBg
+	}
+	if t.TabBarGradBot.A == 0 {
+		t.TabBarGradBot = t.TabBarBg
 	}
 
 	return t

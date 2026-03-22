@@ -1,0 +1,294 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
+      <feDropShadow dx="0" dy="8" stdDeviation="20" flood-color="#000" flood-opacity="0.2"/>
+    </filter>
+    <clipPath id="windowClip">
+      <rect x="40" y="30" width="1120" height="720" rx="12"/>
+    </clipPath>
+    <linearGradient id="tabBarGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f6f6f6"/>
+      <stop offset="100%" stop-color="#ececec"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Backdrop -->
+  <rect width="1200" height="780" fill="#c8d0d8" rx="0"/>
+
+  <!-- Window shadow -->
+  <rect x="40" y="30" width="1120" height="720" rx="12" fill="#fafaf7" filter="url(#shadow)"/>
+
+  <!-- Window content clipped -->
+  <g clip-path="url(#windowClip)">
+
+    <!-- Tab bar (single row with traffic lights + tabs + title) -->
+    <rect x="40" y="30" width="1120" height="38" fill="url(#tabBarGrad)"/>
+    <line x1="40" y1="67" x2="1160" y2="67" stroke="#c8c8c8" stroke-width="1"/>
+
+    <!-- Traffic lights -->
+    <circle cx="62" cy="49" r="6.5" fill="#ff5f57"/>
+    <circle cx="82" cy="49" r="6.5" fill="#febc2e"/>
+    <circle cx="102" cy="49" r="6.5" fill="#28c840"/>
+
+    <!-- Active tab -->
+    <rect x="120" y="30" width="150" height="44" rx="6" fill="#fafaf7"/>
+    <rect x="120" y="30" width="150" height="2" fill="#267f99"/>
+    <text x="134" y="54" fill="#1e1e1e" font-size="12" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">main.go</text>
+    <text x="254" y="54" fill="#787878" font-size="10">×</text>
+
+    <!-- Tab separator -->
+    <line x1="272" y1="38" x2="272" y2="60" stroke="#c8c8c8" stroke-width="1"/>
+
+    <!-- Tab 2 (inactive) -->
+    <text x="284" y="54" fill="#787878" font-size="12" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">fibonacci.go</text>
+    <circle cx="382" cy="50" r="3.5" fill="#b49632"/>
+
+    <line x1="394" y1="38" x2="394" y2="60" stroke="#c8c8c8" stroke-width="1"/>
+
+    <!-- Tab 3 (inactive) -->
+    <text x="406" y="54" fill="#787878" font-size="12" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">render.go</text>
+    <text x="488" y="54" fill="#787878" font-size="10">×</text>
+
+    <!-- Plus button -->
+    <text x="514" y="55" fill="#828282" font-size="17" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">+</text>
+
+    <!-- App title and subtitle -->
+    <text x="548" y="54" fill="#646464" font-size="12">Zephyr</text>
+    <text x="604" y="54" fill="#aaaaaa" font-size="12">The caffeinated editor</text>
+
+    <!-- Theme toggle (sun icon placeholder) -->
+    <circle cx="1130" cy="49" r="6" fill="none" stroke="#aaaaaa" stroke-width="1.5"/>
+    <circle cx="1130" cy="49" r="2" fill="#aaaaaa"/>
+
+    <!-- Editor area — warm off-white -->
+    <rect x="40" y="68" width="1120" height="614" fill="#fafaf7"/>
+
+    <!-- Gutter -->
+    <rect x="40" y="68" width="52" height="614" fill="#fafaf7"/>
+    <line x1="92" y1="68" x2="92" y2="682" stroke="#dcdcdc" stroke-width="1"/>
+
+    <!-- Line numbers -->
+    <text fill="#969696" font-size="13" text-anchor="end">
+      <tspan x="84" y="90">1</tspan>
+      <tspan x="84" y="110">2</tspan>
+      <tspan x="84" y="130">3</tspan>
+      <tspan x="84" y="150">4</tspan>
+      <tspan x="84" y="170">5</tspan>
+      <tspan x="84" y="190">6</tspan>
+      <tspan x="84" y="210">7</tspan>
+      <tspan x="84" y="230">8</tspan>
+      <tspan x="84" y="250">9</tspan>
+      <tspan x="84" y="270">10</tspan>
+      <tspan x="84" y="290">11</tspan>
+      <tspan x="84" y="310">12</tspan>
+      <tspan x="84" y="330">13</tspan>
+      <tspan x="84" y="350">14</tspan>
+      <tspan x="84" y="370">15</tspan>
+      <tspan x="84" y="390">16</tspan>
+      <tspan x="84" y="410">17</tspan>
+      <tspan x="84" y="430">18</tspan>
+      <tspan x="84" y="450">19</tspan>
+      <tspan x="84" y="470">20</tspan>
+      <tspan x="84" y="490">21</tspan>
+      <tspan x="84" y="510">22</tspan>
+      <tspan x="84" y="530">23</tspan>
+      <tspan x="84" y="550">24</tspan>
+      <tspan x="84" y="570">25</tspan>
+      <tspan x="84" y="590">26</tspan>
+      <tspan x="84" y="610">27</tspan>
+      <tspan x="84" y="630">28</tspan>
+      <tspan x="84" y="650">29</tspan>
+      <tspan x="84" y="670">30</tspan>
+    </text>
+
+    <!-- Line highlight on line 10 -->
+    <rect x="92" y="254" width="1068" height="20" fill="#f4f3ef"/>
+
+    <!-- Code content — Go syntax highlighted (light theme) -->
+    <text y="90" font-size="13">
+      <tspan x="104" fill="#af00db">package</tspan>
+      <tspan fill="#1e1e1e"> main</tspan>
+    </text>
+
+    <text y="130" font-size="13">
+      <tspan x="104" fill="#af00db">import</tspan>
+      <tspan fill="#1e1e1e"> (</tspan>
+    </text>
+
+    <text y="150" font-size="13">
+      <tspan x="128" fill="#a31515">"fmt"</tspan>
+    </text>
+
+    <text y="170" font-size="13">
+      <tspan x="128" fill="#a31515">"math"</tspan>
+    </text>
+
+    <text y="190" font-size="13">
+      <tspan x="128" fill="#a31515">"strings"</tspan>
+    </text>
+
+    <text x="104" y="210" fill="#1e1e1e" font-size="13">)</text>
+
+    <text x="104" y="250" fill="#008000" font-size="13">// fibonacci returns the nth Fibonacci number using dynamic programming.</text>
+
+    <text y="270" font-size="13">
+      <tspan x="104" fill="#af00db">func</tspan>
+      <tspan fill="#795e26"> fibonacci</tspan>
+      <tspan fill="#1e1e1e">(</tspan>
+      <tspan fill="#001080">n</tspan>
+      <tspan fill="#1e1e1e"> </tspan>
+      <tspan fill="#267f99">int</tspan>
+      <tspan fill="#1e1e1e">) </tspan>
+      <tspan fill="#267f99">int</tspan>
+      <tspan fill="#1e1e1e"> {</tspan>
+    </text>
+
+    <text y="290" font-size="13">
+      <tspan x="128" fill="#af00db">if</tspan>
+      <tspan fill="#001080"> n</tspan>
+      <tspan fill="#1e1e1e"> &lt;= </tspan>
+      <tspan fill="#09885a">1</tspan>
+      <tspan fill="#1e1e1e"> {</tspan>
+    </text>
+
+    <text y="310" font-size="13">
+      <tspan x="152" fill="#af00db">return</tspan>
+      <tspan fill="#001080"> n</tspan>
+    </text>
+
+    <text x="128" y="330" fill="#1e1e1e" font-size="13">}</text>
+
+    <text y="350" font-size="13">
+      <tspan x="128" fill="#001080">a</tspan>
+      <tspan fill="#1e1e1e">, </tspan>
+      <tspan fill="#001080">b</tspan>
+      <tspan fill="#1e1e1e"> := </tspan>
+      <tspan fill="#09885a">0</tspan>
+      <tspan fill="#1e1e1e">, </tspan>
+      <tspan fill="#09885a">1</tspan>
+    </text>
+
+    <text y="370" font-size="13">
+      <tspan x="128" fill="#af00db">for</tspan>
+      <tspan fill="#001080"> i</tspan>
+      <tspan fill="#1e1e1e"> := </tspan>
+      <tspan fill="#09885a">2</tspan>
+      <tspan fill="#1e1e1e">; </tspan>
+      <tspan fill="#001080">i</tspan>
+      <tspan fill="#1e1e1e"> &lt;= </tspan>
+      <tspan fill="#001080">n</tspan>
+      <tspan fill="#1e1e1e">; </tspan>
+      <tspan fill="#001080">i</tspan>
+      <tspan fill="#1e1e1e">++ {</tspan>
+    </text>
+
+    <text y="390" font-size="13">
+      <tspan x="152" fill="#001080">a</tspan>
+      <tspan fill="#1e1e1e">, </tspan>
+      <tspan fill="#001080">b</tspan>
+      <tspan fill="#1e1e1e"> = </tspan>
+      <tspan fill="#001080">b</tspan>
+      <tspan fill="#1e1e1e">, </tspan>
+      <tspan fill="#001080">a</tspan>
+      <tspan fill="#1e1e1e">+</tspan>
+      <tspan fill="#001080">b</tspan>
+    </text>
+
+    <text x="128" y="410" fill="#1e1e1e" font-size="13">}</text>
+
+    <text y="430" font-size="13">
+      <tspan x="128" fill="#af00db">return</tspan>
+      <tspan fill="#001080"> b</tspan>
+    </text>
+
+    <text x="104" y="450" fill="#1e1e1e" font-size="13">}</text>
+
+    <text x="104" y="490" fill="#008000" font-size="13">// isPrime checks if a number is prime.</text>
+
+    <text y="510" font-size="13">
+      <tspan x="104" fill="#af00db">func</tspan>
+      <tspan fill="#795e26"> isPrime</tspan>
+      <tspan fill="#1e1e1e">(</tspan>
+      <tspan fill="#001080">n</tspan>
+      <tspan fill="#1e1e1e"> </tspan>
+      <tspan fill="#267f99">int</tspan>
+      <tspan fill="#1e1e1e">) </tspan>
+      <tspan fill="#267f99">bool</tspan>
+      <tspan fill="#1e1e1e"> {</tspan>
+    </text>
+
+    <text y="530" font-size="13">
+      <tspan x="128" fill="#af00db">if</tspan>
+      <tspan fill="#001080"> n</tspan>
+      <tspan fill="#1e1e1e"> &lt; </tspan>
+      <tspan fill="#09885a">2</tspan>
+      <tspan fill="#1e1e1e"> {</tspan>
+    </text>
+
+    <text y="550" font-size="13">
+      <tspan x="152" fill="#af00db">return</tspan>
+      <tspan fill="#267f99"> false</tspan>
+    </text>
+
+    <text x="128" y="570" fill="#1e1e1e" font-size="13">}</text>
+
+    <text y="590" font-size="13">
+      <tspan x="128" fill="#af00db">for</tspan>
+      <tspan fill="#001080"> i</tspan>
+      <tspan fill="#1e1e1e"> := </tspan>
+      <tspan fill="#09885a">2</tspan>
+      <tspan fill="#1e1e1e">; </tspan>
+      <tspan fill="#001080">i</tspan>
+      <tspan fill="#1e1e1e"> &lt;= </tspan>
+      <tspan fill="#267f99">int</tspan>
+      <tspan fill="#1e1e1e">(</tspan>
+      <tspan fill="#001080">math</tspan>
+      <tspan fill="#1e1e1e">.</tspan>
+      <tspan fill="#795e26">Sqrt</tspan>
+      <tspan fill="#1e1e1e">(</tspan>
+      <tspan fill="#795e26">float64</tspan>
+      <tspan fill="#1e1e1e">(</tspan>
+      <tspan fill="#001080">n</tspan>
+      <tspan fill="#1e1e1e">))); </tspan>
+      <tspan fill="#001080">i</tspan>
+      <tspan fill="#1e1e1e">++ {</tspan>
+    </text>
+
+    <text y="610" font-size="13">
+      <tspan x="152" fill="#af00db">if</tspan>
+      <tspan fill="#001080"> n</tspan>
+      <tspan fill="#1e1e1e">%</tspan>
+      <tspan fill="#001080">i</tspan>
+      <tspan fill="#1e1e1e"> == </tspan>
+      <tspan fill="#09885a">0</tspan>
+      <tspan fill="#1e1e1e"> {</tspan>
+    </text>
+
+    <text y="630" font-size="13">
+      <tspan x="176" fill="#af00db">return</tspan>
+      <tspan fill="#267f99"> false</tspan>
+    </text>
+
+    <text x="152" y="650" fill="#1e1e1e" font-size="13">}</text>
+
+    <text x="128" y="670" fill="#1e1e1e" font-size="13">}</text>
+
+    <!-- Cursor on line 10 -->
+    <rect x="314" y="257" width="2" height="16" fill="#1e1e1e"/>
+
+    <!-- Scrollbar -->
+    <rect x="1148" y="74" width="8" height="170" rx="4" fill="#a0a0a0" opacity="0.7"/>
+
+    <!-- Status bar -->
+    <rect x="40" y="682" width="1120" height="38" fill="#f0f0f0"/>
+    <line x1="40" y1="682" x2="1160" y2="682" stroke="#d2d2d2" stroke-width="1"/>
+    <text y="706" font-size="11.5" font-family="'SF Pro Text', 'Helvetica Neue', sans-serif">
+      <tspan x="56" fill="#646464">10:26</tspan>
+      <tspan x="1100" fill="#267f99">Go</tspan>
+    </text>
+
+  </g>
+
+  <!-- Window border -->
+  <rect x="40" y="30" width="1120" height="720" rx="12" fill="none" stroke="#bbb" stroke-width="0.5"/>
+</svg>

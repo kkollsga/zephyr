@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 
+	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/highlight"
 	"github.com/kristianweb/zephyr/internal/render"
 )
@@ -177,6 +178,15 @@ func matchDisplayLen(lineText string, runeCol, byteLen, tabSize int) int {
 
 func expandTabs(s string, tabSize int) string {
 	return render.ExpandTabs(s, tabSize)
+}
+
+// runeColToDisplayCol2 is a convenience that fetches the line text from the editor.
+func runeColToDisplayCol2(ed *editor.Editor, line, runeCol, tabSize int) int {
+	lineText, err := ed.Buffer.Line(line)
+	if err != nil {
+		return runeCol
+	}
+	return runeColToDisplayCol(lineText, runeCol, tabSize)
 }
 
 func tokensForRange(tokens []highlight.Token, startByte, endByte int) []highlight.Token {
