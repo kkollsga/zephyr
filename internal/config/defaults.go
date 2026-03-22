@@ -14,11 +14,12 @@ func DefaultBundle() ThemeBundle {
 	bundle, err := LoadBundleFromYAML(defaultThemeYAML)
 	if err != nil {
 		return ThemeBundle{
-			Name:     "Default",
-			Subtitle: "The caffeinated editor",
-			Fonts:    DefaultFontConfig(),
-			Dark:     DarkTheme(),
-			Light:    LightTheme(),
+			Name:       "Default",
+			Subtitle:   "The caffeinated editor",
+			Fonts:      DefaultFontConfig(),
+			MdMaxWidth: 1230,
+			Dark:       DarkTheme(),
+			Light:      LightTheme(),
 		}
 	}
 	return bundle

@@ -191,14 +191,22 @@ func (st *appState) handleKey(ke key.Event) {
 		case ke.Name == "Q" && ke.Modifiers == key.ModShortcut:
 			st.startQuitFlow()
 		case ke.Name == "C" && ke.Modifiers == key.ModShortcut:
-			// Copy full document text in read mode
-			if ed := st.activeEd(); ed != nil {
-				src := string(ed.Buffer.TextBytes(nil))
-				clipboard.Set(src)
+			// Copy selection or full document in read mode
+			if ts.mdSelAnchor != ts.mdSelCursor {
+				sel := mdSelectedText(ts.mdSelText, ts.mdSelAnchor, ts.mdSelCursor)
+				clipboard.Set(sel)
 				st.notification = "Copied to clipboard"
-				st.notificationUntil = time.Now().Add(2 * time.Second)
-				st.window.Invalidate()
+			} else if ed := st.activeEd(); ed != nil {
+				clipboard.Set(string(ed.Buffer.TextBytes(nil)))
+				st.notification = "Copied to clipboard"
 			}
+			st.notificationUntil = time.Now().Add(2 * time.Second)
+			st.window.Invalidate()
+		case ke.Name == "A" && ke.Modifiers == key.ModShortcut:
+			// Select all text in read mode
+			ts.mdSelAnchor = 0
+			ts.mdSelCursor = len(ts.mdSelText)
+			st.window.Invalidate()
 		case ke.Name == "F" && ke.Modifiers == key.ModShortcut:
 			st.openFindBar(false)
 		}
@@ -393,6 +401,13 @@ func (st *appState) handlePointer(pe pointer.Event) {
 					return
 				}
 			}
+			// Start text selection
+			absY := py - st.tabBarHeight + int(ts.mdScrollY)
+			off := mdCharOffset(ts.mdSelBlocks, px, absY)
+			ts.mdSelAnchor = off
+			ts.mdSelCursor = off
+			ts.mdSelActive = true
+			st.window.Invalidate()
 		}
 
 		sr := st.statusRend
@@ -471,6 +486,14 @@ func (st *appState) handlePointer(pe pointer.Event) {
 			st.handleTabBarDrag(int(pe.Position.X), int(pe.Position.Y))
 			return
 		}
+		// Markdown read mode drag selection
+		if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead && ts.mdSelActive {
+			px, py := int(pe.Position.X), int(pe.Position.Y)
+			absY := py - st.tabBarHeight + int(ts.mdScrollY)
+			ts.mdSelCursor = mdCharOffset(ts.mdSelBlocks, px, absY)
+			st.window.Invalidate()
+			return
+		}
 		if !st.dragging {
 			return
 		}
@@ -487,6 +510,10 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		if st.tabDrag.active {
 			st.handleTabBarRelease(int(pe.Position.X), int(pe.Position.Y))
 			return
+		}
+		// End markdown selection
+		if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+			ts.mdSelActive = false
 		}
 		if st.dragging {
 			st.dragging = false

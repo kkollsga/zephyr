@@ -22,6 +22,18 @@ type codeCopyBtn struct {
 	code        string
 }
 
+// mdSelBlock records a block's layout position and its range in the flat
+// selection text, used for mapping mouse coordinates to character offsets.
+type mdSelBlock struct {
+	y, h     int   // screen y and height (before scroll adjustment)
+	x        int   // left edge of text
+	textOff  int   // character offset into mdSelText
+	textLen  int   // number of characters
+	lineH    int   // line height in pixels
+	charW    int   // average character width for hit testing
+	lineLens []int // characters per wrapped line
+}
+
 // mdCheckbox tracks a checkbox hit area for task list toggling.
 type mdCheckbox struct {
 	x, y, w, h  int
@@ -142,32 +154,35 @@ func (st *appState) ensureMdRenderers(gtx layout.Context) *mdRenderers {
 	mono := st.fontCfg.Monospace
 	fg := st.theme.Foreground
 
-	mk := func(size float32, lh float32, face string, weight font.Weight, style font.Style) *render.TextRenderer {
+	mk := func(size float32, lh float32, ls float32, face string, weight font.Weight, style font.Style) *render.TextRenderer {
 		r := render.NewTextRenderer(st.shaper, render.TextStyle{
-			FontSize:   unit.Sp(size),
-			LineHeight: lh,
-			Foreground: fg,
-			Typeface:   face,
-			Weight:     weight,
-			FontStyle:  style,
+			FontSize:      unit.Sp(size),
+			LineHeight:    lh,
+			LetterSpacing: ls,
+			Foreground:    fg,
+			Typeface:      face,
+			Weight:        weight,
+			FontStyle:     style,
 		})
 		r.ComputeMetrics(gtx)
 		return r
 	}
 
+	var bodyLS float32 = 0.3 // subtle letter spacing for body text
+
 	st.mdRend = &mdRenderers{
-		h1:        mk(28, 1.1, heading, font.Bold, font.Regular),
-		h2:        mk(24, 1.1, heading, font.Bold, font.Regular),
-		h3:        mk(20, 1.1, heading, font.Bold, font.Regular),
-		h4:        mk(17, 1.1, heading, font.Bold, font.Regular),
-		h5:        mk(15, 1.1, heading, font.Normal, font.Regular),
-		h6:        mk(14, 1.1, heading, font.Normal, font.Regular),
-		body:      mk(14, 1.2, body, font.Normal, font.Regular),
-		bodySmall: mk(12, 1.2, body, font.Normal, font.Regular),
-		code:      mk(13, 1.3, mono, font.Normal, font.Regular),
-		bold:      mk(14, 1.2, body, font.Bold, font.Regular),
-		ital:      mk(14, 1.2, body, font.Normal, font.Italic),
-		boldItal:  mk(14, 1.2, body, font.Bold, font.Italic),
+		h1:        mk(28, 1.2, 0, heading, font.Bold, font.Regular),
+		h2:        mk(24, 1.2, 0, heading, font.Bold, font.Regular),
+		h3:        mk(20, 1.2, 0, heading, font.Bold, font.Regular),
+		h4:        mk(17, 1.2, 0, heading, font.Bold, font.Regular),
+		h5:        mk(15, 1.2, 0, heading, font.Normal, font.Regular),
+		h6:        mk(14, 1.2, 0, heading, font.Normal, font.Regular),
+		body:      mk(15, 1.55, bodyLS, body, font.Normal, font.Regular),
+		bodySmall: mk(14, 1.5, bodyLS, body, font.Normal, font.Regular),
+		code:      mk(13, 1.3, 0, mono, font.Normal, font.Regular),
+		bold:      mk(15, 1.55, bodyLS, body, font.Bold, font.Regular),
+		ital:      mk(15, 1.55, bodyLS, body, font.Normal, font.Italic),
+		boldItal:  mk(15, 1.55, bodyLS, body, font.Bold, font.Italic),
 	}
 	return st.mdRend
 }
@@ -201,19 +216,31 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 		return
 	}
 	theme := st.theme
-	ts.mdCopyBtns = ts.mdCopyBtns[:0]     // reset copy button hit areas
-	ts.mdCheckboxes = ts.mdCheckboxes[:0] // reset checkbox hit areas
+	ts.mdCopyBtns = ts.mdCopyBtns[:0]       // reset copy button hit areas
+	ts.mdCheckboxes = ts.mdCheckboxes[:0]   // reset checkbox hit areas
+	ts.mdSelBlocks = ts.mdSelBlocks[:0]     // reset selection blocks
+	var selBuf strings.Builder              // build flat text for selection
 
 	charW := st.textRend.CharWidth
 	if charW == 0 {
 		charW = 8
 	}
-	editorX := charW * 5 // left margin — generous for readability
-	rightMargin := charW * 5
-	maxW := gtx.Constraints.Max.X - editorX - rightMargin
+	minMargin := charW * 3 // minimum side margin
+	windowW := gtx.Constraints.Max.X
+
+	// Apply max body width (pixels) and center
+	mdMaxPx := st.themeBundle.MdMaxWidth
+	if mdMaxPx <= 0 {
+		mdMaxPx = 1230
+	}
+	maxW := windowW - minMargin*2
+	if maxW > mdMaxPx {
+		maxW = mdMaxPx
+	}
 	if maxW < charW {
 		maxW = charW
 	}
+	editorX := (windowW - maxW) / 2 // center the body
 	editorH := gtx.Constraints.Max.Y // already clipped to editor area
 
 	scrollY := int(ts.mdScrollY)
@@ -228,10 +255,8 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 		blanks := block.BlankLinesBefore
 		switch {
 		case prevKind < 0:
-			// first block — small top margin
-			if block.Kind == render.BlockHeading {
-				y += bodyH / 3
-			}
+			// first block — generous top margin
+			y += bodyH * 2
 		case block.Kind == render.BlockHeading:
 			// Large gap above headings to clearly separate sections
 			y += bodyH * 2
@@ -245,16 +270,16 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 		case blanks >= 2:
 			y += bodyH + (blanks-1)*bodyH/3
 		case blanks == 1:
-			y += bodyH / 2
+			y += bodyH * 2 / 3
 		default:
-			y += bodyH / 4
+			y += bodyH / 3
 		}
 
 		switch block.Kind {
 		case render.BlockHeading:
 			hr := mr.heading(block.Level)
 			text := spansToPlain(block.Spans)
-			lines := splitAndWrap(text, maxW, hr.CharWidth)
+			lines := wrapTextMeasured(text, maxW, gtx, hr)
 			blockH = len(lines) * hr.LineHeightPx
 
 			// Add separator line below H1/H2 — tight below, space comes from next block's margin
@@ -282,8 +307,8 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 			}
 
 		case render.BlockParagraph:
-			// Estimate height for scroll (approximate with plain text wrapping)
-			lines := splitAndWrap(spansToPlain(block.Spans), maxW, mr.body.CharWidth)
+			// Estimate height for scroll
+			lines := wrapTextMeasured(spansToPlain(block.Spans), maxW, gtx, mr.body)
 			blockH = len(lines) * mr.body.LineHeightPx
 
 			if y+blockH > 0 && y < editorH {
@@ -425,8 +450,9 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 		case render.BlockBlockquote:
 			// Render children as italic text with a colored left bar
 			childText := blocksToPlain(block.Children)
-			lines := splitAndWrap(childText, maxW-24, mr.ital.CharWidth)
-			blockH = len(lines) * mr.ital.LineHeightPx
+			bqRend := mr.ital
+			lines := wrapTextMeasured(childText, maxW-24, gtx, bqRend)
+			blockH = len(lines) * bqRend.LineHeightPx
 
 			if y+blockH > 0 && y < editorH {
 				// Left bar (4px wide, accent color)
@@ -440,7 +466,7 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 
 				// Italic text in subdued color
 				for i, line := range lines {
-					mr.ital.RenderGlyphs(gtx.Ops, gtx, line, editorX+20, y+i*mr.ital.LineHeightPx, theme.StatusFg)
+					bqRend.RenderGlyphs(gtx.Ops, gtx, line, editorX+20, y+i*bqRend.LineHeightPx, theme.StatusFg)
 				}
 			}
 
@@ -468,7 +494,7 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 			}
 
 			text := spansToPlain(textSpans)
-			lines := splitAndWrap(text, maxW-indent-24, listRend.CharWidth)
+			lines := wrapTextMeasured(text, maxW-indent-24, gtx, listRend)
 			if len(lines) == 0 {
 				lines = []string{""}
 			}
@@ -578,12 +604,87 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 			blockH = st.drawMarkdownTable(gtx, mr, &block, editorX, y, maxW, editorH, theme)
 		}
 
+		// Record block for text selection with per-line character counts
+		blockText := blockPlainText(&block)
+		rend := mr.body
+		if block.Kind == render.BlockHeading {
+			rend = mr.heading(block.Level)
+		} else if block.Kind == render.BlockCodeBlock {
+			rend = mr.code
+		}
+		wrappedLines := wrapTextMeasured(blockText, maxW, gtx, rend)
+		lineLens := make([]int, len(wrappedLines))
+		for i, l := range wrappedLines {
+			lineLens[i] = len(l)
+		}
+		ts.mdSelBlocks = append(ts.mdSelBlocks, mdSelBlock{
+			y:        y + scrollY, // absolute y (not scroll-adjusted)
+			h:        blockH,
+			x:        editorX,
+			textOff:  selBuf.Len(),
+			textLen:  len(blockText),
+			lineH:    rend.LineHeightPx,
+			charW:    max(rend.CharWidth, 1),
+			lineLens: lineLens,
+		})
+		selBuf.WriteString(blockText)
+		selBuf.WriteByte('\n')
+
 		y += blockH
 		prevKind = block.Kind
 	}
+	ts.mdSelText = selBuf.String()
 
-	// Store total height for scroll clamping
-	ts.mdTotalH = y + scrollY
+	// Draw selection highlight (character-level)
+	if ts.mdSelAnchor != ts.mdSelCursor {
+		selLo, selHi := ts.mdSelAnchor, ts.mdSelCursor
+		if selLo > selHi {
+			selLo, selHi = selHi, selLo
+		}
+		selColor := theme.Selection
+		for _, sb := range ts.mdSelBlocks {
+			blockEnd := sb.textOff + sb.textLen
+			if selHi <= sb.textOff || selLo >= blockEnd+1 {
+				continue
+			}
+			by := sb.y - scrollY
+			if by+sb.h <= 0 || by >= editorH {
+				continue
+			}
+			// Walk wrapped lines and draw highlight per line
+			charOff := sb.textOff
+			lineY := by
+			for _, ll := range sb.lineLens {
+				lineEnd := charOff + ll
+				// Does this line overlap selection?
+				if selHi > charOff && selLo < lineEnd {
+					startCol := 0
+					if selLo > charOff {
+						startCol = selLo - charOff
+					}
+					endCol := ll
+					if selHi < lineEnd {
+						endCol = selHi - charOff
+					}
+					x1 := sb.x + startCol*sb.charW
+					x2 := sb.x + endCol*sb.charW
+					hlOff := op.Offset(image.Pt(x1, lineY)).Push(gtx.Ops)
+					hlRect := clip.Rect{Max: image.Pt(x2-x1, sb.lineH)}.Push(gtx.Ops)
+					paint.ColorOp{Color: selColor}.Add(gtx.Ops)
+					paint.PaintOp{}.Add(gtx.Ops)
+					hlRect.Pop()
+					hlOff.Pop()
+				}
+				charOff = lineEnd + 1 // +1 for word-wrap space
+				lineY += sb.lineH
+			}
+		}
+	}
+
+	// Store total height for scroll clamping.
+	// Add bottom padding so the last line isn't hidden behind the status bar.
+	statusH := mr.body.LineHeightPx + 6
+	ts.mdTotalH = y + scrollY + statusH + mr.body.LineHeightPx*2
 }
 
 // drawMarkdownTable renders a table block sized to its content and returns its height.
@@ -708,6 +809,32 @@ func spansToPlain(spans []render.InlineSpan) string {
 	return b.String()
 }
 
+// blockPlainText returns the plain text of a single block.
+func blockPlainText(b *render.Block) string {
+	switch b.Kind {
+	case render.BlockCodeBlock:
+		return b.CodeText
+	case render.BlockBlockquote:
+		return blocksToPlain(b.Children)
+	case render.BlockThematicBreak:
+		return ""
+	case render.BlockTable:
+		var buf strings.Builder
+		for _, row := range b.TableCells {
+			for c, cell := range row {
+				if c > 0 {
+					buf.WriteByte('\t')
+				}
+				buf.WriteString(cell)
+			}
+			buf.WriteByte('\n')
+		}
+		return strings.TrimRight(buf.String(), "\n")
+	default:
+		return spansToPlain(b.Spans)
+	}
+}
+
 // blocksToPlain extracts plain text from a slice of blocks.
 func blocksToPlain(blocks []render.Block) string {
 	var b strings.Builder
@@ -765,6 +892,114 @@ func wrapText(text string, maxW, charW int) []string {
 		}
 		lines = append(lines, text[:cut])
 		text = strings.TrimLeft(text[cut:], " ")
+	}
+	return lines
+}
+
+// mdCharOffset maps a screen position (px, py) to a character offset in mdSelText.
+// py should be in absolute coordinates (with scroll added back).
+func mdCharOffset(blocks []mdSelBlock, px, py int) int {
+	// Find the block containing py
+	for _, b := range blocks {
+		if py < b.y || py >= b.y+b.h {
+			continue
+		}
+		if b.textLen == 0 || len(b.lineLens) == 0 {
+			return b.textOff
+		}
+		// Which wrapped line within the block
+		lineIdx := (py - b.y) / b.lineH
+		if lineIdx < 0 {
+			lineIdx = 0
+		}
+		if lineIdx >= len(b.lineLens) {
+			lineIdx = len(b.lineLens) - 1
+		}
+		// Character offset to the start of this line
+		lineOff := 0
+		for i := 0; i < lineIdx; i++ {
+			lineOff += b.lineLens[i]
+			lineOff++ // account for space consumed by word wrap
+		}
+		// Column within the line
+		col := (px - b.x) / b.charW
+		if col < 0 {
+			col = 0
+		}
+		if col > b.lineLens[lineIdx] {
+			col = b.lineLens[lineIdx]
+		}
+		off := b.textOff + lineOff + col
+		if off > b.textOff+b.textLen {
+			off = b.textOff + b.textLen
+		}
+		return off
+	}
+	// Before first block
+	if len(blocks) > 0 && py < blocks[0].y {
+		return 0
+	}
+	// After last block
+	if len(blocks) > 0 {
+		last := blocks[len(blocks)-1]
+		if py >= last.y+last.h {
+			return last.textOff + last.textLen
+		}
+	}
+	return 0
+}
+
+// mdSelectedText returns the selected text from the flat document text.
+func mdSelectedText(selText string, anchor, cursor int) string {
+	lo, hi := anchor, cursor
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(selText) {
+		hi = len(selText)
+	}
+	return selText[lo:hi]
+}
+
+// wrapTextMeasured wraps text using actual glyph measurement for proportional fonts.
+func wrapTextMeasured(text string, maxW int, gtx layout.Context, tr *render.TextRenderer) []string {
+	segments := strings.Split(text, "\n")
+	var lines []string
+	for _, seg := range segments {
+		seg = strings.TrimRight(seg, " ")
+		if seg == "" {
+			lines = append(lines, "")
+			continue
+		}
+		if tr.MeasureString(gtx, seg) <= maxW {
+			lines = append(lines, seg)
+			continue
+		}
+		// Word-wrap by measuring
+		words := strings.Fields(seg)
+		cur := ""
+		for _, w := range words {
+			candidate := cur
+			if candidate != "" {
+				candidate += " "
+			}
+			candidate += w
+			if tr.MeasureString(gtx, candidate) > maxW && cur != "" {
+				lines = append(lines, cur)
+				cur = w
+			} else {
+				cur = candidate
+			}
+		}
+		if cur != "" {
+			lines = append(lines, cur)
+		}
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
 	}
 	return lines
 }

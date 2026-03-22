@@ -516,11 +516,12 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 
 		// Title
 		fg := st.theme.Foreground
-		tr.RenderGlyphs(gtx.Ops, gtx, tab.Title, floatX+m.leftPad, textY, fg)
+		dragTitle := clipTabTitle(tab.Title)
+		tr.RenderGlyphs(gtx.Ops, gtx, dragTitle, floatX+m.leftPad, textY, fg)
 
 		// Close button / modified dot
 		dotR := gtx.Dp(3)
-		closeX := floatX + m.leftPad + utf8.RuneCountInString(tab.Title)*tr.CharWidth + m.innerGap
+		closeX := floatX + m.leftPad + utf8.RuneCountInString(dragTitle)*tr.CharWidth + m.innerGap
 		closeY := st.tabBarHeight / 2
 		if tab.Editor.Modified {
 			dotCx := closeX + m.closeW/2
@@ -601,6 +602,42 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 	if showDropdown && hasOverflow {
 		st.drawOverflowDropdown(gtx)
 	}
+
+	// --- Tab tooltip for clipped titles ---
+	// Determine which tab the pointer is over
+	hoveredIdx := -1
+	hoveredTabX := 0
+	if inTabBar && !dragging {
+		tx := st.trafficLightPx
+		for _, ti := range st.barTabIdxs {
+			tw := st.tabWidth(st.tabBar.Tabs[ti].Title)
+			if st.hoverX >= tx && st.hoverX < tx+tw {
+				hoveredIdx = ti
+				hoveredTabX = tx
+				break
+			}
+			tx += tw
+		}
+	}
+	if hoveredIdx != st.tooltipTabIdx {
+		st.tooltipTabIdx = hoveredIdx
+		st.tooltipEnter = time.Now()
+		st.tooltipX = hoveredTabX
+	}
+	// Show tooltip after 600ms hover on a clipped tab
+	if st.tooltipTabIdx >= 0 && st.tooltipTabIdx < len(st.tabBar.Tabs) &&
+		time.Since(st.tooltipEnter) >= 600*time.Millisecond {
+		fullTitle := st.tabBar.Tabs[st.tooltipTabIdx].Title
+		if clipTabTitle(fullTitle) != fullTitle {
+			st.drawTabTooltip(gtx, fullTitle, st.tooltipX)
+		}
+	}
+	// Request a frame to show the tooltip after the delay
+	if st.tooltipTabIdx >= 0 && st.tooltipTabIdx < len(st.tabBar.Tabs) &&
+		clipTabTitle(st.tabBar.Tabs[st.tooltipTabIdx].Title) != st.tabBar.Tabs[st.tooltipTabIdx].Title &&
+		time.Since(st.tooltipEnter) < 600*time.Millisecond {
+		gtx.Execute(op.InvalidateCmd{At: st.tooltipEnter.Add(600 * time.Millisecond)})
+	}
 }
 
 // drawSingleTab draws one tab at the given X position (used by drawTabBar).
@@ -608,8 +645,8 @@ func (st *appState) drawSingleTab(gtx layout.Context, i, tabX, textY, radius int
 	tr := st.tabRend
 	m := st.tabMetrics()
 	tab := st.tabBar.Tabs[i]
-	title := tab.Title
-	tabW := st.tabWidth(title)
+	title := clipTabTitle(tab.Title)
+	tabW := st.tabWidth(tab.Title)
 	dotR := gtx.Dp(3)
 
 	// Active tab background with rounded top corners and accent line.
@@ -628,7 +665,7 @@ func (st *appState) drawSingleTab(gtx layout.Context, i, tabX, textY, radius int
 
 		// Accent: fill the entire tab shape with accent color
 		accentClip := clip.UniformRRect(tabRect, radius).Push(gtx.Ops)
-		paint.ColorOp{Color: st.theme.TabAccent}.Add(gtx.Ops)
+		paint.ColorOp{Color: st.theme.MdAccent}.Add(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
 		accentClip.Pop()
 
@@ -675,6 +712,62 @@ func (st *appState) drawSingleTab(gtx layout.Context, i, tabX, textY, radius int
 		xGlyphX := closeX + (m.closeW-tr.CharWidth)/2
 		tr.RenderGlyphs(gtx.Ops, gtx, "x", xGlyphX, textY, xFg)
 	}
+}
+
+// drawTabTooltip renders a tooltip below the tab bar showing the full filename.
+func (st *appState) drawTabTooltip(gtx layout.Context, text string, tabX int) {
+	tr := st.tabRend
+	if tr == nil {
+		return
+	}
+	padX := 6
+	padY := 4
+	textW := utf8.RuneCountInString(text) * tr.CharWidth
+	tipW := textW + padX*2
+	tipH := tr.LineHeightPx + padY*2
+	tipX := tabX
+	// Clamp to window bounds
+	if tipX+tipW > gtx.Constraints.Max.X-4 {
+		tipX = gtx.Constraints.Max.X - tipW - 4
+	}
+	if tipX < 4 {
+		tipX = 4
+	}
+	tipY := st.tabBarHeight + 2
+
+	// Shadow
+	shadowOff := op.Offset(image.Pt(tipX+2, tipY+2)).Push(gtx.Ops)
+	shadowRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(tipW, tipH)}, 4).Push(gtx.Ops)
+	paint.ColorOp{Color: color.NRGBA{A: 40}}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	shadowRect.Pop()
+	shadowOff.Pop()
+
+	// Background
+	bgOff := op.Offset(image.Pt(tipX, tipY)).Push(gtx.Ops)
+	bgRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(tipW, tipH)}, 4).Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bgRect.Pop()
+	bgOff.Pop()
+
+	// Border
+	borderOff := op.Offset(image.Pt(tipX, tipY)).Push(gtx.Ops)
+	borderRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(tipW, tipH)}, 4).Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	borderRect.Pop()
+	borderOff.Pop()
+	// Inner fill (1px inset for border effect)
+	innerOff := op.Offset(image.Pt(tipX+1, tipY+1)).Push(gtx.Ops)
+	innerRect := clip.UniformRRect(image.Rectangle{Max: image.Pt(tipW-2, tipH-2)}, 3).Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	innerRect.Pop()
+	innerOff.Pop()
+
+	// Text
+	tr.RenderGlyphs(gtx.Ops, gtx, text, tipX+padX, tipY+padY, st.theme.Foreground)
 }
 
 // drawOverflowDropdown renders the dropdown menu listing overflowed tabs.

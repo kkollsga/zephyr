@@ -18,12 +18,13 @@ import (
 
 // TextStyle holds the styling parameters for text rendering.
 type TextStyle struct {
-	FontSize   unit.Sp
-	LineHeight float32 // multiplier, e.g. 1.5
-	Foreground color.NRGBA
-	Typeface   string      // font face name, e.g. "Menlo, monospace"
-	Weight     font.Weight // e.g. font.Bold
-	FontStyle  font.Style  // e.g. font.Italic
+	FontSize      unit.Sp
+	LineHeight    float32 // multiplier, e.g. 1.5
+	LetterSpacing float32 // extra pixels between characters (0 = normal)
+	Foreground    color.NRGBA
+	Typeface      string      // font face name, e.g. "Menlo, monospace"
+	Weight        font.Weight // e.g. font.Bold
+	FontStyle     font.Style  // e.g. font.Italic
 }
 
 // TextRenderer renders lines of monospaced text with per-character coloring.
@@ -106,8 +107,13 @@ func (tr *TextRenderer) MeasureString(gtx layout.Context, s string) int {
 	params.MaxWidth = 1 << 30
 	tr.Shaper.LayoutString(params, s)
 	total := fixed.Int26_6(0)
+	n := 0
 	for g, ok := tr.Shaper.NextGlyph(); ok; g, ok = tr.Shaper.NextGlyph() {
 		total += g.Advance
+		n++
+	}
+	if tr.Style.LetterSpacing != 0 && n > 1 {
+		total += fixed.Int26_6(tr.Style.LetterSpacing*64) * fixed.Int26_6(n-1)
 	}
 	return total.Round()
 }
@@ -171,11 +177,17 @@ func (tr *TextRenderer) renderText(ops *op.Ops, gtx layout.Context, s string, x,
 	var lineX fixed.Int26_6
 	var lineY int32
 	first := true
+	spacing := tr.Style.LetterSpacing
 	for g, ok := tr.Shaper.NextGlyph(); ok; g, ok = tr.Shaper.NextGlyph() {
 		if first {
 			lineX = g.X
 			lineY = g.Y
 			first = false
+		}
+		// Apply letter spacing: shift glyph position and widen advance
+		if spacing != 0 && len(glyphs) > 0 {
+			extra := fixed.Int26_6(spacing*64) * fixed.Int26_6(len(glyphs))
+			g.X += extra
 		}
 		glyphs = append(glyphs, g)
 	}

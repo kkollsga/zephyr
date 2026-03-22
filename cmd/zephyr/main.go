@@ -46,8 +46,13 @@ type tabState struct {
 	mdDoc      *render.MarkdownDoc // parsed markdown for read mode
 	mdScrollY  float64             // pixel scroll offset for read mode
 	mdTotalH   int                 // total rendered height for scroll clamping
-	mdCopyBtns  []codeCopyBtn       // code block copy button hit areas
-	mdCheckboxes []mdCheckbox      // task list checkbox hit areas
+	mdCopyBtns   []codeCopyBtn  // code block copy button hit areas
+	mdCheckboxes []mdCheckbox  // task list checkbox hit areas
+	mdSelActive  bool          // true during a drag-select
+	mdSelAnchor  int           // character offset where selection started
+	mdSelCursor  int           // character offset where selection currently is
+	mdSelText    string        // full plain text of the document for selection
+	mdSelBlocks  []mdSelBlock  // per-block layout info for selection mapping
 
 	// Word wrap
 	wrapMap *wrapMap // visual line mapping (nil when wrap is off)
@@ -92,6 +97,11 @@ type appState struct {
 	trafficLightPx int     // traffic light padding in pixels (scaled from Dp)
 	hoverX, hoverY int     // last pointer position for hover effects
 	dp             func(v unit.Dp) int // cached scale function from latest gtx
+
+	// Tab tooltip state
+	tooltipTabIdx  int       // tab index the pointer is hovering (-1 = none)
+	tooltipEnter   time.Time // when the pointer entered the tab
+	tooltipX       int       // X position of the hovered tab (for tooltip placement)
 
 	// Tab overflow state
 	overflowOpen         bool  // true when the overflow dropdown is visible
@@ -187,12 +197,21 @@ func (st *appState) activeTabState() *tabState {
 				ts.langLabel = ts.highlighter.Language()
 			}
 		}
+		// Open markdown files in read mode by default
+		if ts.langLabel == "Markdown" {
+			ts.mode = viewMarkdownRead
+			ts.mdDoc = render.ParseMarkdown(ed.Buffer.TextBytes(nil))
+		}
 		st.tabStates[ed] = ts
 	}
 	return ts
 }
 
 func run() {
+	// Load config and theme bundle early (before tab creation)
+	config.EnsureDefaultThemes()
+	cfg := config.LoadConfig()
+
 	tabBar := ui.NewTabBar()
 
 	if len(os.Args) > 2 && os.Args[1] == "--temp" {
@@ -225,10 +244,6 @@ func run() {
 		tabBar.OpenEditor(ed, "Untitled")
 	}
 
-	// Load config and theme bundle
-	config.EnsureDefaultThemes()
-	cfg := config.LoadConfig()
-
 	bundle, err := config.LoadBundleByName(cfg.Theme)
 	if err != nil {
 		bundle = config.DefaultBundle()
@@ -239,19 +254,20 @@ func run() {
 	w := &app.Window{}
 
 	st := &appState{
-		tabBar:      tabBar,
-		tabStates:   make(map[*editor.Editor]*tabState),
-		theme:       theme,
-		colorMap:    render.TokenColorMap(theme),
-		tag:         new(bool),
-		langSel:     ui.NewLanguageSelector(),
-		findBar:     ui.NewFindReplaceBar(),
-		window:      w,
-		darkMode:    cfg.DarkMode,
-		themeName:   cfg.Theme,
-		themeBundle: bundle,
-		fontCfg:     bundle.Fonts,
-		wordWrap:    cfg.WordWrap,
+		tabBar:        tabBar,
+		tabStates:     make(map[*editor.Editor]*tabState),
+		theme:         theme,
+		colorMap:      render.TokenColorMap(theme),
+		tag:           new(bool),
+		langSel:       ui.NewLanguageSelector(),
+		findBar:       ui.NewFindReplaceBar(),
+		window:        w,
+		darkMode:      cfg.DarkMode,
+		themeName:     cfg.Theme,
+		themeBundle:   bundle,
+		fontCfg:       bundle.Fonts,
+		wordWrap:      cfg.WordWrap,
+		tooltipTabIdx: -1,
 	}
 
 	// Init tab state for first tab
@@ -313,6 +329,19 @@ func run() {
 			}
 			if wordWrapToggled() {
 				st.toggleWordWrap()
+			}
+			if openPath := checkOpenFile(); openPath != "" {
+				// If the only tab is an empty untitled one, replace it
+				if len(st.tabBar.Tabs) == 1 && st.tabBar.Tabs[0].IsUntitled &&
+					!st.tabBar.Tabs[0].Editor.Modified {
+					// Remove the empty tab's state
+					delete(st.tabStates, st.tabBar.Tabs[0].Editor)
+					st.tabBar.ForceCloseTab(0)
+				}
+				st.tabBar.OpenFile(openPath)
+				st.activeTabState() // init tab state (incl. markdown read mode)
+				st.updateWindowTitle()
+				w.Invalidate()
 			}
 			if !st.exitPending {
 				st.handleEvents(gtx, w)

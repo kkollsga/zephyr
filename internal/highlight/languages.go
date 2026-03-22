@@ -17,18 +17,27 @@ type LanguageInfo struct {
 	Name     string
 	Language *sitter.Language
 	Query    string
+	initLang func() *sitter.Language // lazy loader; nil once Language is set
+}
+
+// ensureLoaded initializes the Language field on first access.
+func (li *LanguageInfo) ensureLoaded() {
+	if li.Language == nil && li.initLang != nil {
+		li.Language = li.initLang()
+		li.initLang = nil
+	}
 }
 
 // registry maps file extensions to language info.
 var registry = map[string]*LanguageInfo{}
 
 func init() {
-	Register(".go", &LanguageInfo{Name: "Go", Language: golang.GetLanguage(), Query: goHighlightQuery})
-	Register(".py", &LanguageInfo{Name: "Python", Language: python.GetLanguage(), Query: pythonHighlightQuery})
-	Register(".js", &LanguageInfo{Name: "JavaScript", Language: javascript.GetLanguage(), Query: jsHighlightQuery})
-	Register(".jsx", &LanguageInfo{Name: "JavaScript", Language: javascript.GetLanguage(), Query: jsHighlightQuery})
-	Register(".rs", &LanguageInfo{Name: "Rust", Language: rust.GetLanguage(), Query: rustHighlightQuery})
-	Register(".md", &LanguageInfo{Name: "Markdown", Language: tree_sitter_markdown.GetLanguage(), Query: markdownHighlightQuery})
+	Register(".go", &LanguageInfo{Name: "Go", initLang: golang.GetLanguage, Query: goHighlightQuery})
+	Register(".py", &LanguageInfo{Name: "Python", initLang: python.GetLanguage, Query: pythonHighlightQuery})
+	Register(".js", &LanguageInfo{Name: "JavaScript", initLang: javascript.GetLanguage, Query: jsHighlightQuery})
+	Register(".jsx", &LanguageInfo{Name: "JavaScript", initLang: javascript.GetLanguage, Query: jsHighlightQuery})
+	Register(".rs", &LanguageInfo{Name: "Rust", initLang: rust.GetLanguage, Query: rustHighlightQuery})
+	Register(".md", &LanguageInfo{Name: "Markdown", initLang: tree_sitter_markdown.GetLanguage, Query: markdownHighlightQuery})
 }
 
 // Register adds a language to the registry.
@@ -38,13 +47,18 @@ func Register(ext string, info *LanguageInfo) {
 
 // ForExtension returns the language info for a file extension, or nil.
 func ForExtension(ext string) *LanguageInfo {
-	return registry[ext]
+	info := registry[ext]
+	if info != nil {
+		info.ensureLoaded()
+	}
+	return info
 }
 
 // ForName returns the language info for a language name, or nil.
 func ForName(name string) *LanguageInfo {
 	for _, info := range registry {
 		if info.Name == name {
+			info.ensureLoaded()
 			return info
 		}
 	}

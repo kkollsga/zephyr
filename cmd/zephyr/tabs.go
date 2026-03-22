@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,19 +14,46 @@ import (
 	"github.com/kristianweb/zephyr/internal/ipc"
 )
 
+// maxTabTitleChars is the maximum visible characters for the filename stem.
+// The extension (up to 3 chars + dot) is appended separately.
+const maxTabTitleChars = 14
+
 func (st *appState) tabMetrics() tabLayout {
 	if st.dp == nil {
-		return tabLayout{8, 2, 10, 6, 2, 28, 16}
+		return tabLayout{8, 6, 10, 6, 2, 28, 16}
 	}
 	return tabLayout{
 		leftPad:  st.dp(8),
-		innerGap: st.dp(2),
+		innerGap: st.dp(6),
 		closeW:   st.dp(10),
 		rightPad: st.dp(6),
 		tabGap:   st.dp(2),
 		plusW:     st.dp(28),
 		titleGap: st.dp(16),
 	}
+}
+
+// clipTabTitle truncates a tab title to maxTabTitleChars for the stem,
+// preserving the extension (up to ".xxx"). E.g.:
+//
+//	"very_long_filename.go" → "very_long_file….go"
+//	"short.md" → "short.md" (unchanged)
+func clipTabTitle(title string) string {
+	ext := filepath.Ext(title)
+	stem := title[:len(title)-len(ext)]
+
+	// Clamp extension to dot + 3 chars max
+	extRunes := []rune(ext)
+	if len(extRunes) > 4 {
+		extRunes = extRunes[:4]
+		ext = string(extRunes)
+	}
+
+	stemRunes := []rune(stem)
+	if len(stemRunes) <= maxTabTitleChars {
+		return string(stemRunes) + ext
+	}
+	return string(stemRunes[:maxTabTitleChars]) + "\u2026" + ext
 }
 
 // tabWidth computes the pixel width of a tab given its title.
@@ -36,7 +64,8 @@ func (st *appState) tabWidth(title string) int {
 		return 0
 	}
 	m := st.tabMetrics()
-	return m.leftPad + utf8.RuneCountInString(title)*tr.CharWidth + m.innerGap + m.closeW + m.rightPad
+	display := clipTabTitle(title)
+	return m.leftPad + utf8.RuneCountInString(display)*tr.CharWidth + m.innerGap + m.closeW + m.rightPad
 }
 
 func (st *appState) newTab() {

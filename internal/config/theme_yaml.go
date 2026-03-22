@@ -19,17 +19,18 @@ func DefaultFontConfig() FontConfig {
 	return FontConfig{
 		Monospace: "Menlo, monospace",
 		Heading:   "Helvetica Neue, sans-serif",
-		Body:      "Helvetica Neue, sans-serif",
+		Body:      "Charter, Georgia, serif",
 	}
 }
 
 // ThemeBundle holds both dark and light variants from a single theme file.
 type ThemeBundle struct {
-	Name     string
-	Subtitle string // custom tagline, e.g. "The caffeinated editor"
-	Fonts    FontConfig
-	Dark     Theme
-	Light    Theme
+	Name       string
+	Subtitle   string // custom tagline, e.g. "The caffeinated editor"
+	Fonts      FontConfig
+	MdMaxWidth int // max body width in pixels for markdown read mode (0 = unlimited)
+	Dark       Theme
+	Light      Theme
 }
 
 // Theme returns the variant matching the given appearance.
@@ -53,12 +54,13 @@ type fontsYAML struct {
 const DefaultThemeVersion = 4
 
 type themeYAML struct {
-	Version  int          `yaml:"version"`
-	Name     string       `yaml:"name"`
-	Subtitle string       `yaml:"subtitle"`
-	Fonts    fontsYAML    `yaml:"fonts"`
-	Dark     themeVariant `yaml:"dark"`
-	Light    themeVariant `yaml:"light"`
+	Version    int          `yaml:"version"`
+	Name       string       `yaml:"name"`
+	Subtitle   string       `yaml:"subtitle"`
+	Fonts      fontsYAML    `yaml:"fonts"`
+	MdMaxWidth int          `yaml:"md-max-width"`
+	Dark       themeVariant `yaml:"dark"`
+	Light      themeVariant `yaml:"light"`
 }
 
 // themeVariant holds one appearance variant's colors.
@@ -103,12 +105,18 @@ func LoadBundleFromYAML(data []byte) (ThemeBundle, error) {
 		fonts.Body = ty.Fonts.Body
 	}
 
+	mdMaxW := ty.MdMaxWidth
+	if mdMaxW == 0 {
+		mdMaxW = 1230
+	}
+
 	return ThemeBundle{
-		Name:     ty.Name,
-		Subtitle: ty.Subtitle,
-		Fonts:    fonts,
-		Dark:     variantToTheme(ty.Name, ty.Dark),
-		Light:    variantToTheme(ty.Name, ty.Light),
+		Name:       ty.Name,
+		Subtitle:   ty.Subtitle,
+		Fonts:      fonts,
+		MdMaxWidth: mdMaxW,
+		Dark:       variantToTheme(ty.Name, ty.Dark),
+		Light:      variantToTheme(ty.Name, ty.Light),
 	}, nil
 }
 

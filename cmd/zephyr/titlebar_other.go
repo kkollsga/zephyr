@@ -37,3 +37,5 @@ func setupWordWrapMenu(checked bool) {}
 func wordWrapToggled() bool { return false }
 
 func updateWordWrapMenuCheck(checked bool) {}
+
+func checkOpenFile() string { return "" }

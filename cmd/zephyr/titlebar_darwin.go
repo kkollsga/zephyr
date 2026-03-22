@@ -14,6 +14,112 @@ static bool _titlebarDone = false;
 static volatile bool _hasUnsavedChanges = false;
 static volatile bool _closeRequested = false;
 
+// --- Apple Event: Open Document ---
+// Stores file paths received from Finder "Open With" / drag-onto-dock.
+static char _openFilePath[4096] = {0};
+
+const char* checkAndResetOpenFile(void) {
+	if (_openFilePath[0] == '\0') return NULL;
+	static char buf[4096];
+	strncpy(buf, _openFilePath, sizeof(buf)-1);
+	buf[sizeof(buf)-1] = '\0';
+	_openFilePath[0] = '\0';
+	return buf;
+}
+
+@interface ZephyrAppleEventHandler : NSObject
+- (void)handleOpenDocuments:(NSAppleEventDescriptor *)event withReply:(NSAppleEventDescriptor *)reply;
+@end
+
+@implementation ZephyrAppleEventHandler
+- (void)handleOpenDocuments:(NSAppleEventDescriptor *)event withReply:(NSAppleEventDescriptor *)reply {
+	NSAppleEventDescriptor *docList = [event paramDescriptorForKeyword:keyDirectObject];
+	if (!docList) return;
+	NSInteger count = [docList numberOfItems];
+	for (NSInteger i = 1; i <= count; i++) {
+		NSAppleEventDescriptor *desc = [docList descriptorAtIndex:i];
+		// Coerce to file URL — this handles all descriptor types macOS sends.
+		NSAppleEventDescriptor *urlDesc = [desc coerceToDescriptorType:typeFileURL];
+		if (urlDesc) {
+			NSData *data = [urlDesc data];
+			if (data) {
+				NSString *urlStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+				NSURL *url = [NSURL URLWithString:urlStr];
+				NSString *path = [url path];
+				if (path && [path length] > 0) {
+					strncpy(_openFilePath, [path UTF8String], sizeof(_openFilePath)-1);
+					_openFilePath[sizeof(_openFilePath)-1] = '\0';
+				}
+			}
+		}
+	}
+}
+@end
+
+static ZephyrAppleEventHandler *_appleEventHandler = nil;
+
+// Register the Apple Event handler. Must be called AFTER finishLaunching
+// completes, because NSApplication installs its own default kAEOpenDocuments
+// handler during finishLaunching which overwrites earlier registrations.
+// We use NSApplicationDidFinishLaunchingNotification to register at the
+// earliest safe moment — before queued Apple Events are dispatched.
+void registerOpenDocumentHandler(void) {
+	if (!_appleEventHandler) {
+		_appleEventHandler = [[ZephyrAppleEventHandler alloc] init];
+	}
+	[[NSAppleEventManager sharedAppleEventManager]
+		setEventHandler:_appleEventHandler
+		andSelector:@selector(handleOpenDocuments:withReply:)
+		forEventClass:kCoreEventClass
+		andEventID:kAEOpenDocuments];
+}
+
+// Swizzled application:openURLs: — called by macOS when opening files via
+// Finder "Open With", drag-onto-dock, or `open -a`.  This takes priority
+// over the Apple Event handler because NSApplication tries the delegate first.
+static void zephyr_application_openURLs(id self, SEL _cmd, NSApplication *app, NSArray<NSURL *> *urls) {
+	for (NSURL *url in urls) {
+		NSString *path = [url path];
+		if (path && [path length] > 0) {
+			strncpy(_openFilePath, [path UTF8String], sizeof(_openFilePath)-1);
+			_openFilePath[sizeof(_openFilePath)-1] = '\0';
+		}
+	}
+}
+
+// Schedule Apple Event handler and delegate method injection.
+// Uses WillFinishLaunching with queue:nil so the block runs SYNCHRONOUSLY
+// on the posting thread — before macOS processes the open-document request.
+// (queue:[NSOperationQueue mainQueue] defers to the next run loop iteration,
+// which is too late.)
+void scheduleOpenDocumentHandler(void) {
+	[[NSNotificationCenter defaultCenter]
+		addObserverForName:NSApplicationWillFinishLaunchingNotification
+		object:nil
+		queue:nil
+		usingBlock:^(NSNotification *note) {
+			// Inject application:openURLs: into whatever delegate Gio installed.
+			// macOS calls this on the delegate BEFORE falling back to NSDocument.
+			id delegate = [NSApp delegate];
+			if (delegate) {
+				Class cls = [delegate class];
+				if (!class_getInstanceMethod(cls, @selector(application:openURLs:))) {
+					class_addMethod(cls, @selector(application:openURLs:),
+						(IMP)zephyr_application_openURLs, "v@:@@");
+				}
+			}
+		}];
+
+	[[NSNotificationCenter defaultCenter]
+		addObserverForName:NSApplicationDidFinishLaunchingNotification
+		object:nil
+		queue:nil
+		usingBlock:^(NSNotification *note) {
+			// Also register the Apple Event handler as a fallback.
+			registerOpenDocumentHandler();
+		}];
+}
+
 void setUnsavedFlag(bool val) { _hasUnsavedChanges = val; }
 bool getUnsavedFlag(void)     { return _hasUnsavedChanges; }
 
@@ -136,13 +242,10 @@ void ensureTrafficLightsVisible(void) {
 // reconfigures the window and may reset delegate state.
 
 static void handleCloseButtonClick(id self, SEL _cmd, id sender) {
-	if (_hasUnsavedChanges) {
-		_closeRequested = true;
-		return;
-	}
-	// No unsaved changes — close normally.
-	NSWindow *win = [sender window];
-	if (win) [win close];
+	// Always route through Go's quit flow via the _closeRequested flag.
+	// Previously we called [win close] for unmodified files, but that
+	// can race with Go's event loop and cause freezes.
+	_closeRequested = true;
 }
 
 static void installCloseHandler(NSWindow *window) {
@@ -449,7 +552,17 @@ import (
 )
 
 func setupTitlebar() {
+	C.scheduleOpenDocumentHandler()
 	C.registerTitlebarObserver()
+}
+
+// checkOpenFile returns a file path if macOS sent an "Open With" Apple Event.
+func checkOpenFile() string {
+	cs := C.checkAndResetOpenFile()
+	if cs == nil {
+		return ""
+	}
+	return C.GoString(cs)
 }
 
 func titlebarReady() bool {
