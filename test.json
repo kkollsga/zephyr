@@ -1,0 +1,84 @@
+{
+    "name": "Zephyr",
+    "version": "1.0.0",
+    "description": "The caffeinated editor",
+    "author": {
+        "name": "Kristian",
+        "email": "hello@example.com",
+        "social": {
+            "github": "kristianweb",
+            "twitter": null
+        }
+    },
+    "features": [
+        "syntax-highlighting",
+        "code-folding",
+        "json-support",
+        "markdown-preview"
+    ],
+    "config": {
+        "theme": {
+            "dark": {
+                "background": "#1e1e2e",
+                "foreground": "#cdd6f4",
+                "accent": "#89b4fa"
+            },
+            "light": {
+                "background": "#eff1f5",
+                "foreground": "#4c4f69",
+                "accent": "#1e66f5"
+            }
+        },
+        "editor": {
+            "fontSize": 13,
+            "tabSize": 4,
+            "wordWrap": false,
+            "lineNumbers": true
+        },
+        "keybindings": [
+            {
+                "key": "Cmd+S",
+                "action": "save",
+                "when": "editorFocus"
+            },
+            {
+                "key": "Cmd+Shift+P",
+                "action": "commandPalette",
+                "when": "always"
+            }
+        ]
+    },
+    "languages": {
+        "go": {
+            "extensions": [".go"],
+            "treeSitter": true,
+            "foldable": true
+        },
+        "python": {
+            "extensions": [".py"],
+            "treeSitter": true,
+            "foldable": false
+        },
+        "json": {
+            "extensions": [".json"],
+            "treeSitter": false,
+            "foldable": true
+        }
+    },
+    "numbers": [1, 2, 3.14, -42, 1e10],
+    "flags": {
+        "enabled": true,
+        "deprecated": false,
+        "value": null
+    },
+    "empty": {},
+    "nested": {
+        "level1": {
+            "level2": {
+                "level3": {
+                    "deep": "value"
+                }
+            }
+        }
+    }
+}

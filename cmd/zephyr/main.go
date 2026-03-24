@@ -56,6 +56,9 @@ type tabState struct {
 
 	// Word wrap
 	wrapMap *wrapMap // visual line mapping (nil when wrap is off)
+
+	// Code folding
+	foldState *render.FoldState // fold regions and collapsed state
 }
 
 type appState struct {
@@ -187,6 +190,7 @@ func (st *appState) activeTabState() *tabState {
 			viewport:       render.NewViewport(),
 			langLabel:      detectLanguage(ed.FilePath),
 			lastCursorLine: -1,
+			foldState:      render.NewFoldState(),
 		}
 		// Init highlighter
 		if ed.FilePath != "" {
@@ -197,6 +201,10 @@ func (st *appState) activeTabState() *tabState {
 				ts.langLabel = ts.highlighter.Language()
 			}
 		}
+		// Compute fold regions
+		source := ed.Buffer.TextBytes(nil)
+		regions := render.ComputeFoldRegions(string(source))
+		ts.foldState.SetRegions(regions, ed.Buffer.LineCount())
 		// Open markdown files in read mode by default
 		if ts.langLabel == "Markdown" {
 			ts.mode = viewMarkdownRead

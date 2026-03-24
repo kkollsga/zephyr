@@ -14,10 +14,11 @@ import (
 
 // LanguageInfo holds the tree-sitter language and its highlight query.
 type LanguageInfo struct {
-	Name     string
-	Language *sitter.Language
-	Query    string
-	initLang func() *sitter.Language // lazy loader; nil once Language is set
+	Name         string
+	Language     *sitter.Language
+	Query        string
+	initLang     func() *sitter.Language                     // lazy loader; nil once Language is set
+	SimpleTokens func(source []byte, startRow, endRow int) []Token // fallback tokenizer when no tree-sitter grammar
 }
 
 // ensureLoaded initializes the Language field on first access.
@@ -38,6 +39,7 @@ func init() {
 	Register(".jsx", &LanguageInfo{Name: "JavaScript", initLang: javascript.GetLanguage, Query: jsHighlightQuery})
 	Register(".rs", &LanguageInfo{Name: "Rust", initLang: rust.GetLanguage, Query: rustHighlightQuery})
 	Register(".md", &LanguageInfo{Name: "Markdown", initLang: tree_sitter_markdown.GetLanguage, Query: markdownHighlightQuery})
+	Register(".json", &LanguageInfo{Name: "JSON", SimpleTokens: jsonTokenize})
 }
 
 // Register adds a language to the registry.

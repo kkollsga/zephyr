@@ -47,6 +47,16 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 
 	// Skip viewport update in markdown read mode
 	if ts.mode != viewMarkdownRead {
+		// Clamp cursor out of hidden fold regions
+		if ts.foldState != nil && ts.foldState.HasCollapsed() {
+			clamped := ts.foldState.ClampCursorLine(ed.Cursor.Line)
+			if clamped != ed.Cursor.Line {
+				ed.Cursor.Line = clamped
+				ed.Cursor.Col = 0
+				ed.Cursor.PreferredCol = -1
+			}
+		}
+
 		if st.wordWrap && st.textRend != nil && st.textRend.CharWidth > 0 {
 			// Compute wrap map for word wrap mode
 			textAreaW := gtx.Constraints.Max.X - st.gutterRend.EstimateWidth(ed.Buffer.LineCount()) - st.textRend.CharWidth*2
@@ -62,7 +72,11 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 			ts.viewport.TotalLines = ts.wrapMap.visualLines()
 		} else {
 			ts.wrapMap = nil
-			ts.viewport.TotalLines = ed.Buffer.LineCount()
+			if ts.foldState != nil && ts.foldState.HasCollapsed() {
+				ts.viewport.TotalLines = ts.foldState.DisplayLineCount()
+			} else {
+				ts.viewport.TotalLines = ed.Buffer.LineCount()
+			}
 		}
 		if st.textRend.LineHeightPx > 0 {
 			ts.viewport.VisibleLines = (gtx.Constraints.Max.Y - statusH - st.tabBarHeight - editorTopPad) / st.textRend.LineHeightPx
@@ -72,6 +86,9 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 				dispCol := runeColToDisplayCol2(ed, ed.Cursor.Line, ed.Cursor.Col, 4)
 				visualLine, _ := ts.wrapMap.bufferToVisual(ed.Cursor.Line, dispCol)
 				ts.viewport.ScrollToRevealCursor(visualLine)
+			} else if ts.foldState != nil && ts.foldState.HasCollapsed() {
+				cursorDispLine := ts.foldState.BufToDisplay(ed.Cursor.Line)
+				ts.viewport.ScrollToRevealCursor(cursorDispLine)
 			} else {
 				ts.viewport.ScrollToRevealCursor(ed.Cursor.Line)
 			}
@@ -155,8 +172,15 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 
 // drawEditorNormal renders the editor in non-wrapped mode (original path).
 func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *editor.Editor, ts *tabState, firstLine, lastLine, gutterWidth int) {
+	fs := ts.foldState
+	hasFolds := fs != nil && fs.HasCollapsed()
+
 	// Gutter
-	st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ed.Buffer.LineCount(), editorTopPad, ts.viewport.PixelOffset)
+	if hasFolds {
+		st.gutterRend.RenderGutterFolded(gtx, gtx.Ops, firstLine, lastLine, ed.Buffer.LineCount(), fs, editorTopPad, ts.viewport.PixelOffset)
+	} else {
+		st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ed.Buffer.LineCount(), editorTopPad, ts.viewport.PixelOffset)
+	}
 
 	// Gutter right separator
 	sepRect := clip.Rect{
@@ -167,17 +191,38 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 	paint.PaintOp{}.Add(gtx.Ops)
 	sepRect.Pop()
 
-	// Highlight tokens — query only visible range
+	// Determine buffer line range for syntax tokens
+	var firstBufLine, lastBufLine int
+	if hasFolds {
+		firstBufLine = fs.DisplayToBuf(firstLine)
+		lastBufLine = fs.DisplayToBuf(lastLine)
+	} else {
+		firstBufLine = firstLine
+		lastBufLine = lastLine
+	}
+
+	// Highlight tokens — query only visible buffer range
 	var allTokens []highlight.Token
 	if ts.highlighter != nil {
-		allTokens = ts.highlighter.TokensInRange(firstLine, lastLine)
+		allTokens = ts.highlighter.TokensInRange(firstBufLine, lastBufLine)
 	}
+
+	textX := gutterWidth + st.textRend.CharWidth
 
 	// Find match highlights (drawn before text so text is readable on top)
 	if st.findBar.Visible && len(st.findBar.Matches) > 0 {
-		textX := gutterWidth + st.textRend.CharWidth
 		for i, match := range st.findBar.Matches {
-			if match.Line < firstLine || match.Line > lastLine {
+			// Skip matches in hidden lines
+			if hasFolds && fs.IsHidden(match.Line) {
+				continue
+			}
+			var dispLine int
+			if hasFolds {
+				dispLine = fs.BufToDisplay(match.Line)
+			} else {
+				dispLine = match.Line
+			}
+			if dispLine < firstLine || dispLine > lastLine {
 				continue
 			}
 			lineText, err := ed.Buffer.Line(match.Line)
@@ -192,7 +237,7 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 				bgColor = st.theme.FindCurrent
 			}
 
-			visY := (match.Line-firstLine)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
+			visY := (dispLine-firstLine)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
 			x1 := textX + st.textRend.ColX(dispCol)
 			x2 := textX + st.textRend.ColX(dispCol+matchRuneLen)
 			rect := clip.Rect{
@@ -206,50 +251,109 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 	}
 
 	// Visible text lines
-	byteOffset := ed.Buffer.LineStartOffset(firstLine)
-
-	for i := firstLine; i <= lastLine && i < ed.Buffer.LineCount(); i++ {
-		line, err := ed.Buffer.Line(i)
-		if err != nil {
-			continue
-		}
-		y := (i-firstLine)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
-
-		var spans []render.ColorSpan
-		if len(allTokens) > 0 {
-			lineStart := byteOffset
-			lineEnd := byteOffset + len(line)
-			lineTokens := tokensForRange(allTokens, lineStart, lineEnd)
-			spans = render.TokensToColorSpans(lineTokens, lineStart, lineEnd, line, st.colorMap, st.theme.Foreground, 4)
-		}
-
-		// Override text color to dark on the current find match
-		if st.findBar.Visible && st.findBar.CurrentMatch > 0 && st.findBar.CurrentMatch <= len(st.findBar.Matches) {
-			cm := st.findBar.Matches[st.findBar.CurrentMatch-1]
-			if cm.Line == i {
-				darkText := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
-				dispStart := runeColToDisplayCol(line, cm.Col, 4)
-				dispEnd := dispStart + matchDisplayLen(line, cm.Col, cm.Length, 4)
-				spans = append([]render.ColorSpan{{Start: dispStart, End: dispEnd, Color: darkText}}, spans...)
+	if hasFolds {
+		displayCount := fs.DisplayLineCount()
+		for dispLine := firstLine; dispLine <= lastLine && dispLine < displayCount; dispLine++ {
+			bufLine := fs.DisplayToBuf(dispLine)
+			line, err := ed.Buffer.Line(bufLine)
+			if err != nil {
+				continue
 			}
-		}
 
-		expandedLine := expandTabs(line, 4)
-		st.textRend.RenderLine(gtx.Ops, gtx, expandedLine, gutterWidth+st.textRend.CharWidth, y, spans)
-		byteOffset += len(line) + 1
+			// Use collapsed display text if this line is a collapsed fold start
+			displayText := line
+			if fs.IsCollapsed(bufLine) {
+				region := fs.RegionAt(bufLine)
+				if region != nil {
+					displayText = render.CollapsedLineText(line, region)
+				}
+			}
+
+			y := (dispLine-firstLine)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
+
+			var spans []render.ColorSpan
+			if len(allTokens) > 0 {
+				lineStart := ed.Buffer.LineStartOffset(bufLine)
+				lineEnd := lineStart + len(line)
+				lineTokens := tokensForRange(allTokens, lineStart, lineEnd)
+				spans = render.TokensToColorSpans(lineTokens, lineStart, lineEnd, line, st.colorMap, st.theme.Foreground, 4)
+			}
+
+			// Override text color to dark on the current find match
+			if st.findBar.Visible && st.findBar.CurrentMatch > 0 && st.findBar.CurrentMatch <= len(st.findBar.Matches) {
+				cm := st.findBar.Matches[st.findBar.CurrentMatch-1]
+				if cm.Line == bufLine {
+					darkText := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+					dispStart := runeColToDisplayCol(line, cm.Col, 4)
+					dispEnd := dispStart + matchDisplayLen(line, cm.Col, cm.Length, 4)
+					spans = append([]render.ColorSpan{{Start: dispStart, End: dispEnd, Color: darkText}}, spans...)
+				}
+			}
+
+			expandedLine := expandTabs(displayText, 4)
+			st.textRend.RenderLine(gtx.Ops, gtx, expandedLine, textX, y, spans)
+		}
+	} else {
+		byteOffset := ed.Buffer.LineStartOffset(firstLine)
+		for i := firstLine; i <= lastLine && i < ed.Buffer.LineCount(); i++ {
+			line, err := ed.Buffer.Line(i)
+			if err != nil {
+				continue
+			}
+			y := (i-firstLine)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
+
+			var spans []render.ColorSpan
+			if len(allTokens) > 0 {
+				lineStart := byteOffset
+				lineEnd := byteOffset + len(line)
+				lineTokens := tokensForRange(allTokens, lineStart, lineEnd)
+				spans = render.TokensToColorSpans(lineTokens, lineStart, lineEnd, line, st.colorMap, st.theme.Foreground, 4)
+			}
+
+			// Override text color to dark on the current find match
+			if st.findBar.Visible && st.findBar.CurrentMatch > 0 && st.findBar.CurrentMatch <= len(st.findBar.Matches) {
+				cm := st.findBar.Matches[st.findBar.CurrentMatch-1]
+				if cm.Line == i {
+					darkText := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+					dispStart := runeColToDisplayCol(line, cm.Col, 4)
+					dispEnd := dispStart + matchDisplayLen(line, cm.Col, cm.Length, 4)
+					spans = append([]render.ColorSpan{{Start: dispStart, End: dispEnd, Color: darkText}}, spans...)
+				}
+			}
+
+			expandedLine := expandTabs(line, 4)
+			st.textRend.RenderLine(gtx.Ops, gtx, expandedLine, textX, y, spans)
+			byteOffset += len(line) + 1
+		}
 	}
 
 	// Offset cursor and selection by top padding minus scroll pixel offset
 	padOff := op.Offset(image.Pt(0, editorTopPad-ts.viewport.PixelOffset)).Push(gtx.Ops)
 
+	// Convert cursor/selection to display coordinates for rendering
+	cursorLine := ed.Cursor.Line
+	if hasFolds {
+		cursorLine = fs.BufToDisplay(ed.Cursor.Line)
+	}
+
 	// Selection (skip when find bar is active — FindCurrent highlight replaces it)
 	if ed.Selection.Active && !ed.Selection.IsEmpty() && !st.findBar.Visible {
 		start, end := ed.Selection.Ordered()
+		startDisp := start.Line
+		endDisp := end.Line
+		if hasFolds {
+			startDisp = fs.BufToDisplay(start.Line)
+			endDisp = fs.BufToDisplay(end.Line)
+		}
 		st.cursorRend.RenderSelection(gtx.Ops, st.theme.Selection,
-			start.Line, start.Col, end.Line, end.Col,
+			startDisp, start.Col, endDisp, end.Col,
 			firstLine, gutterWidth+st.textRend.CharWidth, gtx.Constraints.Max.Y,
 			func(line int) int {
-				l, _ := ed.Buffer.Line(line)
+				bufLine := line
+				if hasFolds {
+					bufLine = fs.DisplayToBuf(line)
+				}
+				l, _ := ed.Buffer.Line(bufLine)
 				return utf8.RuneCountInString(l)
 			})
 	}
@@ -258,7 +362,7 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 	if st.cursorRend.UpdateBlink() {
 		w.Invalidate()
 	}
-	st.cursorRend.RenderCursor(gtx.Ops, ed.Cursor.Line, ed.Cursor.Col, firstLine, gutterWidth+st.textRend.CharWidth)
+	st.cursorRend.RenderCursor(gtx.Ops, cursorLine, ed.Cursor.Col, firstLine, gutterWidth+st.textRend.CharWidth)
 
 	padOff.Pop()
 }

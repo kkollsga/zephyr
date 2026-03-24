@@ -12,6 +12,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 
+	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/highlight"
 	"github.com/kristianweb/zephyr/pkg/clipboard"
 )
@@ -231,9 +232,11 @@ func (st *appState) handleKey(ke key.Event) {
 	case ke.Name == key.NameUpArrow && ke.Modifiers == 0:
 		ed.Selection.Clear()
 		ed.Cursor.MoveUp(ed.Buffer)
+		st.skipHiddenLines(ed, -1)
 	case ke.Name == key.NameDownArrow && ke.Modifiers == 0:
 		ed.Selection.Clear()
 		ed.Cursor.MoveDown(ed.Buffer)
+		st.skipHiddenLines(ed, 1)
 	case ke.Name == key.NameUpArrow && ke.Modifiers == key.ModShortcut:
 		ed.Selection.Clear()
 		ed.Cursor.MoveToFileStart()
@@ -342,12 +345,14 @@ func (st *appState) handleKey(ke key.Event) {
 			ed.Selection.Start(ed.Cursor)
 		}
 		ed.Cursor.MoveUp(ed.Buffer)
+		st.skipHiddenLines(ed, -1)
 		ed.Selection.Update(ed.Cursor)
 	case ke.Name == key.NameDownArrow && ke.Modifiers == key.ModShift:
 		if !ed.Selection.Active {
 			ed.Selection.Start(ed.Cursor)
 		}
 		ed.Cursor.MoveDown(ed.Buffer)
+		st.skipHiddenLines(ed, 1)
 		ed.Selection.Update(ed.Cursor)
 	}
 	if st.cursorRend != nil {
@@ -466,10 +471,11 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		if ed == nil {
 			return
 		}
-		ts := st.activeTabState()
 
-		gutterWidth := st.gutterRend.Width(ts.viewport.TotalLines)
+		gutterWidth := st.gutterRend.Width(ed.Buffer.LineCount())
 		if int(pe.Position.X) < gutterWidth {
+			// Gutter click — toggle code fold
+			st.handleGutterClick(pe)
 			return
 		}
 		line, col := st.pointerToLineCol(pe.Position)
@@ -575,9 +581,76 @@ func (st *appState) pointerToLineCol(pos f32.Point) (line, col int) {
 		return
 	}
 
+	displayLine := ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
+
+	// Convert display line to buffer line when folds are active
+	fs := ts.foldState
+	if fs != nil && fs.HasCollapsed() {
+		line = fs.DisplayToBuf(displayLine)
+	} else {
+		line = displayLine
+	}
 	col = dispCol
-	line = ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
 	return
+}
+
+// skipHiddenLines moves the cursor past any hidden (folded) lines.
+// dir should be -1 (moving up) or +1 (moving down).
+func (st *appState) skipHiddenLines(ed *editor.Editor, dir int) {
+	ts := st.activeTabState()
+	if ts == nil || ts.foldState == nil || !ts.foldState.HasCollapsed() {
+		return
+	}
+	fs := ts.foldState
+	maxLine := ed.Buffer.LineCount() - 1
+	for fs.IsHidden(ed.Cursor.Line) {
+		ed.Cursor.Line += dir
+		if ed.Cursor.Line < 0 {
+			ed.Cursor.Line = 0
+			break
+		}
+		if ed.Cursor.Line > maxLine {
+			ed.Cursor.Line = maxLine
+			break
+		}
+	}
+	ed.Cursor.PreferredCol = -1
+}
+
+// handleGutterClick toggles a code fold when a gutter line number is clicked.
+func (st *appState) handleGutterClick(pe pointer.Event) {
+	ts := st.activeTabState()
+	ed := st.activeEd()
+	if ts == nil || ed == nil || ts.foldState == nil {
+		return
+	}
+
+	adjustedY := int(pe.Position.Y) - st.tabBarHeight - editorTopPad
+	if st.textRend == nil || st.textRend.LineHeightPx == 0 {
+		return
+	}
+	displayLine := ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
+
+	fs := ts.foldState
+	var bufLine int
+	if fs.HasCollapsed() {
+		bufLine = fs.DisplayToBuf(displayLine)
+	} else {
+		bufLine = displayLine
+	}
+
+	if !fs.IsFoldStart(bufLine) {
+		return
+	}
+
+	// Ctrl/Cmd+click toggles recursively
+	recursive := pe.Modifiers.Contain(key.ModShortcut)
+	if recursive {
+		fs.ToggleRecursive(bufLine, ed.Buffer.LineCount())
+	} else {
+		fs.Toggle(bufLine, ed.Buffer.LineCount())
+	}
+	st.window.Invalidate()
 }
 
 func (st *appState) handleTextInput(text string) {

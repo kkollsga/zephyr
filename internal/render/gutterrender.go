@@ -27,6 +27,9 @@ type GutterRenderer struct {
 	LineHeight int
 }
 
+// foldCollapsedColor is the red color used for collapsed fold line numbers.
+var foldCollapsedColor = color.NRGBA{R: 220, G: 60, B: 60, A: 255}
+
 // Width returns the pixel width of the gutter for the given max line number.
 func (gr *GutterRenderer) Width(maxLineNum int) int {
 	digits := len(fmt.Sprintf("%d", maxLineNum))
@@ -43,6 +46,11 @@ func (gr *GutterRenderer) EstimateWidth(totalLines int) int {
 
 // RenderLineNumber draws a single line number at the given Y position.
 func (gr *GutterRenderer) RenderLineNumber(gtx layout.Context, ops *op.Ops, lineNum, totalLines, y int) {
+	gr.renderLineNumberColored(gtx, ops, lineNum, totalLines, y, gr.FgColor)
+}
+
+// renderLineNumberColored draws a line number at the given Y position in the specified color.
+func (gr *GutterRenderer) renderLineNumberColored(gtx layout.Context, ops *op.Ops, lineNum, totalLines, y int, fg color.NRGBA) {
 	width := gr.Width(totalLines)
 	maxDigits := len(fmt.Sprintf("%d", totalLines))
 	numStr := fmt.Sprintf("%*d", maxDigits, lineNum)
@@ -79,7 +87,50 @@ func (gr *GutterRenderer) RenderLineNumber(gtx layout.Context, ops *op.Ops, line
 	aff := op.Affine(f32.Affine2D{}.Offset(lineOff)).Push(ops)
 	pathSpec := gr.Shaper.Shape(glyphs)
 	cl := clip.Outline{Path: pathSpec}.Op().Push(ops)
-	paint.ColorOp{Color: gr.FgColor}.Add(ops)
+	paint.ColorOp{Color: fg}.Add(ops)
+	paint.PaintOp{}.Add(ops)
+	cl.Pop()
+	aff.Pop()
+}
+
+// renderFoldIcon draws a small "<" icon to the right of the line number for collapsed folds.
+func (gr *GutterRenderer) renderFoldIcon(gtx layout.Context, ops *op.Ops, totalLines, y int) {
+	width := gr.Width(totalLines)
+	// Position the icon in the right padding area of the gutter
+	xOffset := width - gr.CharWidth
+
+	params := text.Parameters{
+		Font:     font.Font{Typeface: "Menlo, monospace"},
+		PxPerEm:  spToFixed(gtx.Metric, gr.FontSize),
+		MaxWidth: 1 << 30,
+	}
+
+	gr.Shaper.LayoutString(params, "‹")
+	var glyphs []text.Glyph
+	var lineX fixed.Int26_6
+	var lineY int32
+	first := true
+	for g, ok := gr.Shaper.NextGlyph(); ok; g, ok = gr.Shaper.NextGlyph() {
+		if first {
+			lineX = g.X
+			lineY = g.Y
+			first = false
+		}
+		glyphs = append(glyphs, g)
+	}
+	if len(glyphs) == 0 {
+		return
+	}
+
+	lineOff := f32.Point{
+		X: float32(xOffset) + fixedToFloat(lineX),
+		Y: float32(y) + float32(lineY),
+	}
+
+	aff := op.Affine(f32.Affine2D{}.Offset(lineOff)).Push(ops)
+	pathSpec := gr.Shaper.Shape(glyphs)
+	cl := clip.Outline{Path: pathSpec}.Op().Push(ops)
+	paint.ColorOp{Color: foldCollapsedColor}.Add(ops)
 	paint.PaintOp{}.Add(ops)
 	cl.Pop()
 	aff.Pop()
@@ -147,6 +198,48 @@ func (gr *GutterRenderer) RenderGutter(gtx layout.Context, ops *op.Ops, firstLin
 		paint.PaintOp{}.Add(ops)
 		cl.Pop()
 		aff.Pop()
+	}
+
+	return width
+}
+
+// RenderGutterFolded draws line numbers for visible lines with fold indicators.
+// firstDisplay/lastDisplay are display line indices. fs maps display lines to buffer lines.
+// Buffer line numbers are shown (not display line numbers).
+func (gr *GutterRenderer) RenderGutterFolded(gtx layout.Context, ops *op.Ops,
+	firstDisplay, lastDisplay, totalBufLines int, fs *FoldState, extraOffsets ...int) int {
+
+	topPad := 0
+	pixelOff := 0
+	if len(extraOffsets) > 0 {
+		topPad = extraOffsets[0]
+	}
+	if len(extraOffsets) > 1 {
+		pixelOff = extraOffsets[1]
+	}
+	width := gr.Width(totalBufLines)
+
+	// Background
+	rect := clip.Rect{Max: image.Pt(width, gtx.Constraints.Max.Y)}.Push(ops)
+	paint.ColorOp{Color: gr.BgColor}.Add(ops)
+	paint.PaintOp{}.Add(ops)
+	rect.Pop()
+
+	displayCount := fs.DisplayLineCount()
+	for dispLine := firstDisplay; dispLine <= lastDisplay && dispLine < displayCount; dispLine++ {
+		bufLine := fs.DisplayToBuf(dispLine)
+		y := (dispLine-firstDisplay)*gr.LineHeight + topPad - pixelOff
+
+		collapsed := fs.IsCollapsed(bufLine)
+		fg := gr.FgColor
+		if collapsed {
+			fg = foldCollapsedColor
+		}
+		gr.renderLineNumberColored(gtx, ops, bufLine+1, totalBufLines, y, fg)
+
+		if collapsed {
+			gr.renderFoldIcon(gtx, ops, totalBufLines, y)
+		}
 	}
 
 	return width

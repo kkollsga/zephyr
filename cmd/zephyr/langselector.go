@@ -9,6 +9,7 @@ import (
 	"gioui.org/op/paint"
 
 	"github.com/kristianweb/zephyr/internal/highlight"
+	"github.com/kristianweb/zephyr/internal/render"
 )
 
 func (st *appState) langDropdownWidth() int {
@@ -117,6 +118,12 @@ func (st *appState) reparseHighlight() {
 		source := ed.Buffer.TextBytes(ts.sourceBuf)
 		ts.sourceBuf = source
 		ts.highlighter.UpdateFromEdits(source, edits)
+	}
+	// Recompute fold regions after edits
+	if ts.foldState != nil {
+		source := ed.Buffer.TextBytes(nil)
+		regions := render.ComputeFoldRegions(string(source))
+		ts.foldState.SetRegions(regions, ed.Buffer.LineCount())
 	}
 	if st.findBar.Visible {
 		st.updateSearchResults()

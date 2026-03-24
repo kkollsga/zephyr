@@ -16,6 +16,7 @@ type Highlighter struct {
 	langInfo *LanguageInfo
 	query    *sitter.Query
 	source   []byte
+	simple   bool // true when using SimpleTokens instead of tree-sitter
 }
 
 // NewHighlighter creates a highlighter for the given file extension.
@@ -24,6 +25,18 @@ func NewHighlighter(filePath string) *Highlighter {
 	ext := filepath.Ext(filePath)
 	info := ForExtension(ext)
 	if info == nil {
+		return nil
+	}
+
+	// Simple tokenizer mode (no tree-sitter grammar needed)
+	if info.Language == nil && info.SimpleTokens != nil {
+		return &Highlighter{
+			langInfo: info,
+			simple:   true,
+		}
+	}
+
+	if info.Language == nil {
 		return nil
 	}
 
@@ -50,6 +63,17 @@ func NewHighlighterForLanguage(name string) *Highlighter {
 		return nil
 	}
 
+	if info.Language == nil && info.SimpleTokens != nil {
+		return &Highlighter{
+			langInfo: info,
+			simple:   true,
+		}
+	}
+
+	if info.Language == nil {
+		return nil
+	}
+
 	parser := sitter.NewParser()
 	parser.SetLanguage(info.Language)
 
@@ -71,6 +95,9 @@ func NewHighlighterForLanguage(name string) *Highlighter {
 // to produce incorrect tokens when the text has changed.
 func (h *Highlighter) Parse(source []byte) {
 	h.source = source
+	if h.simple {
+		return
+	}
 	h.tree = h.parser.Parse(nil, source)
 }
 
@@ -97,6 +124,10 @@ func (h *Highlighter) UpdateMulti(source []byte, edits []sitter.EditInput) {
 // UpdateFromEdits converts buffer.EditInfo slices to tree-sitter EditInputs
 // and performs an incremental reparse. If edits is empty, does a full parse.
 func (h *Highlighter) UpdateFromEdits(source []byte, edits []buffer.EditInfo) {
+	if h.simple {
+		h.source = source
+		return
+	}
 	if len(edits) == 0 {
 		h.Parse(source)
 		return
@@ -159,6 +190,10 @@ func (h *Highlighter) Tokens() []Token {
 // Uses tree-sitter's SetPointRange for efficient querying of visible lines only.
 // Results are in document order (tree-sitter guarantees this with SetPointRange).
 func (h *Highlighter) TokensInRange(startRow, endRow int) []Token {
+	if h.simple && h.langInfo != nil && h.langInfo.SimpleTokens != nil {
+		return h.langInfo.SimpleTokens(h.source, startRow, endRow)
+	}
+
 	if h.tree == nil || h.query == nil {
 		return nil
 	}
@@ -229,6 +264,9 @@ func (h *Highlighter) Evict() {
 
 // NeedsParse returns true if the highlighter has been evicted and needs a full reparse.
 func (h *Highlighter) NeedsParse() bool {
+	if h.simple {
+		return h.source == nil
+	}
 	return h.tree == nil
 }
 
