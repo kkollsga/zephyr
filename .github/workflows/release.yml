@@ -191,5 +191,4 @@ jobs:
         run: |
           gh release create "$TAG" dist/* \
             --title "Zephyr $TAG" \
-            --generate-notes \
-            --draft
+            --generate-notes
