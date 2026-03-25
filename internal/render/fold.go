@@ -1,6 +1,8 @@
 package render
 
 import (
+	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 )
@@ -193,8 +195,42 @@ func (fs *FoldState) ClampCursorLine(line int) int {
 	return line
 }
 
+// CollapsedLineCount returns the number of hidden lines in a collapsed fold.
+func CollapsedLineCount(region *FoldRegion) int {
+	if region == nil {
+		return 0
+	}
+	return region.EndLine - region.StartLine
+}
+
+// superscriptDigits maps ASCII digits to Unicode superscript equivalents.
+var superscriptDigits = [10]rune{'⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'}
+
+// toSuperscript converts a non-negative integer to a string of Unicode superscript digits.
+func toSuperscript(n int) string {
+	s := fmt.Sprintf("%d", n)
+	runes := make([]rune, len(s))
+	for i, ch := range s {
+		runes[i] = superscriptDigits[ch-'0']
+	}
+	return string(runes)
+}
+
+// FoldCountColor returns a color-coded NRGBA for a collapsed line count.
+// Green for small counts, orange for moderate, red for large.
+func FoldCountColor(count int) color.NRGBA {
+	switch {
+	case count <= 5:
+		return color.NRGBA{R: 80, G: 200, B: 80, A: 255} // green
+	case count <= 25:
+		return color.NRGBA{R: 220, G: 160, B: 40, A: 255} // orange
+	default:
+		return color.NRGBA{R: 220, G: 60, B: 60, A: 255} // red
+	}
+}
+
 // CollapsedLineText returns the collapsed display text for a fold start line.
-// e.g. `"key": {` becomes `"key": {...},`
+// e.g. `"key": {` becomes `"key": {...⁴²},`
 func CollapsedLineText(lineText string, region *FoldRegion) string {
 	if region == nil {
 		return lineText
@@ -205,7 +241,47 @@ func CollapsedLineText(lineText string, region *FoldRegion) string {
 	}
 	prefix := lineText[:openCol+1]
 	closeStr := string(region.CloseChar)
-	return prefix + "..." + closeStr + region.TrailingText
+	count := CollapsedLineCount(region)
+	sup := toSuperscript(count)
+	return prefix + "..." + sup + closeStr + region.TrailingText
+}
+
+// CollapsedCountSpan returns the display-column range [start, end) and color for the
+// superscript count indicator in a collapsed line, after tab expansion.
+// Returns start=end=0 if not applicable.
+func CollapsedCountSpan(expandedLine string, region *FoldRegion) (start, end int, clr color.NRGBA) {
+	if region == nil {
+		return 0, 0, color.NRGBA{}
+	}
+	count := CollapsedLineCount(region)
+	sup := toSuperscript(count)
+	supRunes := []rune(sup)
+	closeStr := string(region.CloseChar)
+
+	// Find "..." + sup + closeStr in the expanded line by searching backwards from end
+	// The count appears right after "..." and before the closing bracket
+	target := "..." + sup + closeStr
+	idx := strings.LastIndex(expandedLine, target)
+	if idx < 0 {
+		return 0, 0, color.NRGBA{}
+	}
+	// Convert byte index to rune/column index
+	col := 0
+	for i := range expandedLine {
+		if i == idx+3 { // +3 for "..."
+			start = col
+		}
+		if i == idx+3+len(sup) {
+			end = col
+			break
+		}
+		col++
+	}
+	if end == 0 && start > 0 {
+		// sup extends to end of target
+		end = start + len(supRunes)
+	}
+	return start, end, FoldCountColor(count)
 }
 
 // ComputeFoldRegions scans source text for multi-line bracket pairs.

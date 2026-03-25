@@ -262,10 +262,11 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 
 			// Use collapsed display text if this line is a collapsed fold start
 			displayText := line
+			var collapsedRegion *render.FoldRegion
 			if fs.IsCollapsed(bufLine) {
-				region := fs.RegionAt(bufLine)
-				if region != nil {
-					displayText = render.CollapsedLineText(line, region)
+				collapsedRegion = fs.RegionAt(bufLine)
+				if collapsedRegion != nil {
+					displayText = render.CollapsedLineText(line, collapsedRegion)
 				}
 			}
 
@@ -291,6 +292,14 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 			}
 
 			expandedLine := expandTabs(displayText, 4)
+
+			// Add color span for collapsed fold count indicator
+			if collapsedRegion != nil {
+				if start, end, clr := render.CollapsedCountSpan(expandedLine, collapsedRegion); start != end {
+					spans = append(spans, render.ColorSpan{Start: start, End: end, Color: clr})
+				}
+			}
+
 			st.textRend.RenderLine(gtx.Ops, gtx, expandedLine, textX, y, spans)
 		}
 	} else {
