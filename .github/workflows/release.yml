@@ -97,8 +97,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.tag }}
         run: |
           APP_VERSION="${VERSION#v}"
-          # Convert PNG to ICO for Inno Setup
-          magick assets/icon.iconset/icon_256x256.png assets/icon.ico
+          # Generate ICO from SVG for Inno Setup
+          magick -background none assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico
           iscc "//DAPP_VERSION=$APP_VERSION" build/windows/installer.iss
 
       - name: Upload artifacts
@@ -127,7 +127,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
             libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev \
-            libvulkan-dev rpm
+            libvulkan-dev rpm imagemagick
+
+      - name: Generate PNG from SVG
+        run: convert -background none assets/icon.svg -resize 256x256 assets/zephyr-256.png
 
       - name: Build binary
         env:

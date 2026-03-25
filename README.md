@@ -6,12 +6,12 @@
 <p align="center"><strong>The caffeinated editor</strong></p>
 
 <p align="center">
-  A fast, GPU-accelerated text editor for macOS, written entirely in Go.<br/>
+  A fast, GPU-accelerated text editor written entirely in Go.<br/>
   Powered by <a href="https://gioui.org">Gio</a> for buttery-smooth rendering and <a href="https://tree-sitter.github.io/tree-sitter/">Tree-sitter</a> for precise syntax highlighting.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS-blue?style=flat-square" alt="macOS"/>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square" alt="macOS | Windows | Linux"/>
   <img src="https://img.shields.io/badge/language-Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
   <img src="https://img.shields.io/badge/rendering-GPU-4ec9b0?style=flat-square" alt="GPU Accelerated"/>
@@ -25,15 +25,16 @@
 
 ## Why Zephyr?
 
-Most editors are either fast and ugly, or pretty and slow. Zephyr aims to be both — a native macOS editor that renders every frame on the GPU while staying lightweight and responsive. No Electron, no web views, no compromises.
+Most editors are either fast and ugly, or pretty and slow. Zephyr aims to be both — a native editor that renders every frame on the GPU while staying lightweight and responsive. No Electron, no web views, no compromises.
 
 ## Features
 
 - **GPU-accelerated rendering** — every pixel drawn on the GPU via [Gio](https://gioui.org), delivering smooth scrolling and instant response
 - **Tree-sitter syntax highlighting** — accurate, incremental parsing for 17+ languages including Go, Python, JavaScript, TypeScript, Rust, C, C++, Java, Ruby, Lua, and more
 - **Tabbed editing** — Chrome-style tab bar with drag-to-reorder, overflow dropdown, and unsaved-changes indicators
+- **Code folding** — collapse and expand blocks with a color-coded line count indicator
 - **Markdown preview** — rendered markdown with code blocks, task list checkboxes, tables, and copy buttons
-- **Native macOS integration** — app bundle with custom titlebar, traffic lights, and native Save/Save As dialogs
+- **Cross-platform** — native experience on macOS (custom titlebar, traffic lights, Finder tags), Windows (native window chrome, file dialogs), and Linux
 - **Smart editing** — auto-pairing brackets and quotes, language-aware indentation, soft-tab backspace
 - **Undo/redo** — with intelligent operation coalescing so each undo step feels natural
 - **Find and replace** — inline search with regex and case-sensitive modes
@@ -69,37 +70,78 @@ Architectural foundations exist for these features:
 - File watching for external changes
 - Lua plugin API
 
-## Getting Started
+## Installation
 
-### Build
+Download the latest release from [GitHub Releases](https://github.com/kkollsga/zephyr/releases).
 
-```bash
-make build
-```
+### macOS
 
-### Run
+Download `Zephyr-vX.X.X-macos.dmg`, open it, and drag **Zephyr.app** to your Applications folder.
 
-```bash
-make run ARGS=myfile.txt
-```
-
-### macOS App Bundle
+Or build from source:
 
 ```bash
 make app
 open Zephyr.app
 ```
 
-### Test
+### Windows
+
+**Installer** — Download `Zephyr-X.X.X-setup.exe` and run it. Includes optional desktop shortcut, "Add to PATH", and "Open with Zephyr" context menu integration. Uninstaller included.
+
+**Portable** — Download `Zephyr-vX.X.X-windows-amd64.zip`, extract anywhere, and run `zephyr.exe`.
+
+Or build from source (requires GCC/MinGW for tree-sitter):
 
 ```bash
-make test
+go build -o zephyr.exe ./cmd/zephyr
 ```
 
-### Benchmark
+### Linux
+
+**Debian/Ubuntu** — Download and install the `.deb` package:
 
 ```bash
-make bench
+sudo dpkg -i zephyr_X.X.X_amd64.deb
+```
+
+**Fedora/RHEL** — Download and install the `.rpm` package:
+
+```bash
+sudo rpm -i zephyr-X.X.X-1.x86_64.rpm
+```
+
+**AppImage** — Download `Zephyr-vX.X.X-x86_64.AppImage`, make it executable, and run:
+
+```bash
+chmod +x Zephyr-*.AppImage
+./Zephyr-*.AppImage
+```
+
+**Tarball** — Download `zephyr-vX.X.X-linux-amd64.tar.gz` and extract:
+
+```bash
+tar xzf zephyr-*.tar.gz
+sudo cp zephyr-*/zephyr /usr/local/bin/
+```
+
+**Build from source** (requires gcc, pkg-config, and Gio dependencies):
+
+```bash
+sudo apt install gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+  libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev \
+  libxcursor-dev libvulkan-dev
+make build
+```
+
+## Building from Source
+
+```bash
+make build          # native build
+make test           # run tests
+make bench          # run benchmarks
+make app            # macOS .app bundle
+./zephyr --version  # check version
 ```
 
 ## Keyboard Shortcuts
@@ -132,6 +174,22 @@ internal/
   ui/           UI components — tabs, find bar, language selector, status line
   config/       Themes, fonts, and configuration
   plugin/       Lua plugin API framework
+```
+
+Platform-specific code is isolated via Go build tags:
+
+```
+cmd/zephyr/
+  titlebar_darwin.go      macOS traffic lights, native menus, Cocoa integration
+  titlebar_windows.go     Windows native chrome (Decorated=true)
+  titlebar_other.go       Linux/other fallback stubs
+  platform_darwin.go      macOS file dialogs, Finder tags
+  platform_windows.go     Win32 file dialogs via syscall
+  platform_other.go       Fallback stubs
+pkg/clipboard/
+  clipboard_darwin.go     macOS pasteboard via AppKit
+  clipboard_windows.go    Win32 clipboard via syscall
+  clipboard_other.go      xclip/xsel fallback
 ```
 
 ## License

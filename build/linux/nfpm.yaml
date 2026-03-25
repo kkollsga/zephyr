@@ -8,8 +8,8 @@ maintainer: "Kristian Kollsgard"
 description: |
   Zephyr — The caffeinated editor.
   A fast, GPU-accelerated text editor powered by Gio and Tree-sitter.
-vendor: kristianweb
-homepage: https://github.com/kristianweb/zephyr
+vendor: kkollsga
+homepage: https://github.com/kkollsga/zephyr
 license: MIT
 
 depends:
@@ -19,28 +19,19 @@ depends:
   - libegl1
 
 contents:
-  - src: ../../zephyr
+  - src: ./zephyr
     dst: /usr/bin/zephyr
     file_info:
       mode: 0755
 
-  - src: ./zephyr.desktop
+  - src: ./build/linux/zephyr.desktop
     dst: /usr/share/applications/zephyr.desktop
 
-  - src: ../../assets/icon.iconset/icon_256x256.png
-    dst: /usr/share/icons/hicolor/256x256/apps/zephyr.png
-
-  - src: ../../assets/icon.iconset/icon_128x128.png
-    dst: /usr/share/icons/hicolor/128x128/apps/zephyr.png
-
-  - src: ../../assets/icon.iconset/icon_32x32.png
-    dst: /usr/share/icons/hicolor/32x32/apps/zephyr.png
-
-  - src: ../../assets/icon.iconset/icon_16x16.png
-    dst: /usr/share/icons/hicolor/16x16/apps/zephyr.png
-
-  - src: ../../assets/icon.svg
+  - src: ./assets/icon.svg
     dst: /usr/share/icons/hicolor/scalable/apps/zephyr.svg
 
-  - src: ../../LICENSE
+  - src: ./assets/zephyr-256.png
+    dst: /usr/share/icons/hicolor/256x256/apps/zephyr.png
+
+  - src: ./LICENSE
     dst: /usr/share/doc/zephyr/copyright

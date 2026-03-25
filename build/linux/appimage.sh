@@ -23,8 +23,8 @@ mkdir -p "$APPDIR/usr/share/icons/hicolor/scalable/apps"
 cp zephyr "$APPDIR/usr/bin/"
 cp build/linux/zephyr.desktop "$APPDIR/"
 cp build/linux/zephyr.desktop "$APPDIR/usr/share/applications/"
-cp assets/icon.iconset/icon_256x256.png "$APPDIR/zephyr.png"
-cp assets/icon.iconset/icon_256x256.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/zephyr.png"
+cp assets/zephyr-256.png "$APPDIR/zephyr.png"
+cp assets/zephyr-256.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/zephyr.png"
 cp assets/icon.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/zephyr.svg"
 
 # Create AppRun launcher
