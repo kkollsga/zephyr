@@ -159,9 +159,6 @@ type appState struct {
 		dropSlot      int  // gap position within bar or dropdown section
 	}
 }
-// macOS Finder tag names (indexed 0–6).
-var finderTagNames = [7]string{"Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"}
-
 const editorTopPad = 10 // top margin above first line of text
 
 // tabLayout holds scaled pixel values for tab bar layout.
@@ -283,7 +280,7 @@ func run() {
 
 	st.updateWindowTitle()
 	w.Option(
-		app.Decorated(false),
+		app.Decorated(platformDecorated()),
 		app.Size(unit.Dp(900), unit.Dp(600)),
 		app.MinSize(unit.Dp(400), unit.Dp(300)),
 	)
@@ -300,7 +297,7 @@ func run() {
 			// Has unsaved changes — re-create window and show save prompt.
 			w = new(app.Window)
 			w.Option(
-				app.Decorated(false),
+				app.Decorated(platformDecorated()),
 				app.Title("Zephyr"),
 				app.Size(unit.Dp(1024), unit.Dp(768)),
 				app.MinSize(unit.Dp(400), unit.Dp(300)),
@@ -458,6 +455,14 @@ func (st *appState) initRenderers(gtx layout.Context) {
 	st.dp = gtx.Dp
 	st.tabBarHeight = gtx.Dp(28)
 	st.trafficLightPx = gtx.Dp(trafficLightPaddingDp)
+
+	// On platforms with the theme toggle on the left, reserve space for it.
+	if platformThemeToggleLeft() {
+		_, hitW := st.themeToggleSize()
+		if hitW > st.trafficLightPx {
+			st.trafficLightPx = hitW
+		}
+	}
 }
 
 // applyTheme switches to a new theme at runtime, rebuilding derived state.

@@ -1,10 +1,13 @@
-.PHONY: build app run test bench clean vet
+.PHONY: build build-windows app run test bench clean vet
 
 BINARY=zephyr
 APP=Zephyr.app
 
 build:
 	go build -o $(BINARY) ./cmd/zephyr
+
+build-windows:
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -o $(BINARY).exe ./cmd/zephyr
 
 app: build
 	@-pkill -x zephyr 2>/dev/null; sleep 0.2

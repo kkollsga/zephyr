@@ -1128,17 +1128,6 @@ func (st *appState) drawDropdownInsertIndicator(gtx layout.Context, tr *render.T
 	}
 }
 
-// macOS Finder tag colors (Red, Orange, Yellow, Green, Blue, Purple, Gray).
-var finderTagColors = [7]color.NRGBA{
-	{R: 0xFF, G: 0x3B, B: 0x30, A: 0xFF}, // Red
-	{R: 0xFF, G: 0x9F, B: 0x0A, A: 0xFF}, // Orange
-	{R: 0xFF, G: 0xCC, B: 0x00, A: 0xFF}, // Yellow
-	{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF}, // Green
-	{R: 0x00, G: 0x7A, B: 0xFF, A: 0xFF}, // Blue
-	{R: 0xAF, G: 0x52, B: 0xDE, A: 0xFF}, // Purple
-	{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}, // Gray
-}
-
 // saveMenuShowSaveAs returns true when the Save As rows (Name/Tag/Where/SaveAs)
 // should be visible: always for untitled tabs, or when toggled for file-backed tabs.
 func (st *appState) saveMenuShowSaveAs() bool {
@@ -1156,7 +1145,10 @@ func (st *appState) saveMenuRowCount() int {
 
 	n := 1 // bottom row: Save/Discard/Cancel (always)
 	if st.saveMenuShowSaveAs() {
-		n += 3 // Name, Tag, Where
+		n += 2 // Name, Where
+		if platformHasFinderTags() {
+			n++ // Tag row (macOS only)
+		}
 	}
 	if fileBacked {
 		n++ // Save As radio toggle row
@@ -1324,8 +1316,8 @@ func (st *appState) drawSaveMenu(gtx layout.Context) {
 			curY += itemH
 		}
 
-		// Tag: colored dots
-		{
+		// Tag: colored dots (macOS Finder tags only)
+		if platformHasFinderTags() {
 			iy := curY
 			textY := iy + (itemH-tr.LineHeightPx)/2
 			tr.RenderGlyphs(gtx.Ops, gtx, "Tag:", dx+8, textY, st.theme.TabDimFg)
@@ -1484,7 +1476,7 @@ func (st *appState) drawSaveMenu(gtx layout.Context) {
 				runes := []rune(warning)
 				warning = string(runes[:maxChars-1]) + "…"
 			}
-			tr.RenderGlyphs(gtx.Ops, gtx, warning, dx+8, textY, finderTagColors[1])
+			tr.RenderGlyphs(gtx.Ops, gtx, warning, dx+8, textY, warningColor())
 
 			sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
 			sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
@@ -1510,7 +1502,7 @@ func (st *appState) drawSaveMenu(gtx layout.Context) {
 				hlRect.Pop()
 				hlOff.Pop()
 			}
-			tr.RenderGlyphs(gtx.Ops, gtx, "Overwrite", dx+8, textY, finderTagColors[1])
+			tr.RenderGlyphs(gtx.Ops, gtx, "Overwrite", dx+8, textY, warningColor())
 
 			divOff := op.Offset(image.Pt(dx+halfW, iy+2)).Push(gtx.Ops)
 			divRect := clip.Rect{Max: image.Pt(1, itemH-4)}.Push(gtx.Ops)
@@ -1744,6 +1736,9 @@ func (st *appState) themeToggleSize() (radius, hitW int) {
 // themeToggleX returns the left edge X of the theme toggle hit area.
 func (st *appState) themeToggleX(maxX int) int {
 	_, hitW := st.themeToggleSize()
+	if platformThemeToggleLeft() {
+		return 0
+	}
 	return maxX - hitW
 }
 

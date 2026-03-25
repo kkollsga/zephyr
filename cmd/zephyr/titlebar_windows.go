@@ -1,8 +1,11 @@
-//go:build !darwin && !windows
+//go:build windows
 
 package main
 
 import "image/color"
+
+// Windows uses native window decorations via Gio's Decorated(true),
+// so most titlebar functions are no-ops.
 
 func setupTitlebar() {}
 

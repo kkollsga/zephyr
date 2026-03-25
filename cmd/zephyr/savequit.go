@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -144,21 +143,23 @@ func (st *appState) handleSaveMenuClick(x, y int) {
 		}
 		curY += itemH
 
-		// Tag dots row
-		if y >= curY && y < curY+itemH {
-			dotSize := tr.LineHeightPx - 2
-			dotGap := 4
-			dotX := fieldX
-			for ti := 0; ti < 7; ti++ {
-				if x >= dotX && x < dotX+dotSize {
-					st.saveMenu.tags[ti] = !st.saveMenu.tags[ti]
-					return
+		// Tag dots row (macOS Finder tags only)
+		if platformHasFinderTags() {
+			if y >= curY && y < curY+itemH {
+				dotSize := tr.LineHeightPx - 2
+				dotGap := 4
+				dotX := fieldX
+				for ti := 0; ti < 7; ti++ {
+					if x >= dotX && x < dotX+dotSize {
+						st.saveMenu.tags[ti] = !st.saveMenu.tags[ti]
+						return
+					}
+					dotX += dotSize + dotGap
 				}
-				dotX += dotSize + dotGap
+				return
 			}
-			return
+			curY += itemH
 		}
-		curY += itemH
 
 		// Where directory row
 		if y >= curY && y < curY+itemH {
@@ -320,74 +321,6 @@ func (st *appState) continueQuitFlow() {
 	st.gracefulExit()
 }
 
-// pickSaveDir opens the native macOS folder picker and updates the save dir.
-func (st *appState) pickSaveDir() {
-	script := fmt.Sprintf(
-		`set folderPath to POSIX path of (choose folder with prompt "Save in" default location POSIX file %q)
-return folderPath`, st.saveMenu.dir)
-	go func() {
-		out, err := exec.Command("osascript", "-e", script).Output()
-		if err != nil {
-			return
-		}
-		dir := strings.TrimSpace(string(out))
-		// Remove trailing slash that osascript adds
-		dir = strings.TrimRight(dir, "/")
-		if dir != "" {
-			st.saveMenu.dir = dir
-			if st.window != nil {
-				st.window.Invalidate()
-			}
-		}
-	}()
-}
-
-// applyFinderTags sets macOS Finder tags on the saved file via osascript.
-func (st *appState) applyFinderTags(path string) {
-	var names []string
-	for i, on := range st.saveMenu.tags {
-		if on {
-			names = append(names, finderTagNames[i])
-		}
-	}
-	if len(names) == 0 {
-		return
-	}
-
-	// Build AppleScript list: {"Red", "Blue"}
-	var parts []string
-	for _, n := range names {
-		parts = append(parts, fmt.Sprintf("%q", n))
-	}
-	tagList := "{" + strings.Join(parts, ", ") + "}"
-
-	script := fmt.Sprintf(`
-tell application "Finder"
-	set theTags to %s
-	set theFile to (POSIX file %q) as alias
-	set label index of theFile to 0
-	repeat with t in theTags
-		set current application's NSWorkspace's sharedWorkspace's ` +
-		"`setTags:theTags ofFile:filePath`" + `
-	end repeat
-end tell`, tagList, path)
-
-	// Use a simpler xattr-based approach that works without Finder scripting
-	_ = script // above is complex; use the simpler tag approach below
-
-	go func() {
-		for _, name := range names {
-			// macOS stores Finder tags via extended attributes; the simplest
-			// reliable way is the `tag` CLI or writing com.apple.metadata:_kMDItemUserTags.
-			// Fall back to osascript Finder tell.
-			tagScript := fmt.Sprintf(
-				`tell application "Finder" to set comment of (POSIX file %q as alias) to comment of (POSIX file %q as alias)`, path, path)
-			_ = tagScript
-			// Use the `tag` command if available, otherwise skip silently
-			exec.Command("tag", "--add", name, path).Run()
-		}
-	}()
-}
 
 // --- Save As text input helpers ---
 
@@ -449,29 +382,6 @@ func (st *appState) saveTab(tab *ui.Tab) bool {
 	return true
 }
 
-// saveTabAs shows the native Save As file dialog (Browse fallback).
-func (st *appState) saveTabAs(tab *ui.Tab) bool {
-	defaultName := tab.Title
-	if defaultName == "" || tab.IsUntitled {
-		ts := st.tabStates[tab.Editor]
-		if ts != nil && ts.langLabel != "" && ts.langLabel != "Plain Text" {
-			defaultName = "Untitled" + langToExtension(ts.langLabel)
-		} else {
-			defaultName = "Untitled.txt"
-		}
-	}
-	script := fmt.Sprintf(`set filePath to POSIX path of (choose file name with prompt "Save As" default name %q)
-return filePath`, defaultName)
-	out, err := exec.Command("osascript", "-e", script).Output()
-	if err != nil {
-		return false
-	}
-	path := strings.TrimSpace(string(out))
-	if path == "" {
-		return false
-	}
-	return st.saveTabToPath(tab, path)
-}
 
 func (st *appState) saveTabToPath(tab *ui.Tab, path string) bool {
 	if err := tab.Editor.SaveAs(path); err != nil {
