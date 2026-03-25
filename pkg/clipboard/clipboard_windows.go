@@ -19,7 +19,8 @@ var (
 	globalFree     = kernel32.NewProc("GlobalFree")
 	globalLock     = kernel32.NewProc("GlobalLock")
 	globalUnlock   = kernel32.NewProc("GlobalUnlock")
-	lstrcpyW       = kernel32.NewProc("lstrcpyW")
+	globalSize     = kernel32.NewProc("GlobalSize")
+	rtlMoveMemory  = kernel32.NewProc("RtlMoveMemory")
 )
 
 const (
@@ -46,26 +47,21 @@ func Get() string {
 	}
 	defer globalUnlock.Call(h)
 
-	// Walk the UTF-16 string to find its length, then convert.
-	// ptr is a uintptr from GlobalLock — read uint16s until NUL.
-	n := 0
-	for {
-		ch := *(*uint16)(unsafe.Add(unsafe.Pointer(ptr), uintptr(n)*2))
-		if ch == 0 {
-			break
-		}
-		n++
-		if n > 1<<20 {
-			break
-		}
-	}
-	if n == 0 {
+	// Get the size of the global memory block in bytes.
+	sz, _, _ := globalSize.Call(h)
+	if sz == 0 || sz < 2 {
 		return ""
 	}
+
+	// Copy the data into a Go-managed buffer.
+	n := int(sz) / 2 // number of uint16s
 	buf := make([]uint16, n)
-	for i := range buf {
-		buf[i] = *(*uint16)(unsafe.Add(unsafe.Pointer(ptr), uintptr(i)*2))
-	}
+	rtlMoveMemory.Call(
+		uintptr(unsafe.Pointer(&buf[0])),
+		ptr,
+		sz,
+	)
+
 	return syscall.UTF16ToString(buf)
 }
 
@@ -80,9 +76,9 @@ func Set(text string) {
 	emptyClipboard.Call()
 
 	utf16, _ := syscall.UTF16FromString(text)
-	size := len(utf16) * 2 // uint16 = 2 bytes
+	size := uintptr(len(utf16) * 2)
 
-	h, _, _ := globalAlloc.Call(gmemMoveable, uintptr(size))
+	h, _, _ := globalAlloc.Call(gmemMoveable, size)
 	if h == 0 {
 		return
 	}
@@ -93,10 +89,12 @@ func Set(text string) {
 		return
 	}
 
-	// Copy UTF-16 data into the global memory block.
-	for i, ch := range utf16 {
-		*(*uint16)(unsafe.Add(unsafe.Pointer(ptr), uintptr(i)*2)) = ch
-	}
+	// Copy Go slice into the global memory block via RtlMoveMemory.
+	rtlMoveMemory.Call(
+		ptr,
+		uintptr(unsafe.Pointer(&utf16[0])),
+		size,
+	)
 
 	globalUnlock.Call(h)
 	setClipData.Call(cfUnicodeText, h)
