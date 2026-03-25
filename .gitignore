@@ -16,5 +16,12 @@ Zephyr-*-setup.exe
 # Generated icon assets (regenerate from icon.svg)
 assets/icon.iconset/
 
+# Jekyll build output
+docs/_site/
+docs/_includes/install.md
+docs/_includes/changelog.md
+docs/assets/icon.svg
+docs/assets/hero-dark.svg
+
 # Claude config
 .claude/

@@ -1,0 +1,108 @@
+---
+layout: default
+title: "Zephyr — The caffeinated editor"
+---
+
+<nav>
+  <a href="#features">Features</a>
+  <a href="#download">Download</a>
+  <a href="#install">Install</a>
+  <a href="#changelog">Changelog</a>
+  <a href="{{ site.repo }}">GitHub</a>
+</nav>
+
+<section class="hero">
+  <img class="icon" src="{{ '/assets/icon.svg' | relative_url }}" alt="Zephyr icon">
+  <h1>Zephyr</h1>
+  <p class="tagline">A fast, GPU-accelerated text editor written entirely in Go. Buttery-smooth rendering meets precise syntax highlighting.</p>
+  <div class="buttons">
+    <a href="{{ site.release_url }}" class="btn btn-primary">Download Latest</a>
+    <a href="{{ site.repo }}" class="btn btn-secondary">View on GitHub</a>
+  </div>
+</section>
+
+<section class="screenshot">
+  <img src="{{ '/assets/hero-dark.svg' | relative_url }}" alt="Zephyr editor — dark theme">
+</section>
+
+<div class="container" id="features">
+  <h2 class="section-title">Features</h2>
+  <div class="features">
+    <div class="feature">
+      <strong>GPU-Accelerated</strong>
+      <p>Every pixel rendered on the GPU via Gio. Smooth scrolling and instant response on every platform.</p>
+    </div>
+    <div class="feature">
+      <strong>Tree-sitter Highlighting</strong>
+      <p>Accurate, incremental parsing for 17+ languages including Go, Python, TypeScript, Rust, and more.</p>
+    </div>
+    <div class="feature">
+      <strong>Cross-Platform</strong>
+      <p>Native experience on macOS, Windows, and Linux. Platform-specific integration on each OS.</p>
+    </div>
+    <div class="feature">
+      <strong>Code Folding</strong>
+      <p>Collapse and expand blocks with color-coded line count indicators. Cmd+click for recursive fold.</p>
+    </div>
+    <div class="feature">
+      <strong>Markdown Preview</strong>
+      <p>Rendered markdown with code blocks, task list checkboxes, tables, and copy buttons.</p>
+    </div>
+    <div class="feature">
+      <strong>Tabbed Editing</strong>
+      <p>Chrome-style tabs with drag-to-reorder, overflow dropdown, and unsaved-changes indicators.</p>
+    </div>
+    <div class="feature">
+      <strong>Themes</strong>
+      <p>Dark and light themes configurable via YAML. Toggle with a single click in the tab bar.</p>
+    </div>
+    <div class="feature">
+      <strong>Find & Replace</strong>
+      <p>Inline search with regex and case-sensitive modes. Navigate matches with keyboard shortcuts.</p>
+    </div>
+    <div class="feature">
+      <strong>Smart Editing</strong>
+      <p>Auto-pairing brackets, language-aware indentation, soft-tab backspace, and intelligent undo.</p>
+    </div>
+  </div>
+</div>
+
+<section class="downloads container" id="download">
+  <h2 class="section-title">Download</h2>
+  <p style="color: var(--fg-dim); margin-bottom: 20px;">
+    Grab the latest release for your platform. All downloads available on the
+    <a href="{{ site.release_url }}">GitHub Releases page</a>.
+  </p>
+  <div class="download-grid">
+    <div class="download-card">
+      <div class="platform">&#63743;</div>
+      <h3>macOS</h3>
+      <a href="{{ site.release_url }}" class="btn btn-primary" style="width: 100%;">Download DMG</a>
+      <p class="formats">Drag to Applications</p>
+    </div>
+    <div class="download-card">
+      <div class="platform">&#8862;</div>
+      <h3>Windows</h3>
+      <a href="{{ site.release_url }}" class="btn btn-primary" style="width: 100%;">Download Installer</a>
+      <p class="formats">Setup .exe &middot; Portable .zip</p>
+    </div>
+    <div class="download-card">
+      <div class="platform">&#9881;</div>
+      <h3>Linux</h3>
+      <a href="{{ site.release_url }}" class="btn btn-primary" style="width: 100%;">Download</a>
+      <p class="formats">.deb &middot; .rpm &middot; AppImage &middot; .tar.gz</p>
+    </div>
+  </div>
+</section>
+
+<div class="container install-content" id="install">
+  <h2 class="section-title">Installation</h2>
+  {% capture install_content %}{% include install.md %}{% endcapture %}
+  {{ install_content | markdownify }}
+</div>
+
+<div class="container changelog-content" id="changelog">
+  <h2 class="section-title">Changelog</h2>
+  {% capture changelog_content %}{% include changelog.md %}{% endcapture %}
+  {{ changelog_content | markdownify }}
+</div>

@@ -1,0 +1,57 @@
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync content into docs
+        run: |
+          mkdir -p docs/_includes docs/assets
+
+          # Extract Installation section from README
+          sed -n '/^## Installation$/,/^## [^I]/{ /^## [^I]/d; p; }' README.md > docs/_includes/install.md
+
+          # Copy changelog (strip the top title line)
+          tail -n +3 CHANGELOG.md > docs/_includes/changelog.md
+
+          # Copy assets for the site
+          cp assets/icon.svg docs/assets/icon.svg
+          cp assets/screenshots/hero-dark.svg docs/assets/hero-dark.svg
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: docs
+          destination: _site
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,14 @@
+title: Zephyr
+description: The caffeinated editor — fast, GPU-accelerated text editor
+url: "https://kkollsga.github.io"
+baseurl: "/zephyr"
+repo: "https://github.com/kkollsga/zephyr"
+release_url: "https://github.com/kkollsga/zephyr/releases/latest"
+
+markdown: kramdown
+kramdown:
+  input: GFM
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
