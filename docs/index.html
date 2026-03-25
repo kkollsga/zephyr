@@ -16,7 +16,7 @@ title: "Zephyr — The caffeinated editor"
   <h1>Zephyr</h1>
   <p class="tagline">A fast, GPU-accelerated text editor written entirely in Go. Buttery-smooth rendering meets precise syntax highlighting.</p>
   <div class="buttons">
-    <a href="{{ site.release_url }}" class="btn btn-primary">Download Latest</a>
+    <a href="#download" class="btn btn-primary" id="hero-download" onclick="scrollToDownload(event)">Download for your OS</a>
     <a href="{{ site.repo }}" class="btn btn-secondary">View on GitHub</a>
   </div>
 </section>
@@ -67,6 +67,63 @@ title: "Zephyr — The caffeinated editor"
   </div>
 </div>
 
+<!-- OS-aware download modal -->
+<div class="modal-overlay" id="download-modal" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="document.getElementById('download-modal').classList.remove('active')">&times;</button>
+
+    <!-- macOS -->
+    <div class="modal-os" id="modal-macos">
+      <div class="modal-icon">&#63743;</div>
+      <h2>Download for macOS</h2>
+      <a id="link-macos-dmg" href="{{ site.release_url }}" class="btn btn-primary modal-btn">Download DMG</a>
+      <div class="modal-note">
+        <h4>Before you open Zephyr</h4>
+        <p>macOS will show a warning because Zephyr is not signed with an Apple Developer ID. This is normal for open-source apps distributed outside the App Store.</p>
+        <p>To open it, right-click <strong>Zephyr.app</strong> and select <strong>Open</strong>, then click <strong>Open</strong> in the dialog. You only need to do this once.</p>
+        <p>Alternatively, run in Terminal after dragging to Applications:</p>
+        <pre><code>xattr -cr /Applications/Zephyr.app</code></pre>
+      </div>
+    </div>
+
+    <!-- Windows -->
+    <div class="modal-os" id="modal-windows">
+      <div class="modal-icon">&#8862;</div>
+      <h2>Download for Windows</h2>
+      <div class="modal-buttons">
+        <a id="link-win-setup" href="{{ site.release_url }}" class="btn btn-primary modal-btn">Download Installer</a>
+        <a id="link-win-zip" href="{{ site.release_url }}" class="btn btn-secondary modal-btn">Portable ZIP</a>
+      </div>
+      <div class="modal-note">
+        <p>The <strong>installer</strong> adds a Start Menu entry, optional desktop shortcut, "Add to PATH", and "Open with Zephyr" context menu. Includes an uninstaller.</p>
+        <p>The <strong>portable ZIP</strong> requires no installation — extract and run <code>zephyr.exe</code>.</p>
+      </div>
+    </div>
+
+    <!-- Linux -->
+    <div class="modal-os" id="modal-linux">
+      <div class="modal-icon">&#9881;</div>
+      <h2>Download for Linux</h2>
+      <div class="modal-buttons">
+        <a id="link-linux-appimage" href="{{ site.release_url }}" class="btn btn-primary modal-btn">AppImage</a>
+        <a id="link-linux-deb" href="{{ site.release_url }}" class="btn btn-secondary modal-btn">.deb</a>
+        <a id="link-linux-rpm" href="{{ site.release_url }}" class="btn btn-secondary modal-btn">.rpm</a>
+        <a id="link-linux-tar" href="{{ site.release_url }}" class="btn btn-secondary modal-btn">.tar.gz</a>
+      </div>
+      <div class="modal-note">
+        <p><strong>AppImage</strong> — no install needed. Make executable and run:</p>
+        <pre><code>chmod +x Zephyr-*.AppImage && ./Zephyr-*.AppImage</code></pre>
+        <p><strong>Debian/Ubuntu:</strong> <code>sudo dpkg -i zephyr_*_amd64.deb</code></p>
+        <p><strong>Fedora/RHEL:</strong> <code>sudo rpm -i zephyr-*-1.x86_64.rpm</code></p>
+      </div>
+    </div>
+
+    <p class="modal-all-downloads">
+      <a href="{{ site.release_url }}">View all downloads on GitHub</a>
+    </p>
+  </div>
+</div>
+
 <section class="downloads container" id="download">
   <h2 class="section-title">Download</h2>
   <p style="color: var(--fg-dim); margin-bottom: 20px;">
@@ -74,22 +131,22 @@ title: "Zephyr — The caffeinated editor"
     <a href="{{ site.release_url }}">GitHub Releases page</a>.
   </p>
   <div class="download-grid">
-    <div class="download-card">
+    <div class="download-card" onclick="showModal('macos')">
       <div class="platform">&#63743;</div>
       <h3>macOS</h3>
-      <a href="{{ site.release_url }}" class="btn btn-primary" style="width: 100%;">Download DMG</a>
+      <span class="btn btn-primary" style="width: 100%;">Download DMG</span>
       <p class="formats">Drag to Applications</p>
     </div>
-    <div class="download-card">
+    <div class="download-card" onclick="showModal('windows')">
       <div class="platform">&#8862;</div>
       <h3>Windows</h3>
-      <a href="{{ site.release_url }}" class="btn btn-primary" style="width: 100%;">Download Installer</a>
+      <span class="btn btn-primary" style="width: 100%;">Download Installer</span>
       <p class="formats">Setup .exe &middot; Portable .zip</p>
     </div>
-    <div class="download-card">
+    <div class="download-card" onclick="showModal('linux')">
       <div class="platform">&#9881;</div>
       <h3>Linux</h3>
-      <a href="{{ site.release_url }}" class="btn btn-primary" style="width: 100%;">Download</a>
+      <span class="btn btn-primary" style="width: 100%;">Download</span>
       <p class="formats">.deb &middot; .rpm &middot; AppImage &middot; .tar.gz</p>
     </div>
   </div>
@@ -106,3 +163,83 @@ title: "Zephyr — The caffeinated editor"
   {% capture changelog_content %}{% include changelog.md %}{% endcapture %}
   {{ changelog_content | markdownify }}
 </div>
+
+<script>
+var REPO = "kkollsga/zephyr";
+var releaseData = null;
+
+function detectOS() {
+  var ua = navigator.userAgent || navigator.platform || "";
+  if (/Mac/i.test(ua)) return "macos";
+  if (/Win/i.test(ua)) return "windows";
+  return "linux";
+}
+
+// Update hero button text based on OS
+(function() {
+  var os = detectOS();
+  var btn = document.getElementById("hero-download");
+  var labels = { macos: "Download for macOS", windows: "Download for Windows", linux: "Download for Linux" };
+  btn.textContent = labels[os] || "Download";
+})();
+
+function scrollToDownload(e) {
+  e.preventDefault();
+  showModal(detectOS());
+}
+
+function showModal(os) {
+  // Hide all OS sections, show the requested one
+  document.querySelectorAll(".modal-os").forEach(function(el) { el.style.display = "none"; });
+  var target = document.getElementById("modal-" + os);
+  if (target) target.style.display = "block";
+  document.getElementById("download-modal").classList.add("active");
+
+  // Fetch release assets if not cached
+  if (!releaseData) {
+    fetch("https://api.github.com/repos/" + REPO + "/releases/latest")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        releaseData = data;
+        populateLinks(data);
+      })
+      .catch(function() {});
+  } else {
+    populateLinks(releaseData);
+  }
+}
+
+function populateLinks(data) {
+  if (!data || !data.assets) return;
+  var assets = data.assets;
+  for (var i = 0; i < assets.length; i++) {
+    var name = assets[i].name;
+    var url = assets[i].browser_download_url;
+    if (/\.dmg$/.test(name))           setLink("link-macos-dmg", url);
+    if (/-setup\.exe$/.test(name))     setLink("link-win-setup", url);
+    if (/windows.*\.zip$/.test(name))  setLink("link-win-zip", url);
+    if (/\.AppImage$/.test(name))      setLink("link-linux-appimage", url);
+    if (/\.deb$/.test(name))           setLink("link-linux-deb", url);
+    if (/\.rpm$/.test(name))           setLink("link-linux-rpm", url);
+    if (/linux.*\.tar\.gz$/.test(name)) setLink("link-linux-tar", url);
+  }
+}
+
+function setLink(id, url) {
+  var el = document.getElementById(id);
+  if (el) el.href = url;
+}
+
+function closeModal(e) {
+  if (e.target === e.currentTarget) {
+    document.getElementById("download-modal").classList.remove("active");
+  }
+}
+
+// Close modal on Escape
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    document.getElementById("download-modal").classList.remove("active");
+  }
+});
+</script>

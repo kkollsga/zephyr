@@ -240,6 +240,139 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   padding: 0;
 }
 
+/* ── Modal ── */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-overlay.active {
+  display: flex;
+}
+
+.modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px;
+  max-width: 520px;
+  width: 90%;
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.modal-close:hover { color: var(--fg); }
+
+.modal-os { display: none; }
+
+.modal-icon {
+  font-size: 2.5rem;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.modal h2 {
+  text-align: center;
+  margin-bottom: 20px;
+  font-size: 1.4rem;
+}
+
+.modal-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.modal-buttons .btn {
+  flex: 1;
+  text-align: center;
+  min-width: 80px;
+}
+
+.modal-note {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-top: 16px;
+}
+
+.modal-note h4 {
+  color: var(--accent);
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.modal-note p {
+  color: var(--fg-dim);
+  font-size: 0.85rem;
+  margin-bottom: 8px;
+}
+
+.modal-note p:last-child { margin-bottom: 0; }
+
+.modal-note pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.modal-note code {
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 0.8rem;
+  color: var(--fg);
+}
+
+.modal-note p code {
+  background: var(--bg);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.modal-all-downloads {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 0.85rem;
+}
+
+.download-card {
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.download-card:hover {
+  border-color: var(--accent);
+}
+
 /* ── Footer ── */
 footer {
   text-align: center;

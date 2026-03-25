@@ -82,6 +82,8 @@ Download the latest release from the [releases page](https://github.com/kkollsga
 
 Download the `.dmg` file, open it, and drag **Zephyr.app** to your Applications folder.
 
+> **Gatekeeper warning:** macOS will warn that Zephyr can't be verified because it isn't signed with an Apple Developer ID. Right-click the app, select **Open**, then click **Open** in the dialog. You only need to do this once. Alternatively, run: `xattr -cr /Applications/Zephyr.app`
+
 Or build from source:
 
 ```bash
