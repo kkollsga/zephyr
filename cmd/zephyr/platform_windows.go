@@ -9,6 +9,9 @@ import (
 	"syscall"
 	"unsafe"
 
+	"gioui.org/layout"
+
+	"github.com/kristianweb/zephyr/internal/render"
 	"github.com/kristianweb/zephyr/internal/ui"
 )
 
@@ -175,3 +178,6 @@ func (st *appState) saveTabAs(tab *ui.Tab) bool {
 
 // applyFinderTags is a no-op on Windows (no Finder tags concept).
 func (st *appState) applyFinderTags(path string) {}
+
+func (st *appState) drawFinderTagRow(gtx layout.Context, tr *render.TextRenderer, dx, dw, fieldX, curY, itemH int) {
+}

@@ -1318,55 +1318,7 @@ func (st *appState) drawSaveMenu(gtx layout.Context) {
 
 		// Tag: colored dots (macOS Finder tags only)
 		if platformHasFinderTags() {
-			iy := curY
-			textY := iy + (itemH-tr.LineHeightPx)/2
-			tr.RenderGlyphs(gtx.Ops, gtx, "Tag:", dx+8, textY, st.theme.TabDimFg)
-
-			dotSize := tr.LineHeightPx - 2
-			dotGap := 4
-			dotY := iy + (itemH-dotSize)/2
-			dotX := fieldX
-			for ti := 0; ti < 7; ti++ {
-				cx := dotX + dotSize/2
-				cy := dotY + dotSize/2
-				r := dotSize / 2
-
-				if st.saveMenu.tags[ti] {
-					ellOff := op.Offset(image.Pt(cx-r, cy-r)).Push(gtx.Ops)
-					ell := clip.Ellipse{Max: image.Pt(r*2, r*2)}.Push(gtx.Ops)
-					paint.ColorOp{Color: finderTagColors[ti]}.Add(gtx.Ops)
-					paint.PaintOp{}.Add(gtx.Ops)
-					ell.Pop()
-					ellOff.Pop()
-				} else {
-					ellOff := op.Offset(image.Pt(cx-r, cy-r)).Push(gtx.Ops)
-					ell := clip.Ellipse{Max: image.Pt(r*2, r*2)}.Push(gtx.Ops)
-					dimColor := finderTagColors[ti]
-					dimColor.A = 0x80
-					paint.ColorOp{Color: dimColor}.Add(gtx.Ops)
-					paint.PaintOp{}.Add(gtx.Ops)
-					ell.Pop()
-					ellOff.Pop()
-
-					ir := r - 2
-					if ir > 0 {
-						ellOff2 := op.Offset(image.Pt(cx-ir, cy-ir)).Push(gtx.Ops)
-						ell2 := clip.Ellipse{Max: image.Pt(ir*2, ir*2)}.Push(gtx.Ops)
-						paint.ColorOp{Color: st.theme.DropdownBg}.Add(gtx.Ops)
-						paint.PaintOp{}.Add(gtx.Ops)
-						ell2.Pop()
-						ellOff2.Pop()
-					}
-				}
-				dotX += dotSize + dotGap
-			}
-
-			sepOff := op.Offset(image.Pt(dx+4, iy+itemH-1)).Push(gtx.Ops)
-			sepRect := clip.Rect{Max: image.Pt(dw-8, 1)}.Push(gtx.Ops)
-			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
-			paint.PaintOp{}.Add(gtx.Ops)
-			sepRect.Pop()
-			sepOff.Pop()
+			st.drawFinderTagRow(gtx, tr, dx, dw, fieldX, curY, itemH)
 			curY += itemH
 		}
 

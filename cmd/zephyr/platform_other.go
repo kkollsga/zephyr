@@ -5,6 +5,9 @@ package main
 import (
 	"image/color"
 
+	"gioui.org/layout"
+
+	"github.com/kristianweb/zephyr/internal/render"
 	"github.com/kristianweb/zephyr/internal/ui"
 )
 
@@ -27,3 +30,6 @@ func (st *appState) pickSaveDir() {}
 func (st *appState) saveTabAs(tab *ui.Tab) bool { return false }
 
 func (st *appState) applyFinderTags(path string) {}
+
+func (st *appState) drawFinderTagRow(gtx layout.Context, tr *render.TextRenderer, dx, dw, fieldX, curY, itemH int) {
+}
