@@ -19,6 +19,7 @@ var (
 	globalFree     = kernel32.NewProc("GlobalFree")
 	globalLock     = kernel32.NewProc("GlobalLock")
 	globalUnlock   = kernel32.NewProc("GlobalUnlock")
+	lstrcpyW       = kernel32.NewProc("lstrcpyW")
 )
 
 const (
@@ -45,7 +46,27 @@ func Get() string {
 	}
 	defer globalUnlock.Call(h)
 
-	return syscall.UTF16ToString((*[1 << 20]uint16)(unsafe.Pointer(ptr))[:])
+	// Walk the UTF-16 string to find its length, then convert.
+	// ptr is a uintptr from GlobalLock — read uint16s until NUL.
+	n := 0
+	for {
+		ch := *(*uint16)(unsafe.Add(unsafe.Pointer(ptr), uintptr(n)*2))
+		if ch == 0 {
+			break
+		}
+		n++
+		if n > 1<<20 {
+			break
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	buf := make([]uint16, n)
+	for i := range buf {
+		buf[i] = *(*uint16)(unsafe.Add(unsafe.Pointer(ptr), uintptr(i)*2))
+	}
+	return syscall.UTF16ToString(buf)
 }
 
 // Set sets the clipboard text content.
@@ -72,9 +93,10 @@ func Set(text string) {
 		return
 	}
 
-	src := unsafe.Pointer(&utf16[0])
-	dst := unsafe.Pointer(ptr)
-	copy((*[1 << 20]byte)(dst)[:size], (*[1 << 20]byte)(src)[:size])
+	// Copy UTF-16 data into the global memory block.
+	for i, ch := range utf16 {
+		*(*uint16)(unsafe.Add(unsafe.Pointer(ptr), uintptr(i)*2)) = ch
+	}
 
 	globalUnlock.Call(h)
 	setClipData.Call(cfUnicodeText, h)
