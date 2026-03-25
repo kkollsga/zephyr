@@ -19,6 +19,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		printVersion()
+		os.Exit(0)
+	}
 	setupTitlebar()
 	go run()
 	app.Main()

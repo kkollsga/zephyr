@@ -1,0 +1,195 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION_FILE: go.mod
+
+jobs:
+  # ─── macOS ──────────────────────────────────────────────────
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+
+      - name: Determine version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          go build -ldflags "-X main.version=$VERSION -X main.commit=${COMMIT:0:8} -X main.date=$DATE" \
+            -o zephyr ./cmd/zephyr
+
+      - name: Create .app bundle
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          mkdir -p Zephyr.app/Contents/{MacOS,Resources}
+          cp zephyr Zephyr.app/Contents/MacOS/
+          cp Info.plist Zephyr.app/Contents/
+          plutil -replace CFBundleVersion -string "$VERSION" Zephyr.app/Contents/Info.plist
+          plutil -replace CFBundleShortVersionString -string "$VERSION" Zephyr.app/Contents/Info.plist
+          cp assets/icon.icns Zephyr.app/Contents/Resources/
+          codesign --force --sign - Zephyr.app
+
+      - name: Create DMG
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: bash build/macos/create-dmg.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: "Zephyr-*.dmg"
+
+  # ─── Windows ────────────────────────────────────────────────
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ github.sha }}
+          CGO_ENABLED: "1"
+        run: |
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          go build -ldflags "-X main.version=$VERSION -X main.commit=${COMMIT:0:8} -X main.date=$DATE -H windowsgui" \
+            -o zephyr.exe ./cmd/zephyr
+
+      - name: Create portable zip
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          New-Item -ItemType Directory -Force -Path staging
+          Copy-Item zephyr.exe staging/
+          Copy-Item LICENSE staging/
+          Compress-Archive -Path staging/* -DestinationPath "Zephyr-$env:VERSION-windows-amd64.zip"
+
+      - name: Build Inno Setup installer
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          APP_VERSION="${VERSION#v}"
+          # Convert PNG to ICO for Inno Setup
+          magick assets/icon.iconset/icon_256x256.png assets/icon.ico
+          iscc "//DAPP_VERSION=$APP_VERSION" build/windows/installer.iss
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            Zephyr-*.zip
+            Zephyr-*-setup.exe
+
+  # ─── Linux ──────────────────────────────────────────────────
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+
+      - name: Determine version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev \
+            libvulkan-dev rpm
+
+      - name: Build binary
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          go build -ldflags "-X main.version=$VERSION -X main.commit=${COMMIT:0:8} -X main.date=$DATE" \
+            -o zephyr ./cmd/zephyr
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Build .deb and .rpm
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          export NFPM_VERSION="${VERSION#v}"
+          nfpm package -p deb -f build/linux/nfpm.yaml -t "zephyr_${NFPM_VERSION}_amd64.deb"
+          nfpm package -p rpm -f build/linux/nfpm.yaml -t "zephyr-${NFPM_VERSION}-1.x86_64.rpm"
+
+      - name: Build AppImage
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: bash build/linux/appimage.sh
+
+      - name: Create tarball
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          mkdir -p "zephyr-${VERSION}-linux-amd64"
+          cp zephyr LICENSE "zephyr-${VERSION}-linux-amd64/"
+          tar czf "zephyr-${VERSION}-linux-amd64.tar.gz" "zephyr-${VERSION}-linux-amd64"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            zephyr_*.deb
+            zephyr-*.rpm
+            Zephyr-*.AppImage
+            zephyr-*-linux-amd64.tar.gz
+
+  # ─── Create GitHub Release ──────────────────────────────────
+  release:
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "Zephyr $TAG" \
+            --generate-notes \
+            --draft

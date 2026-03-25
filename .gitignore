@@ -1,6 +1,15 @@
 # Build artifacts
 /zephyr
+/zephyr.exe
 Zephyr.app/
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.ico
+dist/
+appimagetool
+Zephyr.AppDir/
 
 # Generated icon assets (regenerate from icon.svg)
 assets/icon.iconset/

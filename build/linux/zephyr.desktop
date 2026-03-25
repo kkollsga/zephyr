@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Zephyr
+GenericName=Text Editor
+Comment=The caffeinated editor — fast, GPU-accelerated text editor
+Exec=zephyr %F
+Icon=zephyr
+Terminal=false
+Categories=TextEditor;Development;Utility;
+MimeType=text/plain;text/x-csrc;text/x-c++src;text/x-java;text/x-python;text/x-ruby;text/x-go;text/x-rustsrc;text/javascript;text/typescript;text/html;text/css;text/xml;text/markdown;application/json;application/x-yaml;text/x-shellscript;
+Keywords=text;editor;code;programming;
+StartupWMClass=zephyr
