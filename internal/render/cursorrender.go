@@ -19,6 +19,7 @@ type CursorRenderer struct {
 	CharAdvance float64
 	LineHeight  int
 	BlinkOn     bool
+	BlockMode   bool // true for vim Normal mode block cursor
 	lastBlink   time.Time
 }
 
@@ -64,9 +65,17 @@ func (cr *CursorRenderer) RenderCursor(ops *op.Ops, line, col, firstLine, gutter
 	// Cursor height is ~70% of line height, top-aligned with text
 	cursorH := cr.LineHeight * 70 / 100
 
+	width := cr.Width
+	if cr.BlockMode {
+		width = int(math.Round(cr.CharAdvance))
+		if width < cr.CharWidth {
+			width = cr.CharWidth
+		}
+	}
+
 	rect := clip.Rect{
 		Min: image.Pt(x, y),
-		Max: image.Pt(x+cr.Width, y+cursorH),
+		Max: image.Pt(x+width, y+cursorH),
 	}.Push(ops)
 	paint.ColorOp{Color: cr.Color}.Add(ops)
 	paint.PaintOp{}.Add(ops)

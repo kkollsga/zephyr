@@ -14,6 +14,7 @@ import (
 
 	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/highlight"
+	"github.com/kristianweb/zephyr/internal/vim"
 	"github.com/kristianweb/zephyr/pkg/clipboard"
 )
 
@@ -55,13 +56,29 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 		switch ke := ev.(type) {
 		case key.Event:
 			if ke.State == key.Press {
-				st.handleKey(ke)
+				// Check vim toggle (Cmd+Shift+V) — works in all modes
+				if ke.Name == "V" && ke.Modifiers == key.ModShortcut|key.ModShift {
+					st.toggleVimMode()
+					break
+				}
+
+				if st.vimEnabled && st.vimState != nil &&
+					!st.saveMenu.visible && !st.langSel.Visible && !st.findBar.Visible {
+					st.handleVimKeyEvent(ke)
+				} else {
+					st.handleKey(ke)
+				}
 			}
 		case key.EditEvent:
 			if st.langSel.Visible {
 				break
 			}
-			st.handleTextInput(ke.Text)
+			if st.vimEnabled && st.vimState != nil &&
+				!st.saveMenu.visible && !st.findBar.Visible {
+				st.handleVimEditEvent(ke.Text)
+			} else {
+				st.handleTextInput(ke.Text)
+			}
 		case pointer.Event:
 			st.handlePointer(ke)
 		}
@@ -422,6 +439,15 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		}
 		statusY := st.lastMaxY - statusH
 
+		// Click on "Vim" indicator opens tutor
+		if st.vimEnabled && st.vimIndicatorW > 0 {
+			px, py := int(pe.Position.X), int(pe.Position.Y)
+			if py >= statusY && px >= st.vimIndicatorX && px < st.vimIndicatorX+st.vimIndicatorW {
+				st.openVimTutor()
+				return
+			}
+		}
+
 		if st.langSel.Visible && sr != nil {
 			itemH := sr.LineHeightPx + 4
 			dropdownH := len(st.langSel.Languages) * itemH
@@ -704,4 +730,164 @@ func (st *appState) handleTextInput(text string) {
 		st.autoDedentClosingBracket()
 	}
 	st.afterEdit()
+}
+
+// handleVimKeyEvent routes key.Event through the vim state machine.
+func (st *appState) handleVimKeyEvent(ke key.Event) {
+	// In Insert mode, only intercept Escape and Ctrl+[ to return to Normal
+	if st.vimState.Mode == vim.ModeInsert {
+		if ke.Name == key.NameEscape {
+			action := st.vimState.HandleKey(vim.KeyInput{Name: vim.NameEscape})
+			st.executeVimAction(action)
+			return
+		}
+		// Ctrl+C also exits insert mode
+		if ke.Name == "C" && ke.Modifiers&key.ModCtrl != 0 {
+			action := st.vimState.HandleKey(vim.KeyInput{Char: 'c', Ctrl: true})
+			st.executeVimAction(action)
+			return
+		}
+		// All other keys fall through to normal editing
+		st.handleKey(ke)
+		return
+	}
+
+	// In markdown read mode, let existing handler take over
+	if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+		st.handleKey(ke)
+		return
+	}
+
+	// Normal/Visual/Command/Search modes — convert to vim KeyInput
+	ev := gioKeyToVimInput(ke)
+	action := st.vimState.HandleKey(ev)
+	st.executeVimAction(action)
+
+	// Update visual selection if in visual mode
+	if st.vimState.Mode == vim.ModeVisual || st.vimState.Mode == vim.ModeVisualLine ||
+		st.vimState.Mode == vim.ModeVisualBlock {
+		st.updateVimVisualSelection()
+	}
+}
+
+// handleVimEditEvent routes text input (key.EditEvent) through vim.
+func (st *appState) handleVimEditEvent(text string) {
+	if st.vimState.Mode == vim.ModeInsert {
+		// In insert mode, pass through to normal text editing
+		st.handleTextInput(text)
+		return
+	}
+
+	// In Command/Search mode, characters are part of the command line
+	if st.vimState.Mode == vim.ModeCommand || st.vimState.Mode == vim.ModeSearch {
+		for _, r := range text {
+			ev := vim.KeyInput{Char: r}
+			st.vimState.HandleKey(ev)
+		}
+		st.window.Invalidate()
+		return
+	}
+
+	// In Normal/Visual mode, characters are vim commands
+	for _, r := range text {
+		ev := vim.KeyInput{Char: r}
+		action := st.vimState.HandleKey(ev)
+		st.executeVimAction(action)
+	}
+
+	// Update visual selection
+	if st.vimState.Mode == vim.ModeVisual || st.vimState.Mode == vim.ModeVisualLine ||
+		st.vimState.Mode == vim.ModeVisualBlock {
+		st.updateVimVisualSelection()
+	}
+}
+
+// gioKeyToVimInput converts a Gio key.Event to a vim KeyInput.
+func gioKeyToVimInput(ke key.Event) vim.KeyInput {
+	ev := vim.KeyInput{
+		Ctrl:     ke.Modifiers&key.ModCtrl != 0,
+		Shift:    ke.Modifiers&key.ModShift != 0,
+		Alt:      ke.Modifiers&key.ModAlt != 0,
+		Shortcut: ke.Modifiers&key.ModShortcut != 0,
+	}
+
+	// Map Gio named keys to vim named keys
+	switch ke.Name {
+	case key.NameEscape:
+		ev.Name = vim.NameEscape
+	case key.NameReturn:
+		ev.Name = vim.NameReturn
+	case key.NameDeleteBackward:
+		ev.Name = vim.NameDeleteBackward
+	case key.NameDeleteForward:
+		ev.Name = vim.NameDeleteForward
+	case key.NameUpArrow:
+		ev.Name = vim.NameUpArrow
+	case key.NameDownArrow:
+		ev.Name = vim.NameDownArrow
+	case key.NameLeftArrow:
+		ev.Name = vim.NameLeftArrow
+	case key.NameRightArrow:
+		ev.Name = vim.NameRightArrow
+	case key.NameHome:
+		ev.Name = vim.NameHome
+	case key.NameEnd:
+		ev.Name = vim.NameEnd
+	case key.NamePageUp:
+		ev.Name = vim.NamePageUp
+	case key.NamePageDown:
+		ev.Name = vim.NamePageDown
+	case key.NameTab:
+		ev.Name = vim.NameTab
+	default:
+		// Letter keys come as uppercase single chars in Gio (e.g., "A", "B")
+		name := string(ke.Name)
+		if len(name) == 1 {
+			ch := rune(name[0])
+			if ch >= 'A' && ch <= 'Z' {
+				if ev.Shift {
+					ev.Char = ch // uppercase
+				} else {
+					ev.Char = ch + 32 // lowercase
+				}
+			}
+		}
+	}
+
+	return ev
+}
+
+// updateVimVisualSelection updates the editor's selection to match visual mode state.
+func (st *appState) updateVimVisualSelection() {
+	ed := st.activeEd()
+	if ed == nil || st.vimState == nil {
+		return
+	}
+
+	anchor := editor.Cursor{
+		Line: st.vimState.VisualAnchorLine,
+		Col:  st.vimState.VisualAnchorCol,
+	}
+
+	switch st.vimState.Mode {
+	case vim.ModeVisual:
+		ed.Selection.Anchor = anchor
+		ed.Selection.Head = ed.Cursor
+		ed.Selection.Active = true
+	case vim.ModeVisualLine:
+		startLine := anchor.Line
+		endLine := ed.Cursor.Line
+		if startLine > endLine {
+			startLine, endLine = endLine, startLine
+		}
+		ed.Selection.Anchor = editor.Cursor{Line: startLine, Col: 0}
+		endLineText, _ := ed.Buffer.Line(endLine)
+		ed.Selection.Head = editor.Cursor{Line: endLine, Col: len([]rune(endLineText))}
+		ed.Selection.Active = true
+	case vim.ModeVisualBlock:
+		// Block mode: simple selection for now (true block mode requires multi-cursor)
+		ed.Selection.Anchor = anchor
+		ed.Selection.Head = ed.Cursor
+		ed.Selection.Active = true
+	}
 }

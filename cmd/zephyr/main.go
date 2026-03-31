@@ -16,6 +16,7 @@ import (
 	"github.com/kristianweb/zephyr/internal/highlight"
 	"github.com/kristianweb/zephyr/internal/render"
 	"github.com/kristianweb/zephyr/internal/ui"
+	"github.com/kristianweb/zephyr/internal/vim"
 )
 
 func main() {
@@ -148,6 +149,12 @@ type appState struct {
 		confirmOverwrite bool   // true when waiting for overwrite confirmation
 	}
 
+	// Vim mode
+	vimEnabled    bool
+	vimState      *vim.State
+	vimIndicatorX int // X position of "Vim" text in status bar
+	vimIndicatorW int // width of "Vim" text
+
 	// Tab drag state
 	tabDrag struct {
 		active        bool // a tab press is in progress
@@ -259,6 +266,9 @@ func run() {
 		cfg.Theme = "default"
 	}
 	theme := bundle.Theme(cfg.DarkMode)
+	if cfg.VimMode {
+		theme.TabAccent = vimGreen
+	}
 
 	w := &app.Window{}
 
@@ -276,7 +286,12 @@ func run() {
 		themeBundle:   bundle,
 		fontCfg:       bundle.Fonts,
 		wordWrap:      cfg.WordWrap,
+		vimEnabled:    cfg.VimMode,
 		tooltipTabIdx: -1,
+	}
+
+	if st.vimEnabled {
+		st.vimState = vim.NewState()
 	}
 
 	// Init tab state for first tab
@@ -472,6 +487,9 @@ func (st *appState) initRenderers(gtx layout.Context) {
 // applyTheme switches to a new theme at runtime, rebuilding derived state.
 func (st *appState) applyTheme(theme config.Theme) {
 	st.theme = theme
+	if st.vimEnabled {
+		st.theme.TabAccent = vimGreen
+	}
 	st.colorMap = render.TokenColorMap(theme)
 	st.shaper = nil  // forces initRenderers to re-run next frame
 	st.mdRend = nil  // rebuild markdown renderers with new theme
@@ -519,6 +537,21 @@ func (st *appState) persistThemeConfig() {
 	cfg := config.LoadConfig()
 	cfg.Theme = st.themeName
 	cfg.DarkMode = st.darkMode
+	config.SaveConfig(cfg)
+}
+
+// toggleVimMode toggles vim mode on/off and persists the setting.
+func (st *appState) toggleVimMode() {
+	st.vimEnabled = !st.vimEnabled
+	if st.vimEnabled {
+		st.vimState = vim.NewState()
+	} else {
+		st.vimState = nil
+	}
+	// Re-apply theme so accent color is updated
+	st.applyTheme(st.themeBundle.Theme(st.darkMode))
+	cfg := config.LoadConfig()
+	cfg.VimMode = st.vimEnabled
 	config.SaveConfig(cfg)
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/highlight"
 	"github.com/kristianweb/zephyr/internal/render"
+	"github.com/kristianweb/zephyr/internal/vim"
 )
 
 func (st *appState) draw(gtx layout.Context, w *app.Window) {
@@ -368,6 +369,7 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 	}
 
 	// Cursor
+	st.cursorRend.BlockMode = st.vimEnabled && st.vimState != nil && st.vimState.Mode != vim.ModeInsert
 	if st.cursorRend.UpdateBlink() {
 		w.Invalidate()
 	}
@@ -509,6 +511,7 @@ func (st *appState) drawEditorWrapped(gtx layout.Context, w *app.Window, ed *edi
 	}
 
 	// Cursor
+	st.cursorRend.BlockMode = st.vimEnabled && st.vimState != nil && st.vimState.Mode != vim.ModeInsert
 	if st.cursorRend.UpdateBlink() {
 		w.Invalidate()
 	}
@@ -778,7 +781,7 @@ func (st *appState) drawSingleTab(gtx layout.Context, i, tabX, textY, radius int
 
 		// Accent: fill the entire tab shape with accent color
 		accentClip := clip.UniformRRect(tabRect, radius).Push(gtx.Ops)
-		paint.ColorOp{Color: st.theme.MdAccent}.Add(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabAccent}.Add(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
 		accentClip.Pop()
 
@@ -1663,15 +1666,48 @@ func (st *appState) drawStatusLine(gtx layout.Context) {
 		st.mdToggleW = 0
 	}
 
-	// Centered notification (e.g. "Saved to: ~/path")
-	if st.notification != "" && time.Now().Before(st.notificationUntil) {
-		notifW := utf8.RuneCountInString(st.notification) * sr.CharWidth
-		notifX := (gtx.Constraints.Max.X - notifW) / 2
-		sr.RenderGlyphs(gtx.Ops, gtx, st.notification, notifX, textY, st.theme.Foreground)
-		// Schedule a repaint so the notification disappears on time
-		gtx.Execute(op.InvalidateCmd{})
-	} else if st.notification != "" {
-		st.notification = ""
+	// Vim indicator — just "Vim" centered in Xbox green
+	if st.vimEnabled && st.vimState != nil {
+		vimLabel := "Vim"
+		vimW := len(vimLabel) * sr.CharWidth
+		vimX := (gtx.Constraints.Max.X - vimW) / 2
+		sr.RenderGlyphs(gtx.Ops, gtx, vimLabel, vimX, textY, vimGreen)
+		st.vimIndicatorX = vimX
+		st.vimIndicatorW = vimW
+
+		// Command/search line shown to the right of "Vim"
+		if st.vimState.Mode == vim.ModeCommand || st.vimState.Mode == vim.ModeSearch {
+			prefix := ":"
+			if st.vimState.Mode == vim.ModeSearch {
+				prefix = "/"
+				if st.vimState.SearchDir < 0 {
+					prefix = "?"
+				}
+			}
+			cmdStr := prefix + st.vimState.CommandLine
+			cmdX := vimX + vimW + sr.CharWidth
+			sr.RenderGlyphs(gtx.Ops, gtx, cmdStr, cmdX, textY, st.theme.StatusFg)
+			gtx.Execute(op.InvalidateCmd{})
+		}
+
+		// Notifications rendered left of center to avoid overlap
+		if st.notification != "" && time.Now().Before(st.notificationUntil) {
+			notifX := 8 + len("999:999")*sr.CharWidth + sr.CharWidth*2
+			sr.RenderGlyphs(gtx.Ops, gtx, st.notification, notifX, textY, st.theme.Foreground)
+			gtx.Execute(op.InvalidateCmd{})
+		} else if st.notification != "" {
+			st.notification = ""
+		}
+	} else {
+		// Standard centered notification (when vim is off)
+		if st.notification != "" && time.Now().Before(st.notificationUntil) {
+			notifW := utf8.RuneCountInString(st.notification) * sr.CharWidth
+			notifX := (gtx.Constraints.Max.X - notifW) / 2
+			sr.RenderGlyphs(gtx.Ops, gtx, st.notification, notifX, textY, st.theme.Foreground)
+			gtx.Execute(op.InvalidateCmd{})
+		} else if st.notification != "" {
+			st.notification = ""
+		}
 	}
 }
 

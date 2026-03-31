@@ -113,3 +113,14 @@ func (pt *PieceTable) LineColToOffset(lc LineCol) (int, error) {
 
 	return lineStart + byteOff, nil
 }
+
+// LineColToOffsetSafe converts a 0-based line/column to a byte offset.
+// Returns 0 if the position is invalid. This is a convenience wrapper
+// around LineColToOffset for callers that don't need error handling.
+func (pt *PieceTable) LineColToOffsetSafe(line, col int) int {
+	off, err := pt.LineColToOffset(LineCol{Line: line, Col: col})
+	if err != nil {
+		return 0
+	}
+	return off
+}

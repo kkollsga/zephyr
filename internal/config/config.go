@@ -14,6 +14,7 @@ type Config struct {
 	DarkMode   bool    `json:"darkMode"`
 	LineHeight float64 `json:"lineHeight"`
 	WordWrap   bool    `json:"wordWrap"`
+	VimMode    bool    `json:"vimMode"`
 }
 
 // DefaultConfig returns the default configuration.
