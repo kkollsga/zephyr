@@ -41,6 +41,11 @@ func (sr *ScrollbarRenderer) NotifyScroll() {
 	sr.opacity = 1.0
 }
 
+// IsAnimating returns true if the scrollbar is visible or fading.
+func (sr *ScrollbarRenderer) IsAnimating() bool {
+	return sr.opacity > 0
+}
+
 // Update computes the current opacity based on time since last scroll.
 // Returns true if still animating (needs redraw).
 func (sr *ScrollbarRenderer) Update() bool {

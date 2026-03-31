@@ -188,6 +188,16 @@ func variantToTheme(name string, v themeVariant) Theme {
 		"dropdown-sel":     &t.DropdownSel,
 		"md-heading":       &t.MdHeading,
 		"md-accent":        &t.MdAccent,
+		"git-added":        &t.GitAdded,
+		"git-modified":     &t.GitModified,
+		"git-deleted":      &t.GitDeleted,
+		"git-added-bg":     &t.GitAddedBg,
+		"git-modified-bg":  &t.GitModifiedBg,
+		"git-deleted-bg":   &t.GitDeletedBg,
+		"git-original-bg":  &t.GitOriginalBg,
+		"breadcrumb-dim":   &t.BreadcrumbDim,
+		"breadcrumb-file":  &t.BreadcrumbFile,
+		"status-section":   &t.StatusSection,
 	}
 	for key, ptr := range uiFields {
 		if c, ok := v.UI[key]; ok {
@@ -210,6 +220,41 @@ func variantToTheme(name string, v themeVariant) Theme {
 	}
 	if t.TabBarGradBot.A == 0 {
 		t.TabBarGradBot = t.TabBarBg
+	}
+
+	// Git diff color defaults
+	if t.GitAdded.A == 0 {
+		t.GitAdded = color.NRGBA{R: 0x3f, G: 0xb9, B: 0x50, A: 255}
+	}
+	if t.GitModified.A == 0 {
+		t.GitModified = color.NRGBA{R: 0x58, G: 0xa6, B: 0xff, A: 255}
+	}
+	if t.GitDeleted.A == 0 {
+		t.GitDeleted = color.NRGBA{R: 0xf8, G: 0x51, B: 0x49, A: 255}
+	}
+	if t.GitAddedBg.A == 0 {
+		t.GitAddedBg = color.NRGBA{R: 0x3f, G: 0xb9, B: 0x50, A: 25}
+	}
+	if t.GitModifiedBg.A == 0 {
+		t.GitModifiedBg = color.NRGBA{R: 0x58, G: 0xa6, B: 0xff, A: 25}
+	}
+	if t.GitDeletedBg.A == 0 {
+		t.GitDeletedBg = color.NRGBA{R: 0xf8, G: 0x51, B: 0x49, A: 25}
+	}
+	if t.GitOriginalBg.A == 0 {
+		t.GitOriginalBg = color.NRGBA{R: 0xff, G: 0xd7, B: 0x00, A: 30}
+	}
+	if t.BreadcrumbDim.A == 0 {
+		t.BreadcrumbDim = t.TabDimFg
+		if t.BreadcrumbDim.A == 0 {
+			t.BreadcrumbDim = color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 255}
+		}
+	}
+	if t.BreadcrumbFile.A == 0 {
+		t.BreadcrumbFile = t.Foreground
+	}
+	if t.StatusSection.A == 0 {
+		t.StatusSection = t.Keyword
 	}
 
 	return t

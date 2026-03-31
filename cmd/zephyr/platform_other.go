@@ -25,6 +25,8 @@ func warningColor() color.NRGBA {
 	return color.NRGBA{R: 0xFF, G: 0x9F, B: 0x0A, A: 0xFF}
 }
 
+func (st *appState) pickNavRoot() {}
+
 func (st *appState) pickSaveDir() {}
 
 func (st *appState) saveTabAs(tab *ui.Tab) bool { return false }

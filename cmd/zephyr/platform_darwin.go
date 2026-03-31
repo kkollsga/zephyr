@@ -46,6 +46,31 @@ var finderTagColors = [7]color.NRGBA{
 	{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}, // Gray
 }
 
+// pickNavRoot opens the native macOS folder picker to choose a project root.
+func (st *appState) pickNavRoot() {
+	defaultDir := "/"
+	if st.navRoot != "" {
+		defaultDir = st.navRoot
+	}
+	script := fmt.Sprintf(
+		`set folderPath to POSIX path of (choose folder with prompt "Open Project Folder" default location POSIX file %q)
+return folderPath`, defaultDir)
+	go func() {
+		out, err := exec.Command("osascript", "-e", script).Output()
+		if err != nil {
+			return
+		}
+		dir := strings.TrimSpace(string(out))
+		dir = strings.TrimRight(dir, "/")
+		if dir != "" {
+			st.setNavRoot(dir)
+			if st.window != nil {
+				st.window.Invalidate()
+			}
+		}
+	}()
+}
+
 // pickSaveDir opens the native macOS folder picker and updates the save dir.
 func (st *appState) pickSaveDir() {
 	script := fmt.Sprintf(

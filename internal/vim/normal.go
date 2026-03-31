@@ -17,12 +17,21 @@ func (s *State) handleNormal(ev KeyInput) Action {
 		return s.handleOperatorPending(ev)
 	}
 
-	// Handle two-key sequences (g_, z_)
+	// Handle two-key sequences (g_, z_, ]_, [_, <Space>_)
 	if len(s.PendingBuf) > 0 && s.PendingBuf[0] == 'g' {
 		return s.handleGSequence(ev)
 	}
 	if len(s.PendingBuf) > 0 && s.PendingBuf[0] == 'z' {
 		return s.handleZSequence(ev)
+	}
+	if len(s.PendingBuf) > 0 && s.PendingBuf[0] == ']' {
+		return s.handleBracketNext(ev)
+	}
+	if len(s.PendingBuf) > 0 && s.PendingBuf[0] == '[' {
+		return s.handleBracketPrev(ev)
+	}
+	if len(s.PendingBuf) > 0 && s.PendingBuf[0] == ' ' {
+		return s.handleLeaderSequence(ev)
 	}
 
 	ch := ev.Char
@@ -281,6 +290,11 @@ func (s *State) handleNormal(ev KeyInput) Action {
 		s.reset()
 		return Action{Kind: ActionVisualLineStart}
 
+	// Close special buffer (directory/status); no-op in regular files
+	case 'q':
+		s.reset()
+		return Action{Kind: ActionNavCloseSpecial}
+
 	// g-prefix sequences
 	case 'g':
 		s.PendingBuf += "g"
@@ -290,6 +304,30 @@ func (s *State) handleNormal(ev KeyInput) Action {
 	case 'z':
 		s.PendingBuf += "z"
 		return Action{Kind: ActionNone}
+
+	// ]-prefix sequences (next hunk, next file)
+	case ']':
+		s.PendingBuf = "]"
+		return Action{Kind: ActionNone}
+
+	// [-prefix sequences (prev hunk, prev file)
+	case '[':
+		s.PendingBuf = "["
+		return Action{Kind: ActionNone}
+
+	// <Space> leader key (navigator mode only)
+	case ' ':
+		if s.NavigatorEnabled {
+			s.PendingBuf = " "
+			return Action{Kind: ActionNone}
+		}
+		s.reset()
+		return Action{Kind: ActionNone}
+
+	// - open parent directory
+	case '-':
+		s.reset()
+		return Action{Kind: ActionNavOpenParent, Count: count}
 	}
 
 	// Named keys
@@ -297,6 +335,15 @@ func (s *State) handleNormal(ev KeyInput) Action {
 	case NameEscape:
 		s.reset()
 		return Action{Kind: ActionNone}
+	case NameReturn:
+		s.reset()
+		return Action{Kind: ActionEnterKey}
+	case NameTab:
+		s.reset()
+		return Action{Kind: ActionTabKey}
+	case NameDeleteBackward:
+		s.reset()
+		return Action{Kind: ActionBackspaceKey}
 	}
 
 	// Unknown key — reset pending state
@@ -341,6 +388,16 @@ func (s *State) handleGSequence(ev KeyInput) Action {
 	case 'h': // gh = show hover
 		// Placeholder — requires LSP integration
 		return Action{Kind: ActionNone}
+	case 'o': // go = toggle original/modified
+		return Action{Kind: ActionNavToggleOriginal}
+	case 'f': // gf = go to file under cursor
+		return Action{Kind: ActionNavGoFile}
+	case 'i': // gi = show imports
+		return Action{Kind: ActionNavGoImports}
+	case 'a': // ga = alternate file (test <-> impl)
+		return Action{Kind: ActionNavGoAlternate}
+	case '?': // g? = context-sensitive help
+		return Action{Kind: ActionNavHelp}
 	}
 	return Action{Kind: ActionNone}
 }

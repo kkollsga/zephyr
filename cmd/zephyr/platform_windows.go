@@ -91,6 +91,39 @@ const (
 	bifNewdialogstyle   = 0x00000040
 )
 
+// pickNavRoot opens the Windows folder picker to choose a project root.
+func (st *appState) pickNavRoot() {
+	go func() {
+		coInitialize.Call(0)
+		defer coUninitialize.Call()
+
+		displayName := make([]uint16, syscall.MAX_PATH)
+		title, _ := syscall.UTF16PtrFromString("Open Project Folder")
+
+		bi := browseInfoW{
+			displayName: &displayName[0],
+			title:       title,
+			flags:       bifReturnonlyfsdirs | bifNewdialogstyle,
+		}
+
+		pidl, _, _ := shBrowseForFolder.Call(uintptr(unsafe.Pointer(&bi)))
+		if pidl == 0 {
+			return
+		}
+
+		path := make([]uint16, syscall.MAX_PATH)
+		shGetPathFromIDList.Call(pidl, uintptr(unsafe.Pointer(&path[0])))
+
+		dir := syscall.UTF16ToString(path)
+		if dir != "" {
+			st.setNavRoot(dir)
+			if st.window != nil {
+				st.window.Invalidate()
+			}
+		}
+	}()
+}
+
 // pickSaveDir opens the Windows folder picker and updates the save dir.
 func (st *appState) pickSaveDir() {
 	go func() {

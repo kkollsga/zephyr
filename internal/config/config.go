@@ -8,13 +8,34 @@ import (
 
 // Config holds the user configuration.
 type Config struct {
-	FontSize   float64 `json:"fontSize"`
-	TabSize    int     `json:"tabSize"`
-	Theme      string  `json:"theme"`
-	DarkMode   bool    `json:"darkMode"`
-	LineHeight float64 `json:"lineHeight"`
-	WordWrap   bool    `json:"wordWrap"`
-	VimMode    bool    `json:"vimMode"`
+	FontSize    float64  `json:"fontSize"`
+	TabSize     int      `json:"tabSize"`
+	Theme       string   `json:"theme"`
+	DarkMode    bool     `json:"darkMode"`
+	LineHeight  float64  `json:"lineHeight"`
+	WordWrap    bool     `json:"wordWrap"`
+	VimMode     bool     `json:"vimMode"`
+	RecentRoots []string `json:"recentRoots,omitempty"`
+}
+
+const maxRecentRoots = 10
+
+// AddRecentRoot prepends a root path to RecentRoots, deduplicating and capping at 10.
+// Ignores invalid roots like "/" or empty strings.
+func (c *Config) AddRecentRoot(root string) {
+	if root == "" || root == "/" || root == "." {
+		return
+	}
+	var filtered []string
+	for _, r := range c.RecentRoots {
+		if r != root && r != "" && r != "/" && r != "." {
+			filtered = append(filtered, r)
+		}
+	}
+	c.RecentRoots = append([]string{root}, filtered...)
+	if len(c.RecentRoots) > maxRecentRoots {
+		c.RecentRoots = c.RecentRoots[:maxRecentRoots]
+	}
 }
 
 // DefaultConfig returns the default configuration.

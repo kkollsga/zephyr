@@ -203,6 +203,27 @@ func (gr *GutterRenderer) RenderGutter(gtx layout.Context, ops *op.Ops, firstLin
 	return width
 }
 
+// RenderDiffSign draws a 2px colored bar at the left edge of the gutter for a diff sign.
+// signType: '+' = added, '~' = modified.
+func (gr *GutterRenderer) RenderDiffSign(ops *op.Ops, y, lineHeight int, signType rune, added, modified, deleted color.NRGBA) {
+	var c color.NRGBA
+	switch signType {
+	case '+':
+		c = added
+	case '~':
+		c = modified
+	default:
+		return
+	}
+	rect := clip.Rect{
+		Min: image.Pt(1, y),
+		Max: image.Pt(3, y+lineHeight),
+	}.Push(ops)
+	paint.ColorOp{Color: c}.Add(ops)
+	paint.PaintOp{}.Add(ops)
+	rect.Pop()
+}
+
 // RenderGutterFolded draws line numbers for visible lines with fold indicators.
 // firstDisplay/lastDisplay are display line indices. fs maps display lines to buffer lines.
 // Buffer line numbers are shown (not display line numbers).

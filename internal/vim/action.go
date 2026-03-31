@@ -92,6 +92,49 @@ const (
 	// Mode transitions
 	ActionEnterInsert // generic enter insert
 	ActionEnterNormal // generic enter normal
+
+	// Navigator: Hunk navigation
+	ActionNavNextHunk      // ]c
+	ActionNavPrevHunk      // [c
+	ActionNavNextFile      // ]C — next changed file
+	ActionNavPrevFile      // [C — previous changed file
+	ActionNavToggleOriginal // go — toggle original/modified
+
+	// Navigator: File navigation
+	ActionNavOpenParent    // - — open parent directory
+	ActionNavOpenEntry     // Enter/l in directory buffer
+	ActionNavCloseSpecial  // q in directory/status buffer
+	ActionNavOpenRoot      // <Space>e — open project root
+
+	// Navigator: Status buffer
+	ActionNavOpenStatus    // <Space>g — open git status
+	ActionNavStage         // s in status buffer
+	ActionNavUnstage       // u in status buffer
+	ActionNavDiscard       // x in status buffer
+	ActionNavToggleDiff    // = in status buffer
+	ActionNavSectionNext   // n in status buffer
+	ActionNavSectionPrev   // p in status buffer
+	ActionNavRefresh       // R in status buffer
+
+	// Navigator: Import & alternate
+	ActionNavGoFile       // gf — go to file under cursor
+	ActionNavGoImports    // gi — show imports
+	ActionNavGoAlternate  // ga — alternate file (test <-> impl)
+
+	// Navigator: Fuzzy finding
+	ActionNavFindFiles   // <Space>f — find files
+	ActionNavFindChanged // <Space>b — find changed files
+
+	// Navigator: Help
+	ActionNavHelp // g? — context help
+
+	// Navigator: Directory buffer
+	ActionNavToggleHidden // . — toggle hidden files
+
+	// Generic keys used by special buffers
+	ActionEnterKey     // Enter key pressed
+	ActionTabKey       // Tab key pressed
+	ActionBackspaceKey // Backspace key pressed
 )
 
 // MotionType distinguishes line-wise vs char-wise operations.

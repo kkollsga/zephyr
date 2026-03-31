@@ -10,12 +10,13 @@ import (
 
 // FuzzyFinder manages the file finder overlay state.
 type FuzzyFinder struct {
-	Visible  bool
-	Query    string
-	Results  []fuzzy.Match
-	Selected int
-	Files    []string
-	RootDir  string
+	Visible      bool
+	Query        string
+	Results      []fuzzy.Match
+	Selected     int
+	Files        []string
+	RootDir      string
+	ChangedFiles []string // git-changed files for boosted ranking
 }
 
 // NewFuzzyFinder creates a new fuzzy file finder.
@@ -32,6 +33,20 @@ func (ff *FuzzyFinder) Open(rootDir string) {
 		ff.RootDir = rootDir
 		ff.scanFiles()
 	}
+	ff.Results = fuzzy.RankMatches("", ff.Files)
+	if len(ff.Results) > 100 {
+		ff.Results = ff.Results[:100]
+	}
+}
+
+// OpenChanged shows the fuzzy finder with only changed files.
+func (ff *FuzzyFinder) OpenChanged(rootDir string, changedFiles []string) {
+	ff.Visible = true
+	ff.Query = ""
+	ff.Selected = 0
+	ff.RootDir = rootDir
+	ff.ChangedFiles = changedFiles
+	ff.Files = changedFiles
 	ff.Results = fuzzy.RankMatches("", ff.Files)
 	if len(ff.Results) > 100 {
 		ff.Results = ff.Results[:100]

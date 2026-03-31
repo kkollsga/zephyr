@@ -61,6 +61,11 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 					st.toggleVimMode()
 					break
 				}
+				// Check navigator toggle (Cmd+Shift+N / Ctrl+Shift+N)
+				if ke.Name == "N" && ke.Modifiers == key.ModShortcut|key.ModShift {
+					st.toggleNavigatorMode()
+					break
+				}
 
 				if st.vimEnabled && st.vimState != nil &&
 					!st.saveMenu.visible && !st.langSel.Visible && !st.findBar.Visible {
@@ -399,8 +404,38 @@ func (st *appState) handlePointer(pe pointer.Event) {
 			return
 		}
 
-		// Check tab bar clicks first (or overflow dropdown which extends below)
+		// Navigator root dropdown takes priority when open
+		if st.navRootDropdown.open {
+			st.handleNavRootDropdownClick(int(pe.Position.X), int(pe.Position.Y))
+			return
+		}
+
+		// Check tab bar / breadcrumb clicks
 		if int(pe.Position.Y) < st.tabBarHeight || st.overflowOpen {
+			if st.navigatorActive {
+				x := int(pe.Position.X)
+				// Check theme toggle icon
+				if st.lastMaxX > 0 {
+					toggleX := st.themeToggleX(st.lastMaxX)
+					_, hitW := st.themeToggleSize()
+					if x >= toggleX && x < toggleX+hitW {
+						st.toggleTheme()
+						return
+					}
+				}
+				// Folder name → toggle root dropdown
+				if x >= st.navRootDropdown.x && x < st.navRootDropdown.x+st.navRootDropdown.w {
+					if st.navRootDropdown.open {
+						st.navRootDropdown.open = false
+					} else {
+						st.openNavRootDropdown()
+					}
+					return
+				}
+				// Click on empty breadcrumb space → window drag
+				startWindowDrag()
+				return
+			}
 			st.handleTabBarPress(int(pe.Position.X), int(pe.Position.Y))
 			return
 		}
@@ -760,6 +795,19 @@ func (st *appState) handleVimKeyEvent(ke key.Event) {
 
 	// Normal/Visual/Command/Search modes — convert to vim KeyInput
 	ev := gioKeyToVimInput(ke)
+	// Skip printable characters that will also arrive via key.EditEvent.
+	// Processing them here would cause double-handling (key.Event fires
+	// after key.EditEvent in Gio for some keys, and both carry the same character).
+	// Named keys (Escape, Return, arrows, etc.) only come via key.Event.
+	if ev.Name == "" && ev.Char != 0 && !ev.Ctrl && !ev.Alt && !ev.Shortcut {
+		return
+	}
+	// Skip key.Events that produce no usable vim input (e.g., "Space", "Shift")
+	// — these are handled via key.EditEvent instead.
+	if ev.Name == "" && ev.Char == 0 && !ev.Ctrl && !ev.Alt && !ev.Shortcut {
+		return
+	}
+
 	action := st.vimState.HandleKey(ev)
 	st.executeVimAction(action)
 
@@ -850,6 +898,8 @@ func gioKeyToVimInput(ke key.Event) vim.KeyInput {
 				} else {
 					ev.Char = ch + 32 // lowercase
 				}
+			} else if ch == ' ' {
+				ev.Char = ' '
 			}
 		}
 	}

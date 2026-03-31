@@ -13,7 +13,9 @@ import (
 
 	"github.com/kristianweb/zephyr/internal/config"
 	"github.com/kristianweb/zephyr/internal/editor"
+	"github.com/kristianweb/zephyr/internal/git"
 	"github.com/kristianweb/zephyr/internal/highlight"
+	"github.com/kristianweb/zephyr/internal/navigator"
 	"github.com/kristianweb/zephyr/internal/render"
 	"github.com/kristianweb/zephyr/internal/ui"
 	"github.com/kristianweb/zephyr/internal/vim"
@@ -35,6 +37,15 @@ type viewMode int
 const (
 	viewEdit         viewMode = iota
 	viewMarkdownRead          // rendered markdown preview
+)
+
+// bufferType distinguishes file, directory, and status buffers.
+type bufferType int
+
+const (
+	bufFile      bufferType = iota // normal file editing
+	bufDirectory                   // oil-style directory listing
+	bufStatus                      // git status buffer
 )
 
 // tabState holds per-tab state that isn't part of the editor itself.
@@ -64,6 +75,12 @@ type tabState struct {
 
 	// Code folding
 	foldState *render.FoldState // fold regions and collapsed state
+
+	// Navigator mode
+	bufType bufferType              // file, directory, or status
+	gitDiff *git.FileDiff           // diff data for this file (nil if unchanged or not in repo)
+	dirBuf    *navigator.DirBuffer    // directory buffer data (non-nil when bufType == bufDirectory)
+	statusBuf *navigator.StatusBuffer // status buffer data (non-nil when bufType == bufStatus)
 }
 
 type appState struct {
@@ -155,6 +172,24 @@ type appState struct {
 	vimIndicatorX int // X position of "Vim" text in status bar
 	vimIndicatorW int // width of "Vim" text
 
+	// Navigator mode
+	navigatorActive bool
+	navRoot         string // project root path for navigator
+	gitRepo         *git.Repo
+	gitCache        *git.Cache
+	navigator       *navigator.Navigator
+
+	// Navigator root dropdown
+	navRootDropdown struct {
+		open    bool
+		x, w    int // hit area of the folder name in the header
+		items   []string // recent root paths to display
+	}
+	navCachedPath     string // cached display path for breadcrumb
+	navCachedPathKey  string // key: filePath or dirBufPath that produced the cached path
+	navCachedHome     string // cached os.UserHomeDir result
+	navPrevTabIdx     int    // tab index before opening directory buffer (for toggle)
+
 	// Tab drag state
 	tabDrag struct {
 		active        bool // a tab press is in progress
@@ -207,6 +242,12 @@ func (st *appState) activeTabState() *tabState {
 				ts.sourceBuf = ed.Buffer.TextBytes(ts.sourceBuf)
 				ts.highlighter.Parse(ts.sourceBuf)
 				ts.langLabel = ts.highlighter.Language()
+			}
+		}
+		// Load git diff data for gutter signs
+		if st.gitCache != nil && ed.FilePath != "" {
+			if relPath, err := filepath.Rel(st.gitRepo.Root, ed.FilePath); err == nil {
+				ts.gitDiff, _ = st.gitCache.FileDiff(relPath)
 			}
 		}
 		// Compute fold regions
@@ -553,6 +594,109 @@ func (st *appState) toggleVimMode() {
 	cfg := config.LoadConfig()
 	cfg.VimMode = st.vimEnabled
 	config.SaveConfig(cfg)
+}
+
+// toggleNavigatorMode toggles Navigator Mode on/off.
+func (st *appState) toggleNavigatorMode() {
+	st.navigatorActive = !st.navigatorActive
+	if !st.navigatorActive {
+		st.navRootDropdown.open = false
+		return
+	}
+
+	// Navigator requires vim mode — activate it if not already on
+	if !st.vimEnabled {
+		st.vimEnabled = true
+		st.vimState = vim.NewState()
+		st.applyTheme(st.themeBundle.Theme(st.darkMode))
+	}
+	st.vimState.NavigatorEnabled = true
+
+	// Init navigator
+	if st.navigator == nil {
+		st.navigator = navigator.New()
+	}
+
+	// Auto-detect root if not already set
+	if st.navRoot == "" {
+		st.detectNavRoot()
+	}
+
+	// If still no root, open the dropdown so the user can pick one
+	if st.navRoot == "" {
+		st.openNavRootDropdown()
+	}
+}
+
+// detectNavRoot attempts to discover the project root automatically.
+// Priority: git repo root > open file's directory > CWD.
+func (st *appState) detectNavRoot() {
+	// Try git repo discovery
+	var searchPath string
+	if ed := st.activeEd(); ed != nil && ed.FilePath != "" {
+		searchPath = filepath.Dir(ed.FilePath)
+	} else if wd, err := os.Getwd(); err == nil {
+		searchPath = wd
+	}
+
+	if searchPath != "" {
+		if repo, err := git.Discover(searchPath); err == nil && repo != nil {
+			st.setNavRoot(repo.Root)
+			return
+		}
+	}
+
+	// Fallback: directory of open file
+	if ed := st.activeEd(); ed != nil && ed.FilePath != "" {
+		st.setNavRoot(filepath.Dir(ed.FilePath))
+		return
+	}
+
+	// Fallback: CWD
+	if wd, err := os.Getwd(); err == nil {
+		st.setNavRoot(wd)
+	}
+}
+
+// setNavRoot sets the navigator root and initializes git if available.
+func (st *appState) setNavRoot(root string) {
+	if root == "" || root == "/" || root == "." {
+		return
+	}
+	st.navRoot = root
+
+	// Try git discovery from the root
+	if repo, err := git.Discover(root); err == nil && repo != nil {
+		st.gitRepo = repo
+		st.gitCache = git.NewCache(repo)
+	} else {
+		st.gitRepo = nil
+		st.gitCache = nil
+	}
+
+	// Persist to recent roots (async to avoid blocking UI)
+	go func() {
+		cfg := config.LoadConfig()
+		cfg.AddRecentRoot(root)
+		config.SaveConfig(cfg)
+	}()
+
+	// Update cached dropdown items
+	st.navRootDropdown.items = nil // force reload on next open
+	st.navRootDropdown.open = false
+
+	// Invalidate breadcrumb cache
+	st.navCachedPathKey = ""
+}
+
+// openNavRootDropdown populates and opens the root folder dropdown.
+func (st *appState) openNavRootDropdown() {
+	// Only reload from disk if items are empty (first open or after clear)
+	if len(st.navRootDropdown.items) == 0 {
+		cfg := config.LoadConfig()
+		st.navRootDropdown.items = cfg.RecentRoots
+	}
+	st.navRootDropdown.open = true
 }
 
 // toggleWordWrap toggles word wrap on/off and persists the setting.

@@ -17,6 +17,12 @@ var vimGreen = color.NRGBA{R: 0x10, G: 0x7C, B: 0x10, A: 255}
 
 // executeVimAction translates a vim Action into editor operations.
 func (st *appState) executeVimAction(action vim.Action) {
+	// Navigator actions can work even without an active editor
+	// (e.g., <Space>e to open root directory when no file is open)
+	if st.executeNavAction(action) {
+		return
+	}
+
 	ed := st.activeEd()
 	if ed == nil {
 		return

@@ -65,6 +65,20 @@ type Theme struct {
 	FindBarDim     color.NRGBA
 	DropdownBg     color.NRGBA
 	DropdownSel    color.NRGBA
+
+	// Git diff gutter signs
+	GitAdded       color.NRGBA // green bar for added lines
+	GitModified    color.NRGBA // blue bar for modified lines
+	GitDeleted     color.NRGBA // red marker for deleted lines
+	GitAddedBg     color.NRGBA // subtle green line background
+	GitModifiedBg  color.NRGBA // subtle blue line background
+	GitDeletedBg   color.NRGBA // subtle red line background
+	GitOriginalBg  color.NRGBA // amber background for original toggle
+
+	// Navigator breadcrumb
+	BreadcrumbDim  color.NRGBA // dim path segments
+	BreadcrumbFile color.NRGBA // bright filename
+	StatusSection  color.NRGBA // status buffer section headers
 }
 
 // Appearance represents the system appearance mode.
@@ -180,6 +194,16 @@ func LoadThemeFromJSON(data []byte) (Theme, error) {
 		"findBarDim":     &t.FindBarDim,
 		"dropdownBg":     &t.DropdownBg,
 		"dropdownSel":    &t.DropdownSel,
+		"gitAdded":       &t.GitAdded,
+		"gitModified":    &t.GitModified,
+		"gitDeleted":     &t.GitDeleted,
+		"gitAddedBg":     &t.GitAddedBg,
+		"gitModifiedBg":  &t.GitModifiedBg,
+		"gitDeletedBg":   &t.GitDeletedBg,
+		"gitOriginalBg":  &t.GitOriginalBg,
+		"breadcrumbDim":  &t.BreadcrumbDim,
+		"breadcrumbFile": &t.BreadcrumbFile,
+		"statusSection":  &t.StatusSection,
 	}
 	for key, ptr := range uiFields {
 		if c, ok := tj.UI[key]; ok {
@@ -196,6 +220,38 @@ func LoadThemeFromJSON(data []byte) (Theme, error) {
 	}
 	if t.TabBarGradBot.A == 0 {
 		t.TabBarGradBot = t.TabBarBg
+	}
+
+	// Git diff color defaults
+	if t.GitAdded.A == 0 {
+		t.GitAdded = color.NRGBA{R: 0x3f, G: 0xb9, B: 0x50, A: 255}
+	}
+	if t.GitModified.A == 0 {
+		t.GitModified = color.NRGBA{R: 0x58, G: 0xa6, B: 0xff, A: 255}
+	}
+	if t.GitDeleted.A == 0 {
+		t.GitDeleted = color.NRGBA{R: 0xf8, G: 0x51, B: 0x49, A: 255}
+	}
+	if t.GitAddedBg.A == 0 {
+		t.GitAddedBg = color.NRGBA{R: 0x3f, G: 0xb9, B: 0x50, A: 25}
+	}
+	if t.GitModifiedBg.A == 0 {
+		t.GitModifiedBg = color.NRGBA{R: 0x58, G: 0xa6, B: 0xff, A: 25}
+	}
+	if t.GitDeletedBg.A == 0 {
+		t.GitDeletedBg = color.NRGBA{R: 0xf8, G: 0x51, B: 0x49, A: 25}
+	}
+	if t.GitOriginalBg.A == 0 {
+		t.GitOriginalBg = color.NRGBA{R: 0xff, G: 0xd7, B: 0x00, A: 30}
+	}
+	if t.BreadcrumbDim.A == 0 {
+		t.BreadcrumbDim = t.TabDimFg
+	}
+	if t.BreadcrumbFile.A == 0 {
+		t.BreadcrumbFile = t.Foreground
+	}
+	if t.StatusSection.A == 0 {
+		t.StatusSection = t.Keyword
 	}
 
 	return t, nil

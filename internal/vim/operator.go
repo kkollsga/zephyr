@@ -151,7 +151,7 @@ func (s *State) handleTextObjDelimiter(ev KeyInput) Action {
 
 	// Valid text object delimiters
 	switch ch {
-	case 'w', 'W', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', 'b', 'B', 't':
+	case 'w', 'W', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', 'b', 'B', 't', 'h':
 		return Action{
 			Kind:        opToAction(op),
 			MotionType:  MotionCharWise,

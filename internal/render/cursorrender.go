@@ -48,6 +48,11 @@ func (cr *CursorRenderer) UpdateBlink() bool {
 	return false
 }
 
+// LastBlinkTime returns the time of the last blink toggle.
+func (cr *CursorRenderer) LastBlinkTime() time.Time {
+	return cr.lastBlink
+}
+
 // ResetBlink makes the cursor visible (e.g. after a keystroke).
 func (cr *CursorRenderer) ResetBlink() {
 	cr.BlinkOn = true

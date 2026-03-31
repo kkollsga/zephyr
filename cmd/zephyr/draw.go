@@ -5,6 +5,9 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -29,13 +32,17 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	paint.ColorOp{Color: st.theme.Background}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 
-	// Tab bar
-	st.drawTabBar(gtx)
+	// Tab bar or breadcrumb
+	if st.navigatorActive {
+		st.drawBreadcrumb(gtx, ed, ts)
+	} else {
+		st.drawTabBar(gtx)
+	}
 
 	if ed == nil || ts == nil {
 		st.lastMaxY = gtx.Constraints.Max.Y
 		st.lastMaxX = gtx.Constraints.Max.X
-		st.drawStatusLine(gtx)
+		st.drawStatusLine(gtx, nil, nil)
 		return
 	}
 
@@ -112,7 +119,7 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		tabOff.Pop()
 		st.lastMaxY = gtx.Constraints.Max.Y
 		st.lastMaxX = gtx.Constraints.Max.X
-		st.drawStatusLine(gtx)
+		st.drawStatusLine(gtx, ed, ts)
 		// Save menu must render on top even in read mode
 		if st.saveMenu.visible {
 			st.drawSaveMenu(gtx)
@@ -155,7 +162,7 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	// Status line
 	st.lastMaxY = gtx.Constraints.Max.Y
 	st.lastMaxX = gtx.Constraints.Max.X
-	st.drawStatusLine(gtx)
+	st.drawStatusLine(gtx, ed, ts)
 
 	// Unified save menu dropdown
 	if st.saveMenu.visible {
@@ -167,8 +174,25 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		st.drawLangSelector(gtx)
 	}
 
-	// Request redraws for cursor blink and scrollbar fade animations
-	gtx.Execute(op.InvalidateCmd{})
+	// Schedule next redraw only when an animation needs it.
+	// Cursor blink: schedule at next toggle time (530ms intervals).
+	// Scrollbar fade: continuous until fully faded.
+	// Notifications: continuous until expired.
+	if st.cursorRend != nil && ed != nil {
+		// Schedule redraw at the next blink toggle, not continuously
+		elapsed := time.Since(st.cursorRend.LastBlinkTime())
+		remaining := 530*time.Millisecond - elapsed
+		if remaining <= 0 {
+			remaining = time.Millisecond
+		}
+		gtx.Execute(op.InvalidateCmd{At: time.Now().Add(remaining)})
+	}
+	if st.scrollbarRend != nil && st.scrollbarRend.IsAnimating() {
+		gtx.Execute(op.InvalidateCmd{})
+	}
+	if st.notification != "" && time.Now().Before(st.notificationUntil) {
+		gtx.Execute(op.InvalidateCmd{})
+	}
 }
 
 // drawEditorNormal renders the editor in non-wrapped mode (original path).
@@ -181,6 +205,44 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 		st.gutterRend.RenderGutterFolded(gtx, gtx.Ops, firstLine, lastLine, ed.Buffer.LineCount(), fs, editorTopPad, ts.viewport.PixelOffset)
 	} else {
 		st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ed.Buffer.LineCount(), editorTopPad, ts.viewport.PixelOffset)
+	}
+
+	// Git diff gutter signs + line background highlights (single pass)
+	if ts.gitDiff != nil {
+		for i := 0; i <= lastLine-firstLine; i++ {
+			dispLine := firstLine + i
+			var bufLine int
+			if hasFolds {
+				bufLine = fs.DisplayToBuf(dispLine)
+			} else {
+				bufLine = dispLine
+			}
+			if bufLine >= ed.Buffer.LineCount() {
+				break
+			}
+			sign := ts.gitDiff.LineStatus(bufLine + 1)
+			if sign != '+' && sign != '~' {
+				continue
+			}
+			y := i*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
+			// Gutter sign
+			st.gutterRend.RenderDiffSign(gtx.Ops, y, st.textRend.LineHeightPx, sign,
+				st.theme.GitAdded, st.theme.GitModified, st.theme.GitDeleted)
+			// Line background
+			var bgColor color.NRGBA
+			if sign == '+' {
+				bgColor = st.theme.GitAddedBg
+			} else {
+				bgColor = st.theme.GitModifiedBg
+			}
+			bgRect := clip.Rect{
+				Min: image.Pt(gutterWidth, y),
+				Max: image.Pt(gtx.Constraints.Max.X, y+st.textRend.LineHeightPx),
+			}.Push(gtx.Ops)
+			paint.ColorOp{Color: bgColor}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			bgRect.Pop()
+		}
 	}
 
 	// Gutter right separator
@@ -520,6 +582,276 @@ func (st *appState) drawEditorWrapped(gtx layout.Context, w *app.Window, ed *edi
 	st.cursorRend.RenderCursor(gtx.Ops, cursorVis, cursorVisCol, firstVis, gutterWidth+st.textRend.CharWidth)
 
 	padOff.Pop()
+}
+
+func (st *appState) drawBreadcrumb(gtx layout.Context, ed *editor.Editor, ts *tabState) {
+	tr := st.tabRend
+	if tr == nil {
+		return
+	}
+
+	maxX := gtx.Constraints.Max.X
+
+	// Background — same gradient as tab bar for visual consistency
+	bgRect := clip.Rect{Max: image.Pt(maxX, st.tabBarHeight)}.Push(gtx.Ops)
+	paint.LinearGradientOp{
+		Stop1:  f32.Pt(0, 0),
+		Color1: st.theme.TabBarGradTop,
+		Stop2:  f32.Pt(0, float32(st.tabBarHeight)),
+		Color2: st.theme.TabBarGradBot,
+	}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	bgRect.Pop()
+
+	textY := (st.tabBarHeight - tr.LineHeightPx) / 2
+
+	// Build the display path (cached — only recompute when source changes)
+	var pathKey string
+	if ts != nil && ts.bufType == bufDirectory && ts.dirBuf != nil {
+		pathKey = "d:" + ts.dirBuf.DirPath
+	} else if ed != nil && ed.FilePath != "" {
+		pathKey = "f:" + ed.FilePath
+	} else {
+		pathKey = "r:" + st.navRoot
+	}
+
+	displayPath := st.navCachedPath
+	if pathKey != st.navCachedPathKey {
+		st.navCachedPathKey = pathKey
+		rootBase := ""
+		if st.navRoot != "" {
+			rootBase = filepath.Base(st.navRoot)
+		}
+
+		if ts != nil && ts.bufType == bufDirectory && ts.dirBuf != nil {
+			if st.navRoot != "" {
+				if rel, err := filepath.Rel(st.navRoot, ts.dirBuf.DirPath); err == nil && rel != "." {
+					displayPath = rootBase + "/" + rel + "/"
+				} else {
+					displayPath = rootBase + "/"
+				}
+			} else {
+				displayPath = ts.dirBuf.DirPath + "/"
+			}
+		} else if ed != nil && ed.FilePath != "" {
+			if st.navRoot != "" {
+				if rel, err := filepath.Rel(st.navRoot, ed.FilePath); err == nil {
+					displayPath = rootBase + "/" + rel
+				} else {
+					displayPath = ed.FilePath
+				}
+			} else {
+				displayPath = ed.FilePath
+			}
+		} else if st.navRoot != "" {
+			displayPath = rootBase + "/"
+		} else {
+			displayPath = "No Root"
+		}
+		st.navCachedPath = displayPath
+	}
+
+	// Clip with "..." on the left if too long
+	rightPad := 12 // padding on the right edge
+	leftPad := st.trafficLightPx + 12
+	availW := maxX - leftPad - rightPad
+	if tr.CharWidth > 0 {
+		maxChars := availW / tr.CharWidth
+		if len(displayPath) > maxChars && maxChars > 4 {
+			displayPath = "..." + displayPath[len(displayPath)-maxChars+3:]
+		}
+	}
+
+	pathW := len(displayPath) * tr.CharWidth
+	pathX := (maxX - pathW) / 2
+
+	// Subtle hover highlight on the path (clickable for root dropdown)
+	isHovered := st.hoverY >= 0 && st.hoverY < st.tabBarHeight &&
+		st.hoverX >= pathX-4 && st.hoverX < pathX+pathW+4
+	if isHovered || st.navRootDropdown.open {
+		hlRect := clip.Rect{
+			Min: image.Pt(pathX-6, 2),
+			Max: image.Pt(pathX+pathW+6, st.tabBarHeight-2),
+		}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		hlRect.Pop()
+	}
+
+	fg := st.theme.BreadcrumbFile
+	if st.navRoot == "" {
+		fg = st.theme.BreadcrumbDim
+	}
+	tr.RenderGlyphs(gtx.Ops, gtx, displayPath, pathX, textY, fg)
+
+	// Store hit area for click detection
+	st.navRootDropdown.x = pathX - 6
+	st.navRootDropdown.w = pathW + 12
+
+	// Theme toggle icon (sun/moon)
+	inHeader := st.hoverY >= 0 && st.hoverY < st.tabBarHeight
+	st.drawThemeToggle(gtx, inHeader)
+
+	// Draw dropdown if open
+	if st.navRootDropdown.open {
+		st.drawNavRootDropdown(gtx)
+	}
+}
+
+// drawNavRootDropdown renders the root folder selection dropdown.
+func (st *appState) drawNavRootDropdown(gtx layout.Context) {
+	tr := st.tabRend
+	if tr == nil || tr.LineHeightPx <= 0 || tr.CharWidth <= 0 {
+		return
+	}
+
+	items := st.navRootDropdown.items
+	itemCount := len(items) + 1 // +1 for "Open Folder..."
+
+	itemH := tr.LineHeightPx + 8
+	dropW := 36 * tr.CharWidth
+	dropH := itemCount * itemH
+	if dropW <= 0 || dropH <= 0 {
+		return
+	}
+	dropX := (gtx.Constraints.Max.X - dropW) / 2
+	if dropX < 0 {
+		dropX = 0
+	}
+	dropY := st.tabBarHeight
+
+	// Shadow
+	shadowOff := op.Offset(image.Pt(dropX+2, dropY+2)).Push(gtx.Ops)
+	shadowRect := clip.Rect{Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: color.NRGBA{A: 50}}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	shadowRect.Pop()
+	shadowOff.Pop()
+
+	// Background + content — all drawn within this offset
+	ddOff := op.Offset(image.Pt(dropX, dropY)).Push(gtx.Ops)
+	ddClip := clip.Rect{Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.DropdownBg}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+
+	// Items — recent roots
+	for i, root := range items {
+		iy := i * itemH
+		label := filepath.Base(root) + "/"
+
+		// Hover highlight
+		absY := dropY + iy
+		if st.hoverX >= dropX && st.hoverX < dropX+dropW &&
+			st.hoverY >= absY && st.hoverY < absY+itemH {
+			hlRect := clip.Rect{
+				Min: image.Pt(0, iy),
+				Max: image.Pt(dropW, iy+itemH),
+			}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			hlRect.Pop()
+		}
+
+		// Active indicator dot
+		if root == st.navRoot {
+			dotY := iy + (itemH-6)/2
+			dotRect := clip.Ellipse{
+				Min: image.Pt(6, dotY),
+				Max: image.Pt(12, dotY+6),
+			}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabAccent}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			dotRect.Pop()
+		}
+
+		ty := iy + (itemH-tr.LineHeightPx)/2
+		tr.RenderGlyphs(gtx.Ops, gtx, label, 18, ty, st.theme.Foreground)
+
+		// Dim full path (use cached home dir)
+		dimPath := root
+		if st.navCachedHome == "" {
+			st.navCachedHome, _ = os.UserHomeDir()
+		}
+		if st.navCachedHome != "" {
+			if rel, err := filepath.Rel(st.navCachedHome, root); err == nil && !strings.HasPrefix(rel, "..") {
+				dimPath = "~/" + rel
+			}
+		}
+		pathX := (len(label)+1)*tr.CharWidth + 18
+		avail := dropW - 8 - pathX
+		if avail > 0 && tr.CharWidth > 0 && len(dimPath)*tr.CharWidth > avail {
+			maxChars := avail / tr.CharWidth
+			if maxChars > 3 && len(dimPath) > maxChars {
+				dimPath = "..." + dimPath[len(dimPath)-maxChars+3:]
+			} else {
+				dimPath = "..."
+			}
+		}
+		tr.RenderGlyphs(gtx.Ops, gtx, dimPath, pathX, ty, st.theme.BreadcrumbDim)
+
+		// Separator between items
+		if i < len(items)-1 {
+			sepY := iy + itemH - 1
+			sepRect := clip.Rect{
+				Min: image.Pt(8, sepY),
+				Max: image.Pt(dropW-8, sepY+1),
+			}.Push(gtx.Ops)
+			paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+			paint.PaintOp{}.Add(gtx.Ops)
+			sepRect.Pop()
+		}
+	}
+
+	// Separator before "Open Folder..."
+	if len(items) > 0 {
+		sepY := len(items)*itemH - 1
+		sepRect := clip.Rect{
+			Min: image.Pt(4, sepY),
+			Max: image.Pt(dropW-4, sepY+1),
+		}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		sepRect.Pop()
+	}
+
+	// "Open Folder..." item
+	openY := len(items) * itemH
+	absOpenY := dropY + openY
+	if st.hoverX >= dropX && st.hoverX < dropX+dropW &&
+		st.hoverY >= absOpenY && st.hoverY < absOpenY+itemH {
+		hlRect := clip.Rect{
+			Min: image.Pt(0, openY),
+			Max: image.Pt(dropW, openY+itemH),
+		}.Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.DropdownSel}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		hlRect.Pop()
+	}
+	openTextY := openY + (itemH-tr.LineHeightPx)/2
+	tr.RenderGlyphs(gtx.Ops, gtx, "Open Folder...", 18, openTextY, st.theme.Foreground)
+
+	ddClip.Pop()
+	ddOff.Pop()
+
+	// Border — drawn in screen space around the dropdown
+	borderOff := op.Offset(image.Pt(dropX, dropY)).Push(gtx.Ops)
+	topB := clip.Rect{Max: image.Pt(dropW, 1)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	topB.Pop()
+	botB := clip.Rect{Min: image.Pt(0, dropH - 1), Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	botB.Pop()
+	leftB := clip.Rect{Max: image.Pt(1, dropH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	leftB.Pop()
+	rightB := clip.Rect{Min: image.Pt(dropW - 1, 0), Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
+	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	rightB.Pop()
+	borderOff.Pop()
 }
 
 func (st *appState) drawTabBar(gtx layout.Context) {
@@ -1583,13 +1915,11 @@ func (st *appState) drawSaveMenu(gtx layout.Context) {
 	bOff.Pop()
 }
 
-func (st *appState) drawStatusLine(gtx layout.Context) {
+func (st *appState) drawStatusLine(gtx layout.Context, ed *editor.Editor, ts *tabState) {
 	sr := st.statusRend
 	if sr == nil || sr.LineHeightPx == 0 {
 		return
 	}
-	ed := st.activeEd()
-	ts := st.activeTabState()
 
 	statusH := sr.LineHeightPx + 6
 	y := gtx.Constraints.Max.Y - statusH

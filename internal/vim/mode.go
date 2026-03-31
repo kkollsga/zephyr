@@ -90,6 +90,9 @@ type State struct {
 	// Waiting for text object delimiter (after i or a in operator-pending)
 	WaitingForTextObj     bool
 	WaitingForTextObjType rune // 'i' (inner) or 'a' (around)
+
+	// Navigator mode: when true, <Space> acts as leader key
+	NavigatorEnabled bool
 }
 
 // NewState creates a new vim state in Normal mode.
