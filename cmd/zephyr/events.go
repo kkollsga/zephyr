@@ -787,9 +787,21 @@ func (st *appState) handleVimKeyEvent(ke key.Event) {
 		return
 	}
 
-	// In markdown read mode, let existing handler take over
+	// In markdown read mode, handle limited vim keys for reading
 	if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
-		st.handleKey(ke)
+		ev := gioKeyToVimInput(ke)
+		// Allow Ctrl keys through vim (Ctrl+d, Ctrl+u, Ctrl+f, Ctrl+b)
+		if ev.Ctrl {
+			action := st.vimState.HandleKey(ev)
+			st.executeMdReadAction(action, ts)
+			return
+		}
+		// Allow system shortcuts (Cmd+C, Cmd+F, etc.) through normal handler
+		if ke.Modifiers&key.ModShortcut != 0 {
+			st.handleKey(ke)
+			return
+		}
+		// Skip other key.Events for printable chars (handled via EditEvent)
 		return
 	}
 
@@ -823,6 +835,24 @@ func (st *appState) handleVimEditEvent(text string) {
 	if st.vimState.Mode == vim.ModeInsert {
 		// In insert mode, pass through to normal text editing
 		st.handleTextInput(text)
+		return
+	}
+
+	// In markdown read mode, process limited vim keys
+	if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+		// Allow command/search mode entry and processing
+		if st.vimState.Mode == vim.ModeCommand || st.vimState.Mode == vim.ModeSearch {
+			for _, r := range text {
+				st.vimState.HandleKey(vim.KeyInput{Char: r})
+			}
+			st.window.Invalidate()
+			return
+		}
+		// Normal mode — process through vim then filter to read-safe actions
+		for _, r := range text {
+			action := st.vimState.HandleKey(vim.KeyInput{Char: r})
+			st.executeMdReadAction(action, ts)
+		}
 		return
 	}
 

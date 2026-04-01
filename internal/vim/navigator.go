@@ -44,6 +44,8 @@ func (s *State) handleLeaderSequence(ev KeyInput) Action {
 		return Action{Kind: ActionNavNextHunk, Count: count}
 	case 'C':
 		return Action{Kind: ActionNavPrevHunk, Count: count}
+	case 'r':
+		return Action{Kind: ActionNavToggleReadMode}
 	case 'n':
 		return Action{Kind: ActionNavNextFile, Count: count}
 	case 'N':

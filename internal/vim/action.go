@@ -129,7 +129,8 @@ const (
 	ActionNavHelp // g? — context help
 
 	// Navigator: Directory buffer
-	ActionNavToggleHidden // . — toggle hidden files
+	ActionNavToggleHidden  // . — toggle hidden files
+	ActionNavToggleReadMode // <Space>r — toggle markdown read/edit
 
 	// Generic keys used by special buffers
 	ActionEnterKey     // Enter key pressed

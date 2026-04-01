@@ -11,6 +11,103 @@ import (
 	"github.com/kristianweb/zephyr/internal/vim"
 )
 
+// executeMdReadAction handles vim actions in markdown read mode.
+// Only allows scrolling, search, and mode toggle — blocks all editing.
+func (st *appState) executeMdReadAction(action vim.Action, ts *tabState) {
+	lineH := 0
+	if st.textRend != nil {
+		lineH = st.textRend.LineHeightPx
+	}
+	if lineH <= 0 {
+		lineH = 20
+	}
+	editorH := st.lastMaxY - st.tabBarHeight
+
+	switch action.Kind {
+	// Scroll: j/k
+	case vim.ActionMoveDown:
+		count := action.EffectiveCount()
+		st.mdScroll(ts, float64(count*lineH), editorH)
+	case vim.ActionMoveUp:
+		count := action.EffectiveCount()
+		st.mdScroll(ts, float64(-count*lineH), editorH)
+
+	// Half-page: Ctrl+d / Ctrl+u
+	case vim.ActionMoveHalfPageDown:
+		st.mdScroll(ts, float64(editorH/2), editorH)
+	case vim.ActionMoveHalfPageUp:
+		st.mdScroll(ts, float64(-editorH/2), editorH)
+
+	// Full page: Ctrl+f / Ctrl+b
+	case vim.ActionMovePageDown:
+		st.mdScroll(ts, float64(editorH), editorH)
+	case vim.ActionMovePageUp:
+		st.mdScroll(ts, float64(-editorH), editorH)
+
+	// Top/bottom: gg / G
+	case vim.ActionMoveFileStart:
+		ts.mdScrollY = 0
+		st.window.Invalidate()
+	case vim.ActionMoveFileEnd:
+		maxScroll := float64(ts.mdTotalH - editorH)
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		ts.mdScrollY = maxScroll
+		st.window.Invalidate()
+
+	// Search
+	case vim.ActionEnterSearch:
+		st.openFindBar(false)
+	case vim.ActionEnterSearchBack:
+		st.openFindBar(false)
+	case vim.ActionSearchNext, vim.ActionSearchPrev, vim.ActionSearchWordUnder:
+		// Let the normal vim action handle search navigation
+		st.executeVimAction(action)
+
+	// Enter command mode (for :q etc.)
+	case vim.ActionEnterCommand:
+		// Allow — the command line handler will process it
+
+	// Execute command (Enter in command mode)
+	case vim.ActionExecCommand:
+		st.executeVimAction(action)
+
+	// Toggle read/edit mode
+	case vim.ActionNavToggleReadMode:
+		st.toggleMarkdownPreview()
+
+	// Close
+	case vim.ActionNavCloseSpecial:
+		st.closeTabAt(st.tabBar.ActiveIdx)
+
+	// Everything else (insert, delete, visual, etc.) — silently ignore
+	default:
+		// Check if it's a navigator action that should still work
+		if action.Kind == vim.ActionNavOpenRoot ||
+			action.Kind == vim.ActionNavOpenStatus ||
+			action.Kind == vim.ActionNavOpenParent {
+			st.executeNavAction(action)
+		}
+	}
+}
+
+// mdScroll scrolls the markdown read view by the given pixel delta, clamping to bounds.
+func (st *appState) mdScroll(ts *tabState, delta float64, editorH int) {
+	ts.mdScrollY += delta
+	if ts.mdScrollY < 0 {
+		ts.mdScrollY = 0
+	}
+	maxScroll := float64(ts.mdTotalH - editorH)
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if ts.mdScrollY > maxScroll {
+		ts.mdScrollY = maxScroll
+	}
+	st.window.Invalidate()
+}
+
 // handleNavRootDropdownClick handles a click when the root dropdown is open.
 // Clicking an item selects that root; clicking outside closes the dropdown.
 func (st *appState) handleNavRootDropdownClick(x, y int) {
@@ -911,6 +1008,9 @@ func (st *appState) executeNavAction(action vim.Action) bool {
 		return true
 	case vim.ActionNavGoFile:
 		st.navGoFile()
+		return true
+	case vim.ActionNavToggleReadMode:
+		st.toggleMarkdownPreview()
 		return true
 
 	// Stubs for features implemented in later phases
