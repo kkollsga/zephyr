@@ -374,7 +374,9 @@ func (st *appState) executeVimAction(action vim.Action) {
 			if tab.Editor.FilePath == "" {
 				st.showSaveAsMenu(st.tabBar.ActiveIdx, false, false)
 			} else {
-				st.saveTab(tab)
+				if st.saveTab(tab) {
+					st.showSaveNotification(tab.Editor.FilePath)
+				}
 				st.updateWindowTitle()
 			}
 		}
@@ -386,7 +388,9 @@ func (st *appState) executeVimAction(action vim.Action) {
 			if tab.Editor.FilePath == "" {
 				st.showSaveAsMenu(st.tabBar.ActiveIdx, false, false)
 			} else {
-				st.saveTab(tab)
+				if st.saveTab(tab) {
+					st.showSaveNotification(tab.Editor.FilePath)
+				}
 				st.closeCurrentTab()
 			}
 		}

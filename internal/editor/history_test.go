@@ -82,7 +82,7 @@ func TestHistory_UndoCoalescing_RapidTyping(t *testing.T) {
 func TestHistory_Undo_MultipleSteps(t *testing.T) {
 	h := NewHistory()
 	h.Record(EditAction{Type: ActionInsert, Offset: 0, Text: "first"})
-	time.Sleep(400 * time.Millisecond) // exceed coalescing window
+	time.Sleep(1100 * time.Millisecond) // exceed 1s coalescing window
 	h.Record(EditAction{Type: ActionInsert, Offset: 5, Text: "second"})
 
 	a1 := h.Undo()
@@ -109,5 +109,47 @@ func TestHistory_Undo_RestoresCursorPosition(t *testing.T) {
 	action := h.Undo()
 	if action.Cursor != cursor {
 		t.Fatalf("got cursor %+v, want %+v", action.Cursor, cursor)
+	}
+}
+
+func TestHistory_CoalesceWindow_1s(t *testing.T) {
+	h := NewHistory()
+	if h.coalesceWindow != 1*time.Second {
+		t.Errorf("coalesceWindow = %v, want 1s", h.coalesceWindow)
+	}
+}
+
+func TestHistory_Clear(t *testing.T) {
+	h := NewHistory()
+	h.Record(EditAction{Type: ActionInsert, Offset: 0, Text: "a"})
+	h.Undo()
+	h.Record(EditAction{Type: ActionInsert, Offset: 0, Text: "b"})
+
+	h.Clear()
+	if h.CanUndo() {
+		t.Error("undo should be empty after clear")
+	}
+	if h.CanRedo() {
+		t.Error("redo should be empty after clear")
+	}
+}
+
+func TestHistory_RecordExternalChange(t *testing.T) {
+	h := NewHistory()
+	h.Record(EditAction{Type: ActionInsert, Offset: 0, Text: "user edit"})
+
+	h.RecordExternalChange("original content", Cursor{Line: 0, Col: 0})
+
+	// Should have 2 entries: user edit + external change
+	if len(h.undoStack) != 2 {
+		t.Fatalf("expected 2 undo entries, got %d", len(h.undoStack))
+	}
+
+	top := h.undoStack[len(h.undoStack)-1]
+	if top.Type != ActionDelete || top.Text != "original content" {
+		t.Errorf("external change = %+v", top)
+	}
+	if h.CanRedo() {
+		t.Error("redo should be cleared after external change")
 	}
 }

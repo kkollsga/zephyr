@@ -115,6 +115,7 @@ const (
 	ActionNavSectionNext   // n in status buffer
 	ActionNavSectionPrev   // p in status buffer
 	ActionNavRefresh       // R in status buffer
+	ActionNavCommit        // cc in status buffer — commit staged changes
 
 	// Navigator: Import & alternate
 	ActionNavGoFile       // gf — go to file under cursor

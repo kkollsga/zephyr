@@ -584,6 +584,7 @@ func (st *appState) forceCloseTab(idx int) {
 		return
 	}
 	tab := st.tabBar.Tabs[idx]
+	st.unwatchEditorFile(tab.Editor)
 	if ts, ok := st.tabStates[tab.Editor]; ok {
 		if ts.highlighter != nil {
 			ts.highlighter.Close()

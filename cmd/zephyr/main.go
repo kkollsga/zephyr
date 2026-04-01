@@ -13,6 +13,7 @@ import (
 
 	"github.com/kristianweb/zephyr/internal/config"
 	"github.com/kristianweb/zephyr/internal/editor"
+	"github.com/kristianweb/zephyr/internal/fileio"
 	"github.com/kristianweb/zephyr/internal/git"
 	"github.com/kristianweb/zephyr/internal/highlight"
 	"github.com/kristianweb/zephyr/internal/navigator"
@@ -190,6 +191,9 @@ type appState struct {
 	navCachedHome     string // cached os.UserHomeDir result
 	navPrevTabIdx     int    // tab index before opening directory buffer (for toggle)
 
+	// File watcher for external changes
+	watcher *fileio.Watcher
+
 	// Tab drag state
 	tabDrag struct {
 		active        bool // a tab press is in progress
@@ -335,6 +339,15 @@ func run() {
 		st.vimState = vim.NewState()
 	}
 
+	// Start file watcher
+	if fw, err := fileio.NewWatcher(); err == nil {
+		st.watcher = fw
+		// Watch initial file if present
+		if tab := tabBar.ActiveTab(); tab != nil && tab.Editor.FilePath != "" {
+			fw.Watch(tab.Editor.FilePath)
+		}
+	}
+
 	// Init tab state for first tab
 	st.activeTabState()
 
@@ -411,6 +424,7 @@ func run() {
 			if !st.exitPending {
 				st.handleEvents(gtx, w)
 				st.flushReparse()
+				st.pollFileWatcher()
 			}
 			st.draw(gtx, w)
 			e.Frame(gtx.Ops)

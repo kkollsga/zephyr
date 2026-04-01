@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kristianweb/zephyr/internal/buffer"
 	"github.com/kristianweb/zephyr/internal/editor"
@@ -670,6 +671,73 @@ func (st *appState) navStatusOpenFile() {
 	st.tabBar.OpenFile(fullPath)
 }
 
+// navCommit commits staged changes and clears undo history for committed files.
+func (st *appState) navCommit(message string) {
+	if st.gitRepo == nil {
+		return
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		st.notification = "Commit message required"
+		st.notificationUntil = time.Now().Add(3 * time.Second)
+		return
+	}
+
+	// Get staged files before committing
+	stagedFiles, err := st.gitRepo.StagedFiles()
+	if err != nil || len(stagedFiles) == 0 {
+		st.notification = "Nothing staged to commit"
+		st.notificationUntil = time.Now().Add(3 * time.Second)
+		return
+	}
+
+	// Commit
+	if err := st.gitRepo.Commit(message); err != nil {
+		st.notification = "Commit failed"
+		st.notificationUntil = time.Now().Add(5 * time.Second)
+		return
+	}
+
+	// Clear undo history for committed files
+	for ed, ts := range st.tabStates {
+		if ed.FilePath == "" {
+			continue
+		}
+		relPath, relErr := filepath.Rel(st.gitRepo.Root, ed.FilePath)
+		if relErr != nil {
+			continue
+		}
+		for _, staged := range stagedFiles {
+			if staged == relPath {
+				ed.History.Clear()
+				// Refresh git diff (file now matches HEAD)
+				if ts.gitDiff != nil {
+					ts.gitDiff = nil
+				}
+				break
+			}
+		}
+	}
+
+	// Invalidate cache and refresh
+	st.gitCache.Invalidate()
+	st.navCachedPathKey = "" // force breadcrumb refresh
+
+	// Refresh status buffer if open
+	ts := st.activeTabState()
+	if ts != nil && ts.bufType == bufStatus {
+		st.navRefreshStatus()
+	}
+
+	// Truncate message for notification
+	short := message
+	if len(short) > 50 {
+		short = short[:47] + "..."
+	}
+	st.notification = "Committed: " + short
+	st.notificationUntil = time.Now().Add(5 * time.Second)
+}
+
 // navToggleCollapse toggles section collapse in the status buffer.
 func (st *appState) navToggleCollapse() {
 	ts := st.activeTabState()
@@ -923,6 +991,18 @@ func (st *appState) handleStatusBufferAction(action vim.Action) bool {
 	case vim.ActionUndo:
 		st.navUnstage()
 		return true
+	// c → enter commit mode (normally ActionChange, which we'd block anyway)
+	case vim.ActionChange:
+		// Pre-populate command line with ":commit "
+		if st.vimState != nil {
+			st.vimState.Mode = vim.ModeCommand
+			st.vimState.CommandLine = "commit "
+			st.vimState.CommandCursor = 7
+		}
+		return true
+	case vim.ActionNavCommit:
+		// Direct commit action (shouldn't normally fire from here)
+		return true
 	// n → next section (normally ActionSearchNext)
 	case vim.ActionSearchNext:
 		st.navSectionNext()
@@ -938,7 +1018,7 @@ func (st *appState) handleStatusBufferAction(action vim.Action) bool {
 		vim.ActionInsertLineStart, vim.ActionInsertLineEnd,
 		vim.ActionOpenBelow, vim.ActionOpenAbove,
 		vim.ActionSubstLine,
-		vim.ActionDelete, vim.ActionChange,
+		vim.ActionDelete,
 		vim.ActionPut, vim.ActionPutBefore,
 		vim.ActionReplace, vim.ActionJoinLines,
 		vim.ActionIndent, vim.ActionDedent,
@@ -958,6 +1038,9 @@ func (st *appState) executeNavAction(action vim.Action) bool {
 		return true
 	case vim.ActionNavOpenStatus:
 		st.navOpenStatus()
+		return true
+	case vim.ActionNavCommit:
+		st.navCommit(action.Text)
 		return true
 	}
 

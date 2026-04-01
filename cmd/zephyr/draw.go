@@ -651,42 +651,66 @@ func (st *appState) drawBreadcrumb(gtx layout.Context, ed *editor.Editor, ts *ta
 		st.navCachedPath = displayPath
 	}
 
-	// Clip with "..." on the left if too long
-	rightPad := 12 // padding on the right edge
+	// Compute per-file diff stats
+	var addedStr, deletedStr string
+	if ts != nil && ts.gitDiff != nil {
+		added, deleted := ts.gitDiff.Stats()
+		if added > 0 {
+			addedStr = fmt.Sprintf(" +%d", added)
+		}
+		if deleted > 0 {
+			deletedStr = fmt.Sprintf(" -%d", deleted)
+		}
+	}
+	statsLen := len(addedStr) + len(deletedStr)
+
+	// Clip path with "..." on the left if too long
+	rightPad := 12
 	leftPad := st.trafficLightPx + 12
 	availW := maxX - leftPad - rightPad
 	if tr.CharWidth > 0 {
-		maxChars := availW / tr.CharWidth
+		maxChars := (availW / tr.CharWidth) - statsLen
 		if len(displayPath) > maxChars && maxChars > 4 {
 			displayPath = "..." + displayPath[len(displayPath)-maxChars+3:]
 		}
 	}
 
-	pathW := len(displayPath) * tr.CharWidth
-	pathX := (maxX - pathW) / 2
+	totalW := (len(displayPath) + statsLen) * tr.CharWidth
+	startX := (maxX - totalW) / 2
 
 	// Subtle hover highlight on the path (clickable for root dropdown)
 	isHovered := st.hoverY >= 0 && st.hoverY < st.tabBarHeight &&
-		st.hoverX >= pathX-4 && st.hoverX < pathX+pathW+4
+		st.hoverX >= startX-4 && st.hoverX < startX+totalW+4
 	if isHovered || st.navRootDropdown.open {
 		hlRect := clip.Rect{
-			Min: image.Pt(pathX-6, 2),
-			Max: image.Pt(pathX+pathW+6, st.tabBarHeight-2),
+			Min: image.Pt(startX-6, 2),
+			Max: image.Pt(startX+totalW+6, st.tabBarHeight-2),
 		}.Push(gtx.Ops)
 		paint.ColorOp{Color: st.theme.TabActiveBg}.Add(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
 		hlRect.Pop()
 	}
 
+	// Render path
 	fg := st.theme.BreadcrumbFile
 	if st.navRoot == "" {
 		fg = st.theme.BreadcrumbDim
 	}
-	tr.RenderGlyphs(gtx.Ops, gtx, displayPath, pathX, textY, fg)
+	tr.RenderGlyphs(gtx.Ops, gtx, displayPath, startX, textY, fg)
+
+	// Render diff stats in color
+	statsX := startX + len(displayPath)*tr.CharWidth
+	if addedStr != "" {
+		tr.RenderGlyphs(gtx.Ops, gtx, addedStr, statsX, textY, st.theme.GitAdded)
+		statsX += len(addedStr) * tr.CharWidth
+	}
+	if deletedStr != "" {
+		tr.RenderGlyphs(gtx.Ops, gtx, deletedStr, statsX, textY, st.theme.GitDeleted)
+	}
 
 	// Store hit area for click detection
-	st.navRootDropdown.x = pathX - 6
-	st.navRootDropdown.w = pathW + 12
+	st.navRootDropdown.x = startX - 6
+	st.navRootDropdown.w = totalW + 12
 
 	// Theme toggle icon (sun/moon)
 	inHeader := st.hoverY >= 0 && st.hoverY < st.tabBarHeight

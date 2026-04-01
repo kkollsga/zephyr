@@ -30,7 +30,7 @@ type History struct {
 // NewHistory creates a new History with default coalescing window.
 func NewHistory() *History {
 	return &History{
-		coalesceWindow: 300 * time.Millisecond,
+		coalesceWindow: 1 * time.Second,
 	}
 }
 
@@ -121,4 +121,24 @@ func (h *History) CanUndo() bool {
 // CanRedo returns true if there are actions to redo.
 func (h *History) CanRedo() bool {
 	return len(h.redoStack) > 0
+}
+
+// Clear empties both undo and redo stacks.
+func (h *History) Clear() {
+	h.undoStack = h.undoStack[:0]
+	h.redoStack = h.redoStack[:0]
+}
+
+// RecordExternalChange records a full content replacement as a single undo step.
+// Call this before replacing the buffer with externally-changed content so the
+// user can Cmd+Z back to the pre-change state.
+func (h *History) RecordExternalChange(oldContent string, oldCursor Cursor) {
+	h.undoStack = append(h.undoStack, EditAction{
+		Type:      ActionDelete,
+		Offset:    0,
+		Text:      oldContent,
+		Cursor:    oldCursor,
+		Timestamp: time.Now(),
+	})
+	h.redoStack = nil
 }

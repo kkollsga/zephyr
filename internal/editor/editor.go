@@ -278,6 +278,28 @@ func (e *Editor) Save() error {
 	return nil
 }
 
+// Reload replaces the buffer with the current content from disk.
+// Records the old content in undo history so the reload is reversible.
+// Does NOT clear undo history — the user can Cmd+Z through the reload.
+func (e *Editor) Reload() error {
+	if e.FilePath == "" {
+		return nil
+	}
+	// Record the current content for undo before replacing
+	oldContent := e.Buffer.Text()
+	e.History.RecordExternalChange(oldContent, e.Cursor)
+
+	pt, err := buffer.NewFromFile(e.FilePath)
+	if err != nil {
+		return err
+	}
+	e.Buffer = pt
+	e.Modified = false
+	e.Cursor.Clamp(e.Buffer)
+	e.Selection.Clear()
+	return nil
+}
+
 // SaveAs writes the buffer content to the given path and updates FilePath.
 func (e *Editor) SaveAs(path string) error {
 	e.FilePath = path

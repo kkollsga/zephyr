@@ -32,6 +32,11 @@ func ParseCommand(cmdLine string) Action {
 	case strings.HasPrefix(cmd, "w "):
 		// :w filename — save as
 		return Action{Kind: ActionWrite, Text: strings.TrimSpace(cmd[2:])}
+	case strings.HasPrefix(cmd, "commit "):
+		// :commit message — git commit
+		return Action{Kind: ActionNavCommit, Text: strings.TrimSpace(cmd[7:])}
+	case cmd == "commit":
+		return Action{Kind: ActionNavCommit}
 	}
 
 	return Action{Kind: ActionNone}
