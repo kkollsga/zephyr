@@ -81,6 +81,11 @@ type tabState struct {
 	// Code folding
 	foldState *render.FoldState // fold regions and collapsed state
 
+	// Diagnostics: buffer lines (0-based) flagged with a syntax/format error.
+	// Rendered as gutter markers; nil/empty means no errors. Per-tab so switching
+	// tabs shows that tab's markers.
+	errorLines map[int]bool
+
 	// Navigator mode
 	bufType   bufferType              // file, directory, or status
 	gitDiff   *git.FileDiff           // diff data for this file (nil if unchanged or not in repo)
@@ -89,41 +94,47 @@ type tabState struct {
 }
 
 type appState struct {
-	tabBar          *ui.TabBar
-	tabStates       map[*editor.Editor]*tabState
-	theme           config.Theme
-	shaper          *text.Shaper
-	textRend        *render.TextRenderer
-	gutterRend      *render.GutterRenderer
-	cursorRend      *render.CursorRenderer
-	colorMap        highlight.TokenColorMap
-	statusRend      *render.TextRenderer
-	tabRend         *render.TextRenderer // font for tab bar
-	plusRend        *render.TextRenderer // larger font for "+" button
-	tag             *bool
-	langSel         *ui.LanguageSelector
-	findBar         *ui.FindReplaceBar
-	scrollbarRend   *render.ScrollbarRenderer
-	langLabelX      int
-	lastMaxY        int
-	lastMaxX        int
-	dragging        bool
-	activePointer   pointer.ID
-	pointerActive   bool
-	quitInProgress  bool
-	scrollAccum     float32 // accumulated fractional scroll delta
-	window          *app.Window
-	lastWindowTitle string             // dedup title updates to avoid Configure() thrash
-	darkMode        bool               // true = dark theme, false = light theme
-	themeName       string             // active theme bundle name
-	themeBundle     config.ThemeBundle // loaded theme bundle
-	fontCfg         config.FontConfig  // font configuration from theme
-	mdRend          *mdRenderers       // cached markdown preview renderers
-	mdToggleX       int                // left edge of Edit/Read toggle button
-	mdToggleW       int                // width of the toggle button
-	themeMenuReady  bool               // true once native theme menu has been set up
-	wordWrap        bool               // true when word wrap is enabled
-	wrapMenuReady   bool               // true once native word wrap menu has been set up
+	tabBar           *ui.TabBar
+	tabStates        map[*editor.Editor]*tabState
+	theme            config.Theme
+	shaper           *text.Shaper
+	textRend         *render.TextRenderer
+	gutterRend       *render.GutterRenderer
+	cursorRend       *render.CursorRenderer
+	colorMap         highlight.TokenColorMap
+	statusRend       *render.TextRenderer
+	tabRend          *render.TextRenderer // font for tab bar
+	plusRend         *render.TextRenderer // larger font for "+" button
+	tag              *bool
+	langSel          *ui.LanguageSelector
+	findBar          *ui.FindReplaceBar
+	scrollbarRend    *render.ScrollbarRenderer
+	langLabelX       int
+	lastMaxY         int
+	lastMaxX         int
+	dragging         bool
+	activePointer    pointer.ID
+	pointerActive    bool
+	quitInProgress   bool
+	scrollAccum      float32 // accumulated fractional scroll delta
+	window           *app.Window
+	lastWindowTitle  string             // dedup title updates to avoid Configure() thrash
+	darkMode         bool               // true = dark theme, false = light theme
+	themeName        string             // active theme bundle name
+	themeBundle      config.ThemeBundle // loaded theme bundle
+	fontCfg          config.FontConfig  // font configuration from theme
+	mdRend           *mdRenderers       // cached markdown preview renderers
+	mdToggleX        int                // left edge of Edit/Read toggle button
+	mdToggleW        int                // width of the toggle button
+	fmtToggleX       int                // left edge of JSON Compact/Expanded toggle
+	fmtToggleW       int                // width of the JSON Compact/Expanded toggle
+	themeMenuReady   bool               // true once native theme menu has been set up
+	wordWrap         bool               // true when word wrap is enabled
+	wrapMenuReady    bool               // true once native word wrap menu has been set up
+	autoIndent       bool               // true when indentation is fixed on every Enter
+	indentMenuReady  bool               // true once native auto indent menu has been set up
+	indentWidth      int                // spaces per indentation level (default 2)
+	versionMenuReady bool               // true once native app menu version row has been set up
 
 	tabBarHeight   int                 // computed from display scale to match native titlebar
 	trafficLightPx int                 // traffic light padding in pixels (scaled from Dp)
@@ -147,6 +158,11 @@ type appState struct {
 	// Debounced reparse state
 	reparsePending  bool
 	reparseDeadline time.Time
+
+	// Debounced error-check state: runs syntax/format detection 5s after the
+	// last buffer-modifying keystroke (any edit resets the deadline).
+	errCheckPending  bool
+	errCheckDeadline time.Time
 
 	// Footer notification (e.g. "Saved to: /path/to/file")
 	notification      string
@@ -275,6 +291,10 @@ func (st *appState) activeTabState() *tabState {
 			ts.mode = viewMarkdownRead
 			ts.mdDoc = render.ParseMarkdown(ed.Buffer.TextBytes(nil))
 		}
+		// Detect syntax/format errors on open. The highlighter (if any) was just
+		// parsed above, so its tree is current; call runErrorDetection directly
+		// rather than detectErrors, which would re-enter activeTabState.
+		st.runErrorDetection(ts, ed)
 		st.tabStates[ed] = ts
 	}
 	return ts
@@ -343,6 +363,8 @@ func run() {
 		themeBundle:   bundle,
 		fontCfg:       bundle.Fonts,
 		wordWrap:      cfg.WordWrap,
+		autoIndent:    cfg.AutoIndent,
+		indentWidth:   cfg.IndentWidth,
 		vimEnabled:    cfg.VimMode,
 		tooltipTabIdx: -1,
 	}
@@ -408,6 +430,15 @@ func run() {
 				setupWordWrapMenu(st.wordWrap)
 				st.wrapMenuReady = true
 			}
+			if !st.indentMenuReady && titlebarReady() {
+				setupAutoIndentMenu(st.autoIndent)
+				setupIndentWidthMenu(st.indentWidth)
+				st.indentMenuReady = true
+			}
+			if !st.versionMenuReady && titlebarReady() {
+				setupAppMenuVersionItem(versionMenuTitle())
+				st.versionMenuReady = true
+			}
 
 			// Check if graceful exit delay has elapsed
 			if st.exitPending && !time.Now().Before(st.exitDeadline) {
@@ -423,6 +454,12 @@ func run() {
 			}
 			if wordWrapToggled() {
 				st.toggleWordWrap()
+			}
+			if autoIndentToggled() {
+				st.toggleAutoIndent()
+			}
+			if w := checkIndentWidthSelection(); w > 0 && w != st.indentWidth {
+				st.selectIndentWidth(w)
 			}
 			if openPath := checkOpenFile(); openPath != "" {
 				// If the only tab is an empty untitled one, replace it
@@ -441,6 +478,7 @@ func run() {
 			if !st.exitPending {
 				st.handleEvents(gtx, w)
 				st.flushReparse()
+				st.flushErrCheck()
 				st.pollFileWatcher()
 			}
 			eventDuration := time.Since(eventStart)
@@ -764,4 +802,22 @@ func (st *appState) toggleWordWrap() {
 	cfg.WordWrap = st.wordWrap
 	config.SaveConfig(cfg)
 	updateWordWrapMenuCheck(st.wordWrap)
+}
+
+// toggleAutoIndent toggles auto indent on/off and persists the setting.
+func (st *appState) toggleAutoIndent() {
+	st.autoIndent = !st.autoIndent
+	cfg := config.LoadConfig()
+	cfg.AutoIndent = st.autoIndent
+	config.SaveConfig(cfg)
+	updateAutoIndentMenuCheck(st.autoIndent)
+}
+
+// selectIndentWidth sets the indentation width and persists the setting.
+func (st *appState) selectIndentWidth(width int) {
+	st.indentWidth = width
+	cfg := config.LoadConfig()
+	cfg.IndentWidth = st.indentWidth
+	config.SaveConfig(cfg)
+	updateIndentWidthMenuCheck(st.indentWidth)
 }

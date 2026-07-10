@@ -42,6 +42,39 @@ func TestEditor_TypeAndSave(t *testing.T) {
 	}
 }
 
+func TestEditor_SetLineLeadingWhitespace(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("a\n        b\nc"), "")
+
+	// Dedent line 1 from 8 spaces to 4.
+	if !ed.SetLineLeadingWhitespace(1, "    ") {
+		t.Fatal("expected change")
+	}
+	if got, _ := ed.Buffer.Line(1); got != "    b" {
+		t.Fatalf("after dedent: %q", got)
+	}
+	if !ed.Modified {
+		t.Fatal("expected Modified after indent change")
+	}
+	// Pure dedent is a single undo step.
+	ed.Undo()
+	if got, _ := ed.Buffer.Line(1); got != "        b" {
+		t.Fatalf("after undo: %q", got)
+	}
+
+	// No-op when the whitespace already matches.
+	if ed.SetLineLeadingWhitespace(2, "") {
+		t.Fatal("expected no change for already-correct line")
+	}
+
+	// Indent a line that has none.
+	if !ed.SetLineLeadingWhitespace(0, "  ") {
+		t.Fatal("expected change")
+	}
+	if got, _ := ed.Buffer.Line(0); got != "  a" {
+		t.Fatalf("after indent: %q", got)
+	}
+}
+
 func TestEditor_OpenEditSaveReopen(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "roundtrip.txt")

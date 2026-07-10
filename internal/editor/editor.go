@@ -307,6 +307,60 @@ func (e *Editor) Reload() error {
 	return nil
 }
 
+// SetLineLeadingWhitespace replaces the leading spaces/tabs of the line at
+// lineIdx with newWS, recording the change in history so it is undoable.
+// It rewrites only the minimal differing region (the common prefix/suffix of
+// the old and new whitespace is left in place), so a pure indent or dedent is a
+// single history action. The active cursor's line/col is preserved unless the
+// cursor sits on lineIdx, in which case its column is shifted by the change.
+// Returns true if the buffer changed.
+func (e *Editor) SetLineLeadingWhitespace(lineIdx int, newWS string) bool {
+	line, err := e.Buffer.Line(lineIdx)
+	if err != nil {
+		return false
+	}
+	oldLen := 0
+	for oldLen < len(line) && (line[oldLen] == ' ' || line[oldLen] == '\t') {
+		oldLen++
+	}
+	oldWS := line[:oldLen]
+	if oldWS == newWS {
+		return false
+	}
+	lineStart := e.Buffer.LineStartOffset(lineIdx)
+
+	// Trim the common prefix and suffix so only the changed span is edited.
+	p := 0
+	for p < len(oldWS) && p < len(newWS) && oldWS[p] == newWS[p] {
+		p++
+	}
+	s := 0
+	for s < len(oldWS)-p && s < len(newWS)-p && oldWS[len(oldWS)-1-s] == newWS[len(newWS)-1-s] {
+		s++
+	}
+	delSpan := oldWS[p : len(oldWS)-s]
+	insSpan := newWS[p : len(newWS)-s]
+	off := lineStart + p
+
+	if delSpan != "" {
+		e.History.Record(EditAction{Type: ActionDelete, Offset: off, Text: delSpan, Cursor: e.Cursor})
+		e.Buffer.Delete(off, len(delSpan))
+	}
+	if insSpan != "" {
+		e.History.Record(EditAction{Type: ActionInsert, Offset: off, Text: insSpan, Cursor: e.Cursor})
+		e.Buffer.Insert(off, insSpan)
+	}
+	e.Modified = true
+
+	if e.Cursor.Line == lineIdx {
+		e.Cursor.Col += len(newWS) - oldLen
+		if e.Cursor.Col < 0 {
+			e.Cursor.Col = 0
+		}
+	}
+	return true
+}
+
 // SaveAs writes the buffer content to the given path and updates FilePath.
 func (e *Editor) SaveAs(path string) error {
 	if err := fileio.SaveFile(e.Buffer, path); err != nil {

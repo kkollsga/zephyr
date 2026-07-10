@@ -224,6 +224,43 @@ func (gr *GutterRenderer) RenderDiffSign(ops *op.Ops, y, lineHeight int, signTyp
 	rect.Pop()
 }
 
+// RenderErrorMarker draws a filled dot near the left edge of the gutter to flag
+// a line that contains a syntax/format error. It sits just right of the 2px git
+// diff bar so the two can coexist on the same line. The dot is centered on the
+// visual midpoint of the line-number digits (baseline minus half the ascent),
+// derived from the same shaping metrics the digits are drawn with — the digits
+// sit higher than the raw line-box midpoint.
+func (gr *GutterRenderer) RenderErrorMarker(gtx layout.Context, ops *op.Ops, y, lineHeight int, c color.NRGBA) {
+	d := lineHeight / 3
+	if d < 4 {
+		d = 4
+	}
+	if d > gr.CharWidth+2 {
+		d = gr.CharWidth + 2
+	}
+	// Digit center Y: shape a digit with the line-number parameters to find the
+	// baseline (glyph dot Y) and ascent within the line box.
+	centerY := y + lineHeight/2 // fallback: line-box midpoint (no shaper in headless tests)
+	if gr.Shaper != nil {
+		params := text.Parameters{
+			Font:     font.Font{Typeface: "Menlo, monospace"},
+			PxPerEm:  spToFixed(gtx.Metric, gr.FontSize),
+			MaxWidth: 1 << 30,
+		}
+		gr.Shaper.LayoutString(params, "0")
+		if g, ok := gr.Shaper.NextGlyph(); ok {
+			baseline := y + int(g.Y)
+			centerY = baseline - int(fixedToFloat(g.Ascent)/2)
+		}
+	}
+	x0 := 4
+	y0 := centerY - d/2
+	dot := clip.Ellipse(image.Rect(x0, y0, x0+d, y0+d)).Push(ops)
+	paint.ColorOp{Color: c}.Add(ops)
+	paint.PaintOp{}.Add(ops)
+	dot.Pop()
+}
+
 // RenderGutterFolded draws line numbers for visible lines with fold indicators.
 // firstDisplay/lastDisplay are display line indices. fs maps display lines to buffer lines.
 // Buffer line numbers are shown (not display line numbers).

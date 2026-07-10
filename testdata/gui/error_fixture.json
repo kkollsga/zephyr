@@ -1,0 +1,21 @@
+{
+  "name": "error-fixture",
+  "version": "1.0.0",
+  "description": "Valid JSON except for one missing comma mid-file.",
+  "settings": {
+    "theme": "dark",
+    "fontSize": 13,
+    "wordWrap": false
+  },
+  "features": {
+    "autoIndent": true
+    "syntaxErrors": true
+  },
+  "authors": [
+    "kkollsga"
+  ],
+  "counts": {
+    "lines": 20,
+    "markers": 1
+  }
+}

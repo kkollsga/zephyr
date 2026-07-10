@@ -81,12 +81,15 @@ func (st *appState) setLanguage(lang string) {
 			ts.highlighter = nil
 		}
 		ts.langLabel = "Plain Text"
+		// Clear any stale markers from the previous language.
+		st.runErrorDetection(ts, ed)
 		return
 	}
 
 	h := highlight.NewHighlighterForLanguage(lang)
 	if h == nil {
 		ts.langLabel = lang
+		st.runErrorDetection(ts, ed)
 		return
 	}
 
@@ -100,6 +103,8 @@ func (st *appState) setLanguage(lang string) {
 		ts.highlighter.Parse(source)
 	}
 	ts.langLabel = lang
+	// Re-detect against the new language; stale markers are replaced/cleared.
+	st.runErrorDetection(ts, ed)
 }
 
 func detectLanguage(path string) string {

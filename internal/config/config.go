@@ -14,6 +14,8 @@ type Config struct {
 	DarkMode    bool     `json:"darkMode"`
 	LineHeight  float64  `json:"lineHeight"`
 	WordWrap    bool     `json:"wordWrap"`
+	AutoIndent  bool     `json:"autoIndent"`
+	IndentWidth int      `json:"indentWidth"`
 	VimMode     bool     `json:"vimMode"`
 	RecentRoots []string `json:"recentRoots,omitempty"`
 }
@@ -41,12 +43,14 @@ func (c *Config) AddRecentRoot(root string) {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
-		FontSize:   14,
-		TabSize:    4,
-		Theme:      "default",
-		DarkMode:   true,
-		LineHeight: 1.5,
-		WordWrap:   false,
+		FontSize:    14,
+		TabSize:     4,
+		Theme:       "default",
+		DarkMode:    true,
+		LineHeight:  1.5,
+		WordWrap:    false,
+		AutoIndent:  true,
+		IndentWidth: 2,
 	}
 }
 
@@ -78,6 +82,9 @@ func LoadConfig() Config {
 	}
 	if cfg.TabSize < 1 {
 		cfg.TabSize = 4
+	}
+	if cfg.IndentWidth < 1 {
+		cfg.IndentWidth = 2
 	}
 	if cfg.LineHeight < 1.0 {
 		cfg.LineHeight = 1.0

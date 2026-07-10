@@ -625,6 +625,7 @@ func (st *appState) updateUntitledTitle() {
 func (st *appState) afterEdit() {
 	st.reparsePending = true
 	st.reparseDeadline = time.Now().Add(50 * time.Millisecond)
+	st.scheduleErrCheck()
 	st.updateUntitledTitle()
 }
 

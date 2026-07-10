@@ -75,6 +75,9 @@ type Theme struct {
 	GitDeletedBg   color.NRGBA // subtle red line background
 	GitOriginalBg  color.NRGBA // amber background for original toggle
 
+	// Diagnostics
+	ErrorMarker color.NRGBA // gutter marker for lines with a syntax/format error
+
 	// Navigator breadcrumb
 	BreadcrumbDim  color.NRGBA // dim path segments
 	BreadcrumbFile color.NRGBA // bright filename
@@ -201,6 +204,7 @@ func LoadThemeFromJSON(data []byte) (Theme, error) {
 		"gitModifiedBg":  &t.GitModifiedBg,
 		"gitDeletedBg":   &t.GitDeletedBg,
 		"gitOriginalBg":  &t.GitOriginalBg,
+		"errorMarker":    &t.ErrorMarker,
 		"breadcrumbDim":  &t.BreadcrumbDim,
 		"breadcrumbFile": &t.BreadcrumbFile,
 		"statusSection":  &t.StatusSection,
@@ -243,6 +247,9 @@ func LoadThemeFromJSON(data []byte) (Theme, error) {
 	}
 	if t.GitOriginalBg.A == 0 {
 		t.GitOriginalBg = color.NRGBA{R: 0xff, G: 0xd7, B: 0x00, A: 30}
+	}
+	if t.ErrorMarker.A == 0 {
+		t.ErrorMarker = color.NRGBA{R: 0xe5, G: 0x48, B: 0x4d, A: 255} // red, readable on dark and light gutters
 	}
 	if t.BreadcrumbDim.A == 0 {
 		t.BreadcrumbDim = t.TabDimFg

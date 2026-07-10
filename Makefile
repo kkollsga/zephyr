@@ -2,7 +2,7 @@
 
 BINARY    = zephyr
 APP       = Zephyr.app
-VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION  ?= $(shell test -f VERSION && printf 'v%s' "$$(cat VERSION)" || git describe --tags --always --dirty 2>/dev/null || echo dev)
 APP_VERSION ?= $(shell printf '%s' "$(VERSION)" | sed -E 's/^v//; s/[-+].*//' | grep -E '^[0-9]+(\.[0-9]+){0,2}$$' || echo 0.0.0)
 COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)

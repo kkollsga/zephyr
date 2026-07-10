@@ -428,6 +428,117 @@ void setupWordWrapMenuItem(bool checked) {
 	});
 }
 
+// --- Auto Indent menu support ---
+
+static volatile bool _autoIndentToggled = false;
+static NSMenuItem *_autoIndentItem = nil;
+
+bool checkAndResetAutoIndentToggled(void) {
+	if (_autoIndentToggled) {
+		_autoIndentToggled = false;
+		return true;
+	}
+	return false;
+}
+
+void updateAutoIndentCheck(bool checked) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (_autoIndentItem) {
+			[_autoIndentItem setState:checked ? NSControlStateValueOn : NSControlStateValueOff];
+		}
+	});
+}
+
+@interface ZephyrAutoIndentHandler : NSObject
+- (void)toggleAutoIndent:(NSMenuItem *)sender;
+@end
+
+@implementation ZephyrAutoIndentHandler
+- (void)toggleAutoIndent:(NSMenuItem *)sender {
+	_autoIndentToggled = true;
+}
+@end
+
+static ZephyrAutoIndentHandler *_autoIndentHandler = nil;
+
+void setupAutoIndentMenuItem(bool checked) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (!_autoIndentHandler) {
+			_autoIndentHandler = [[ZephyrAutoIndentHandler alloc] init];
+		}
+
+		NSMenu *mainMenu = [NSApp mainMenu];
+		if (!mainMenu) return;
+
+		// Find or create the View menu
+		NSMenuItem *viewMenuItem = nil;
+		for (NSMenuItem *item in [mainMenu itemArray]) {
+			if ([item.title isEqualToString:@"View"]) {
+				viewMenuItem = item;
+				break;
+			}
+		}
+		if (!viewMenuItem) {
+			viewMenuItem = [[NSMenuItem alloc] initWithTitle:@"View" action:nil keyEquivalent:@""];
+			NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+			[viewMenuItem setSubmenu:viewMenu];
+			[mainMenu addItem:viewMenuItem];
+		}
+
+		NSMenu *viewMenu = [viewMenuItem submenu];
+
+		// Check if Auto Indent item already exists
+		if ([viewMenu indexOfItemWithTitle:@"Auto Indent"] >= 0) return;
+
+		// Add Auto Indent item (no key equivalent)
+		_autoIndentItem = [[NSMenuItem alloc] initWithTitle:@"Auto Indent"
+		                                             action:@selector(toggleAutoIndent:)
+		                                      keyEquivalent:@""];
+		[_autoIndentItem setTarget:_autoIndentHandler];
+		[_autoIndentItem setState:checked ? NSControlStateValueOn : NSControlStateValueOff];
+
+		// Insert directly below Word Wrap if present, otherwise at the top
+		NSInteger wrapIndex = [viewMenu indexOfItemWithTitle:@"Word Wrap"];
+		if (wrapIndex >= 0) {
+			[viewMenu insertItem:_autoIndentItem atIndex:wrapIndex + 1];
+		} else {
+			[viewMenu insertItem:_autoIndentItem atIndex:0];
+			[viewMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+		}
+	});
+}
+
+// --- App menu version item support ---
+
+// setupAppMenuVersionItem inserts a disabled version row at the top of the
+// application (first) menu, followed by a separator. Idempotent.
+void setupAppMenuVersionItem(const char *title) {
+	NSString *versionTitle = [NSString stringWithUTF8String:title];
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSMenu *mainMenu = [NSApp mainMenu];
+		if (!mainMenu) return;
+		if ([[mainMenu itemArray] count] == 0) return;
+
+		NSMenu *appMenu = [[mainMenu itemAtIndex:0] submenu];
+		if (!appMenu) return;
+
+		// Idempotent: don't insert twice.
+		if ([appMenu indexOfItemWithTitle:versionTitle] >= 0) return;
+
+		// Disabled item: nil action makes it disabled under autoenabling, and
+		// we also set it explicitly in case autoenabling is turned off.
+		NSMenuItem *versionItem = [[NSMenuItem alloc] initWithTitle:versionTitle
+		                                                     action:nil
+		                                              keyEquivalent:@""];
+		[versionItem setTarget:nil];
+		[versionItem setEnabled:NO];
+
+		[appMenu insertItem:versionItem atIndex:0];
+		[appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+	});
+}
+
 // --- Theme menu support ---
 
 static char _selectedTheme[256] = {0};  // selected theme name (check-and-reset)
@@ -533,6 +644,108 @@ void updateThemeMenuSelection(const char *activeTheme) {
 	});
 }
 
+// --- Indentation submenu support ---
+
+static const int _indentWidths[3] = {2, 4, 8};
+static volatile int _selectedIndentWidth = 0;  // selected width (check-and-reset)
+static NSMenu *_indentSubmenu = nil;
+static int _activeIndentWidth = 0;
+
+// Returns the selected indentation width and resets it. 0 means no selection.
+int checkAndResetSelectedIndentWidth(void) {
+	int w = _selectedIndentWidth;
+	_selectedIndentWidth = 0;
+	return w;
+}
+
+@interface ZephyrIndentWidthHandler : NSObject
+- (void)indentWidthSelected:(NSMenuItem *)sender;
+@end
+
+@implementation ZephyrIndentWidthHandler
+- (void)indentWidthSelected:(NSMenuItem *)sender {
+	_selectedIndentWidth = (int)[sender tag];
+}
+@end
+
+static ZephyrIndentWidthHandler *_indentWidthHandler = nil;
+
+void setupIndentWidthMenu(int activeWidth) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (!_indentWidthHandler) {
+			_indentWidthHandler = [[ZephyrIndentWidthHandler alloc] init];
+		}
+
+		_activeIndentWidth = activeWidth;
+
+		NSMenu *mainMenu = [NSApp mainMenu];
+		if (!mainMenu) return;
+
+		// Find or create the View menu
+		NSMenuItem *viewMenuItem = nil;
+		for (NSMenuItem *item in [mainMenu itemArray]) {
+			if ([item.title isEqualToString:@"View"]) {
+				viewMenuItem = item;
+				break;
+			}
+		}
+		if (!viewMenuItem) {
+			viewMenuItem = [[NSMenuItem alloc] initWithTitle:@"View" action:nil keyEquivalent:@""];
+			NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+			[viewMenuItem setSubmenu:viewMenu];
+			[mainMenu addItem:viewMenuItem];
+		}
+
+		NSMenu *viewMenu = [viewMenuItem submenu];
+
+		// Remove old Indentation submenu if exists
+		NSInteger indentIdx = [viewMenu indexOfItemWithTitle:@"Indentation"];
+		if (indentIdx >= 0) {
+			[viewMenu removeItemAtIndex:indentIdx];
+		}
+
+		// Create Indentation submenu with radio-style checkmarks
+		_indentSubmenu = [[NSMenu alloc] initWithTitle:@"Indentation"];
+		for (int i = 0; i < 3; i++) {
+			int width = _indentWidths[i];
+			NSString *title = [NSString stringWithFormat:@"%d Spaces", width];
+			NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title
+			                                             action:@selector(indentWidthSelected:)
+			                                      keyEquivalent:@""];
+			[item setTarget:_indentWidthHandler];
+			[item setTag:width];
+			if (width == _activeIndentWidth) {
+				[item setState:NSControlStateValueOn];
+			}
+			[_indentSubmenu addItem:item];
+		}
+
+		NSMenuItem *indentItem = [[NSMenuItem alloc] initWithTitle:@"Indentation" action:nil keyEquivalent:@""];
+		[indentItem setSubmenu:_indentSubmenu];
+
+		// Insert directly below Auto Indent if present, otherwise below Word Wrap,
+		// otherwise append.
+		NSInteger anchor = [viewMenu indexOfItemWithTitle:@"Auto Indent"];
+		if (anchor < 0) {
+			anchor = [viewMenu indexOfItemWithTitle:@"Word Wrap"];
+		}
+		if (anchor >= 0) {
+			[viewMenu insertItem:indentItem atIndex:anchor + 1];
+		} else {
+			[viewMenu addItem:indentItem];
+		}
+	});
+}
+
+void updateIndentWidthMenuSelection(int activeWidth) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (!_indentSubmenu) return;
+		for (NSMenuItem *item in [_indentSubmenu itemArray]) {
+			[item setState:([item tag] == activeWidth) ? NSControlStateValueOn : NSControlStateValueOff];
+		}
+	});
+}
+
 void setWindowBgColor(double r, double g, double b) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		for (NSWindow *window in [NSApp windows]) {
@@ -621,6 +834,14 @@ func updateWindowBackground(c color.NRGBA) {
 	C.setWindowBgColor(C.double(float64(c.R)/255.0), C.double(float64(c.G)/255.0), C.double(float64(c.B)/255.0))
 }
 
+// setupAppMenuVersionItem inserts a disabled version row at the top of the
+// native macOS application (Zephyr) menu.
+func setupAppMenuVersionItem(title string) {
+	cTitle := C.CString(title)
+	C.setupAppMenuVersionItem(cTitle)
+	C.free(unsafe.Pointer(cTitle))
+}
+
 // setupThemeMenu creates the View > Theme submenu in the macOS menu bar.
 func setupThemeMenu(themeNames []string, activeTheme string) {
 	if len(themeNames) == 0 {
@@ -661,6 +882,37 @@ func wordWrapToggled() bool {
 // updateWordWrapMenuCheck syncs the Word Wrap menu checkmark.
 func updateWordWrapMenuCheck(checked bool) {
 	C.updateWordWrapCheck(C.bool(checked))
+}
+
+// setupAutoIndentMenu creates the View > Auto Indent menu item.
+func setupAutoIndentMenu(checked bool) {
+	C.setupAutoIndentMenuItem(C.bool(checked))
+}
+
+// autoIndentToggled returns true if the user clicked the Auto Indent menu item.
+func autoIndentToggled() bool {
+	return bool(C.checkAndResetAutoIndentToggled())
+}
+
+// updateAutoIndentMenuCheck syncs the Auto Indent menu checkmark.
+func updateAutoIndentMenuCheck(checked bool) {
+	C.updateAutoIndentCheck(C.bool(checked))
+}
+
+// setupIndentWidthMenu creates the View > Indentation submenu.
+func setupIndentWidthMenu(activeWidth int) {
+	C.setupIndentWidthMenu(C.int(activeWidth))
+}
+
+// checkIndentWidthSelection returns the indentation width the user selected
+// from the menu, or 0 if none. Resets after reading.
+func checkIndentWidthSelection() int {
+	return int(C.checkAndResetSelectedIndentWidth())
+}
+
+// updateIndentWidthMenuCheck updates the checkmark in the Indentation submenu.
+func updateIndentWidthMenuCheck(activeWidth int) {
+	C.updateIndentWidthMenuSelection(C.int(activeWidth))
 }
 
 // updateThemeMenuCheck updates the checkmark in the Theme submenu.

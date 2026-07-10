@@ -193,6 +193,12 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 	if st.notification != "" && time.Now().Before(st.notificationUntil) {
 		gtx.Execute(op.InvalidateCmd{})
 	}
+	// Wake the frame loop when the idle error-check deadline elapses so
+	// flushErrCheck can run even without further input (mirrors the reparse
+	// scheduling, which piggybacks on the cursor-blink wake).
+	if st.errCheckPending {
+		gtx.Execute(op.InvalidateCmd{At: st.errCheckDeadline})
+	}
 }
 
 // drawEditorNormal renders the editor in non-wrapped mode (original path).
@@ -242,6 +248,38 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 			paint.ColorOp{Color: bgColor}.Add(gtx.Ops)
 			paint.PaintOp{}.Add(gtx.Ops)
 			bgRect.Pop()
+		}
+	}
+
+	// Error markers: a red dot on lines with a syntax/format error. For a
+	// collapsed fold, the visible header line is flagged when an error hides
+	// inside the folded range.
+	if len(ts.errorLines) > 0 {
+		for i := 0; i <= lastLine-firstLine; i++ {
+			dispLine := firstLine + i
+			bufLine := dispLine
+			if hasFolds {
+				bufLine = fs.DisplayToBuf(dispLine)
+			}
+			if bufLine >= ed.Buffer.LineCount() {
+				break
+			}
+			mark := ts.errorLines[bufLine]
+			if !mark && hasFolds && fs.IsCollapsed(bufLine) {
+				if r := fs.RegionAt(bufLine); r != nil {
+					for el := range ts.errorLines {
+						if el > r.StartLine && el <= r.EndLine {
+							mark = true
+							break
+						}
+					}
+				}
+			}
+			if !mark {
+				continue
+			}
+			y := i*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
+			st.gutterRend.RenderErrorMarker(gtx, gtx.Ops, y, st.textRend.LineHeightPx, st.theme.ErrorMarker)
 		}
 	}
 
@@ -510,9 +548,13 @@ func (st *appState) drawEditorWrapped(gtx layout.Context, w *app.Window, ed *edi
 
 			y := (visLine-firstVis)*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
 
-			// Gutter: line number only on first segment
+			// Gutter: line number only on first segment; error marker sits on
+			// the first visual line of the logical line.
 			if seg == 0 {
 				st.gutterRend.RenderLineNumber(gtx, gtx.Ops, bufLine+1, totalBufLines, y)
+				if ts.errorLines[bufLine] {
+					st.gutterRend.RenderErrorMarker(gtx, gtx.Ops, y, st.textRend.LineHeightPx, st.theme.ErrorMarker)
+				}
 			}
 
 			// Extract segment text
@@ -2021,6 +2063,37 @@ func (st *appState) drawStatusLine(gtx layout.Context, ed *editor.Editor, ts *ta
 	} else {
 		st.mdToggleX = 0
 		st.mdToggleW = 0
+	}
+
+	// JSON Compact/Expanded toggle — left of language label. The label shows the
+	// document's CURRENT state (like the markdown pill). JSON and Markdown are
+	// mutually exclusive languages, so the two pills never collide spatially.
+	if lang == "JSON" && ts != nil && ed != nil {
+		fmtLabel := "Expanded"
+		if fmtIsCompact(ed) {
+			fmtLabel = "Compact"
+		}
+		fmtPad := sr.CharWidth
+		fmtW := len(fmtLabel)*sr.CharWidth + fmtPad*2
+		fmtX := st.langLabelX - fmtW - sr.CharWidth
+		fmtY := y
+
+		fmtOff := op.Offset(image.Pt(fmtX, fmtY+1)).Push(gtx.Ops)
+		fmtRect := clip.UniformRRect(image.Rectangle{
+			Max: image.Pt(fmtW, statusH-2),
+		}, 3).Push(gtx.Ops)
+		paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		fmtRect.Pop()
+		fmtOff.Pop()
+
+		sr.RenderGlyphs(gtx.Ops, gtx, fmtLabel, fmtX+fmtPad, textY, st.theme.Foreground)
+
+		st.fmtToggleX = fmtX
+		st.fmtToggleW = fmtW
+	} else {
+		st.fmtToggleX = 0
+		st.fmtToggleW = 0
 	}
 
 	// Vim indicator — just "Vim" centered in Xbox green

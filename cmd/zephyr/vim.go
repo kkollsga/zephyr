@@ -232,9 +232,9 @@ func (st *appState) executeVimAction(action vim.Action) {
 		st.vimState.Mode = vim.ModeInsert
 	case vim.ActionOpenBelow:
 		ed.Cursor.MoveToLineEnd(ed.Buffer)
-		indent := st.computeAutoIndent()
-		ed.InsertText("\n" + indent)
+		st.insertNewlineAutoIndent()
 		st.afterEdit()
+		st.detectErrors() // refresh error markers on newline open
 		st.vimState.Mode = vim.ModeInsert
 	case vim.ActionOpenAbove:
 		line := ed.Cursor.Line
@@ -245,10 +245,10 @@ func (st *appState) executeVimAction(action vim.Action) {
 		} else {
 			ed.Cursor.SetPosition(ed.Buffer, line-1, 0)
 			ed.Cursor.MoveToLineEnd(ed.Buffer)
-			indent := st.computeAutoIndent()
-			ed.InsertText("\n" + indent)
+			st.insertNewlineAutoIndent()
 		}
 		st.afterEdit()
+		st.detectErrors() // refresh error markers on newline open
 		st.vimState.Mode = vim.ModeInsert
 	case vim.ActionSubstChar:
 		// s = delete char + enter insert

@@ -4,6 +4,32 @@ All notable changes to Zephyr are documented here.
 
 ## Unreleased
 
+### Editing
+
+- Added syntax/format error detection with red gutter markers: JSON is
+  validated with the standard parser and tree-sitter languages are checked
+  for parse errors, on every Enter and after five seconds of typing
+  inactivity, as well as on open and language switch.
+- Added an Auto Indent mode (View menu, on by default): pressing Enter in
+  JSON, JavaScript, and TypeScript files re-indents the line being left and
+  indents the new line from token-aware bracket depth, leaving strings,
+  template literals, and comments untouched.
+- Added a configurable indentation level (View → Indentation: 2, 4, or
+  8 spaces, default 2), persisted across sessions.
+- Added a Compact/Expanded toggle in the status bar for JSON files that
+  converts the buffer between minified and pretty-printed form in place, so
+  saving stores the selected form; the conversion preserves key order and is
+  a single undo step.
+
+### macOS
+
+- The Zephyr application menu now shows the current version as its first row.
+
+### Versioning
+
+- The repository root `VERSION` file is now the version source of truth for
+  local builds, with `scripts/bump-version.sh` to bump patch/minor/major.
+
 ### Reliability and testing
 
 - Fixed primary/secondary/middle mouse isolation, pointer-gesture identity,

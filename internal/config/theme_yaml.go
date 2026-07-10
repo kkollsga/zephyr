@@ -195,6 +195,7 @@ func variantToTheme(name string, v themeVariant) Theme {
 		"git-modified-bg":  &t.GitModifiedBg,
 		"git-deleted-bg":   &t.GitDeletedBg,
 		"git-original-bg":  &t.GitOriginalBg,
+		"error-marker":     &t.ErrorMarker,
 		"breadcrumb-dim":   &t.BreadcrumbDim,
 		"breadcrumb-file":  &t.BreadcrumbFile,
 		"status-section":   &t.StatusSection,
@@ -243,6 +244,9 @@ func variantToTheme(name string, v themeVariant) Theme {
 	}
 	if t.GitOriginalBg.A == 0 {
 		t.GitOriginalBg = color.NRGBA{R: 0xff, G: 0xd7, B: 0x00, A: 30}
+	}
+	if t.ErrorMarker.A == 0 {
+		t.ErrorMarker = color.NRGBA{R: 0xe5, G: 0x48, B: 0x4d, A: 255} // red, readable on dark and light gutters
 	}
 	if t.BreadcrumbDim.A == 0 {
 		t.BreadcrumbDim = t.TabDimFg

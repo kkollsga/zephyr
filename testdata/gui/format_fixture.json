@@ -1,0 +1,27 @@
+{
+"name": "zephyr",
+    "version": "0.1.0",
+  "nested": {
+        "flag": true,
+    "count": 42,
+"list": [
+1,
+    2,
+        3
+],
+      "deep": {
+"a": {
+        "b": {
+    "c": "café ☕"
+}
+        }
+      }
+},
+   "array_of_objects": [
+{ "id": 1, "label": "one" },
+        { "id": 2, "label": "two" }
+   ],
+    "empty": {},
+"pi": 3.14159,
+     "neg": -1.5e10
+}

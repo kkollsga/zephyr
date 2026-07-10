@@ -291,9 +291,9 @@ func (st *appState) handleKey(ke key.Event) {
 		ed.DeleteForward()
 		st.afterEdit()
 	case ke.Name == key.NameReturn && ke.Modifiers == 0:
-		indent := st.computeAutoIndent()
-		ed.InsertText("\n" + indent)
+		st.insertNewlineAutoIndent()
 		st.afterEdit()
+		st.detectErrors() // refresh error markers on every Enter
 	case ke.Name == key.NameTab && ke.Modifiers == 0:
 		ed.InsertText("    ")
 		st.afterEdit()
@@ -522,6 +522,15 @@ func (st *appState) handlePointer(pe pointer.Event) {
 			px := int(pe.Position.X)
 			if px >= st.mdToggleX && px < st.mdToggleX+st.mdToggleW {
 				st.toggleMarkdownPreview()
+				return
+			}
+		}
+
+		// JSON Compact/Expanded toggle button
+		if st.fmtToggleW > 0 && int(pe.Position.Y) >= statusY {
+			px := int(pe.Position.X)
+			if px >= st.fmtToggleX && px < st.fmtToggleX+st.fmtToggleW {
+				st.toggleJSONCompact()
 				return
 			}
 		}
