@@ -48,14 +48,14 @@ func (st *appState) executeMdReadAction(action vim.Action, ts *tabState) {
 	// Top/bottom: gg / G
 	case vim.ActionMoveFileStart:
 		ts.mdScrollY = 0
-		st.window.Invalidate()
+		st.invalidate()
 	case vim.ActionMoveFileEnd:
 		maxScroll := float64(ts.mdTotalH - editorH)
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
 		ts.mdScrollY = maxScroll
-		st.window.Invalidate()
+		st.invalidate()
 
 	// Search
 	case vim.ActionEnterSearch:
@@ -106,7 +106,7 @@ func (st *appState) mdScroll(ts *tabState, delta float64, editorH int) {
 	if ts.mdScrollY > maxScroll {
 		ts.mdScrollY = maxScroll
 	}
-	st.window.Invalidate()
+	st.invalidate()
 }
 
 // handleNavRootDropdownClick handles a click when the root dropdown is open.

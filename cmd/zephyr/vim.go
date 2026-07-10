@@ -1505,4 +1505,3 @@ func (st *appState) openVimTutor() {
 	st.updateWindowTitle()
 	st.window.Invalidate()
 }
-

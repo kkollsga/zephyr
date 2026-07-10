@@ -3,6 +3,7 @@ package editor
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kristianweb/zephyr/internal/buffer"
@@ -68,6 +69,184 @@ func TestEditor_OpenEditSaveReopen(t *testing.T) {
 	}
 	if pt.Text() != "original modified" {
 		t.Fatalf("got %q", pt.Text())
+	}
+}
+
+func TestEditor_SaveAsFailureDoesNotChangeFilePath(t *testing.T) {
+	dir := t.TempDir()
+	originalPath := filepath.Join(dir, "original.txt")
+	ed := NewEditor(buffer.NewFromString("unsaved"), originalPath)
+	ed.Modified = true
+	failedPath := filepath.Join(dir, "missing", "failed.txt")
+
+	if err := ed.SaveAs(failedPath); err == nil {
+		t.Fatal("expected SaveAs to fail")
+	}
+	if ed.FilePath != originalPath {
+		t.Fatalf("FilePath changed after failed SaveAs: got %q, want %q", ed.FilePath, originalPath)
+	}
+	if !ed.Modified {
+		t.Fatal("failed SaveAs cleared modified state")
+	}
+}
+
+func TestEditor_SaveAsWritesAndUpdatesState(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "saved-as.txt")
+	ed := NewEditor(buffer.NewFromString("save-as content"), "")
+	ed.Modified = true
+
+	if err := ed.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "save-as content"; got != want {
+		t.Fatalf("saved content = %q, want %q", got, want)
+	}
+	if ed.FilePath != path {
+		t.Fatalf("FilePath = %q, want %q", ed.FilePath, path)
+	}
+	if ed.Modified {
+		t.Fatal("successful SaveAs left editor modified")
+	}
+}
+
+func TestEditor_SaveThroughSymlinkKeepsVisiblePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation commonly requires elevated privileges on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	link := filepath.Join(dir, "visible-link.txt")
+	if err := os.WriteFile(target, []byte("before"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	ed := NewEditor(buffer.NewFromString("after"), link)
+	ed.Modified = true
+
+	if err := ed.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if ed.FilePath != link {
+		t.Fatalf("FilePath = %q, want editor-visible symlink %q", ed.FilePath, link)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("save replaced editor-visible symlink")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "after"; got != want {
+		t.Fatalf("target content = %q, want %q", got, want)
+	}
+}
+
+func TestEditor_ReloadExternalChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reload.txt")
+	if err := os.WriteFile(path, []byte("first line\nsecond line\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ed, err := NewEditorFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ed.Cursor = Cursor{Line: 1, Col: 6}
+	ed.Selection.Start(Cursor{Line: 0, Col: 0})
+	ed.Selection.Update(Cursor{Line: 1, Col: 3})
+	ed.Modified = true
+
+	if err := os.WriteFile(path, []byte("external\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ed.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ed.Buffer.Text(), "external\n"; got != want {
+		t.Fatalf("buffer = %q, want %q", got, want)
+	}
+	if ed.Modified {
+		t.Fatal("reload left editor modified")
+	}
+	if ed.Selection.Active {
+		t.Fatal("reload left a selection active")
+	}
+	if ed.Cursor.Line >= ed.Buffer.LineCount() {
+		t.Fatalf("cursor was not clamped: %+v", ed.Cursor)
+	}
+}
+
+func TestEditor_UndoReloadRestoresPreviousContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reload-undo.txt")
+	if err := os.WriteFile(path, []byte("before"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ed, err := NewEditorFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ed.Cursor = Cursor{Line: 0, Col: 4}
+	if err := os.WriteFile(path, []byte("after"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ed.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	ed.Undo()
+	if got, want := ed.Buffer.Text(), "before"; got != want {
+		t.Fatalf("undo after reload = %q, want %q", got, want)
+	}
+	if got, want := ed.Cursor, (Cursor{Line: 0, Col: 4}); got != want {
+		t.Fatalf("cursor after undo = %+v, want %+v", got, want)
+	}
+	if !ed.Modified {
+		t.Fatal("undoing reload should mark the editor modified")
+	}
+
+	ed.Redo()
+	if got, want := ed.Buffer.Text(), "after"; got != want {
+		t.Fatalf("redo after reload = %q, want %q", got, want)
+	}
+	if ed.Modified {
+		t.Fatal("redoing reload should restore the unmodified disk state")
+	}
+}
+
+func TestEditor_FailedReloadDoesNotChangeHistory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reload-failure.txt")
+	if err := os.WriteFile(path, []byte("before"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ed, err := NewEditorFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeUndo := len(ed.History.undoStack)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := ed.Reload(); err == nil {
+		t.Fatal("expected reload of removed file to fail")
+	}
+	if got := len(ed.History.undoStack); got != beforeUndo {
+		t.Fatalf("failed reload changed undo history length: got %d, want %d", got, beforeUndo)
+	}
+	if got, want := ed.Buffer.Text(), "before"; got != want {
+		t.Fatalf("failed reload changed buffer: got %q, want %q", got, want)
 	}
 }
 

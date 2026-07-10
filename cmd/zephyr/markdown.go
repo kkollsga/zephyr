@@ -19,7 +19,7 @@ import (
 // codeCopyBtn tracks a copy button's hit area for a code block.
 type codeCopyBtn struct {
 	x, y, w, h int
-	code        string
+	code       string
 }
 
 // mdSelBlock records a block's layout position and its range in the flat
@@ -36,25 +36,25 @@ type mdSelBlock struct {
 
 // mdCheckbox tracks a checkbox hit area for task list toggling.
 type mdCheckbox struct {
-	x, y, w, h  int
-	sourceOffset int  // byte offset of the [ ] or [x] in the source
+	x, y, w, h   int
+	sourceOffset int // byte offset of the [ ] or [x] in the source
 	checked      bool
 }
 
 // Markdown preview renderers, cached on appState and rebuilt when theme changes.
 type mdRenderers struct {
-	h1       *render.TextRenderer
-	h2       *render.TextRenderer
-	h3       *render.TextRenderer
-	h4       *render.TextRenderer
-	h5       *render.TextRenderer
-	h6       *render.TextRenderer
-	body     *render.TextRenderer
+	h1        *render.TextRenderer
+	h2        *render.TextRenderer
+	h3        *render.TextRenderer
+	h4        *render.TextRenderer
+	h5        *render.TextRenderer
+	h6        *render.TextRenderer
+	body      *render.TextRenderer
 	bodySmall *render.TextRenderer // for nested list items
-	code     *render.TextRenderer
-	bold     *render.TextRenderer
-	ital     *render.TextRenderer
-	boldItal *render.TextRenderer
+	code      *render.TextRenderer
+	bold      *render.TextRenderer
+	ital      *render.TextRenderer
+	boldItal  *render.TextRenderer
 }
 
 // toggleCheckbox toggles a task list checkbox in the source buffer and re-parses.
@@ -116,7 +116,7 @@ func (st *appState) toggleCheckbox(cb mdCheckbox) {
 
 	// Re-parse and refresh
 	ts.mdDoc = render.ParseMarkdown(ed.Buffer.TextBytes(nil))
-	st.window.Invalidate()
+	st.invalidate()
 }
 
 // toggleMarkdownPreview switches between edit and read mode for markdown files.
@@ -216,10 +216,10 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 		return
 	}
 	theme := st.theme
-	ts.mdCopyBtns = ts.mdCopyBtns[:0]       // reset copy button hit areas
-	ts.mdCheckboxes = ts.mdCheckboxes[:0]   // reset checkbox hit areas
-	ts.mdSelBlocks = ts.mdSelBlocks[:0]     // reset selection blocks
-	var selBuf strings.Builder              // build flat text for selection
+	ts.mdCopyBtns = ts.mdCopyBtns[:0]     // reset copy button hit areas
+	ts.mdCheckboxes = ts.mdCheckboxes[:0] // reset checkbox hit areas
+	ts.mdSelBlocks = ts.mdSelBlocks[:0]   // reset selection blocks
+	var selBuf strings.Builder            // build flat text for selection
 
 	charW := st.textRend.CharWidth
 	if charW == 0 {
@@ -240,7 +240,7 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 	if maxW < charW {
 		maxW = charW
 	}
-	editorX := (windowW - maxW) / 2 // center the body
+	editorX := (windowW - maxW) / 2  // center the body
 	editorH := gtx.Constraints.Max.Y // already clipped to editor area
 
 	scrollY := int(ts.mdScrollY)
@@ -510,8 +510,8 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 					if boxSize < 10 {
 						boxSize = 10
 					}
-					hitSize := lh            // larger hit target
-					cbX := textX + (hitSize-boxSize)/2  // center box in hit area
+					hitSize := lh                      // larger hit target
+					cbX := textX + (hitSize-boxSize)/2 // center box in hit area
 					cbY := y + (lh-boxSize)/2
 
 					hoverX := st.hoverX
@@ -540,9 +540,9 @@ func (st *appState) drawMarkdownPreview(gtx layout.Context, ts *tabState) {
 						// Horizontal: left start ~20%, bottom ~40%, right end ~80%
 						cx := cbX
 						cy := cbY
-						x1, y1 := cx+boxSize*20/100, cy+boxSize*50/100  // left start
-						x2, y2 := cx+boxSize*40/100, cy+boxSize*72/100  // bottom vertex
-						x3, y3 := cx+boxSize*80/100, cy+boxSize*28/100  // right end
+						x1, y1 := cx+boxSize*20/100, cy+boxSize*50/100 // left start
+						x2, y2 := cx+boxSize*40/100, cy+boxSize*72/100 // bottom vertex
+						x3, y3 := cx+boxSize*80/100, cy+boxSize*28/100 // right end
 						drawThickLine(gtx.Ops, x1, y1, x2, y2, sw, checkColor)
 						drawThickLine(gtx.Ops, x2, y2, x3, y3, sw, checkColor)
 					} else {
@@ -839,61 +839,16 @@ func blockPlainText(b *render.Block) string {
 func blocksToPlain(blocks []render.Block) string {
 	var b strings.Builder
 	for _, block := range blocks {
-		b.WriteString(spansToPlain(block.Spans))
-	}
-	return b.String()
-}
-
-// splitAndWrap splits text on newlines first, then wraps each segment.
-func splitAndWrap(text string, maxW, charW int) []string {
-	segments := strings.Split(text, "\n")
-	var lines []string
-	for _, seg := range segments {
-		seg = strings.TrimRight(seg, " ")
-		if seg == "" {
-			lines = append(lines, "")
+		text := blockPlainText(&block)
+		if text == "" {
 			continue
 		}
-		lines = append(lines, wrapText(seg, maxW, charW)...)
-	}
-	// Trim trailing empty lines
-	for len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	return lines
-}
-
-// wrapText wraps text to fit within maxW pixels given a character width.
-func wrapText(text string, maxW, charW int) []string {
-	if charW <= 0 {
-		return []string{text}
-	}
-	maxCols := maxW / charW
-	if maxCols <= 0 {
-		maxCols = 1
-	}
-	if len(text) <= maxCols {
-		return []string{text}
-	}
-
-	var lines []string
-	for len(text) > 0 {
-		if len(text) <= maxCols {
-			lines = append(lines, text)
-			break
+		if b.Len() > 0 {
+			b.WriteByte('\n')
 		}
-		// Find last space before maxCols
-		cut := maxCols
-		for cut > 0 && text[cut] != ' ' {
-			cut--
-		}
-		if cut == 0 {
-			cut = maxCols // no space found, hard break
-		}
-		lines = append(lines, text[:cut])
-		text = strings.TrimLeft(text[cut:], " ")
+		b.WriteString(text)
 	}
-	return lines
+	return b.String()
 }
 
 // mdCharOffset maps a screen position (px, py) to a character offset in mdSelText.
@@ -1173,28 +1128,4 @@ func codeLineColor(line, lang string, theme config.Theme) color.NRGBA {
 		}
 	}
 	return theme.Foreground
-}
-
-// drawRoundedBorder draws a 1px border of a rounded rectangle using 4 edge rects.
-func drawRoundedBorder(ops *op.Ops, x, y, w, h, r int, c color.NRGBA) {
-	// Top
-	tr := clip.Rect{Min: image.Pt(x+r, y), Max: image.Pt(x+w-r, y+1)}.Push(ops)
-	paint.ColorOp{Color: c}.Add(ops)
-	paint.PaintOp{}.Add(ops)
-	tr.Pop()
-	// Bottom
-	br := clip.Rect{Min: image.Pt(x+r, y+h-1), Max: image.Pt(x+w-r, y+h)}.Push(ops)
-	paint.ColorOp{Color: c}.Add(ops)
-	paint.PaintOp{}.Add(ops)
-	br.Pop()
-	// Left
-	lr := clip.Rect{Min: image.Pt(x, y+r), Max: image.Pt(x+1, y+h-r)}.Push(ops)
-	paint.ColorOp{Color: c}.Add(ops)
-	paint.PaintOp{}.Add(ops)
-	lr.Pop()
-	// Right
-	rr := clip.Rect{Min: image.Pt(x+w-1, y+r), Max: image.Pt(x+w, y+h-r)}.Push(ops)
-	paint.ColorOp{Color: c}.Add(ops)
-	paint.PaintOp{}.Add(ops)
-	rr.Pop()
 }

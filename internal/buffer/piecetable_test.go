@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -326,19 +327,100 @@ func TestPieceTable_Unicode(t *testing.T) {
 func TestPieceTable_ConcurrentReads(t *testing.T) {
 	pt := NewFromString("hello world\nsecond line\nthird line\n")
 
-	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = pt.Text()
-			_ = pt.Length()
-			_ = pt.LineCount()
-			_, _ = pt.Line(0)
-			_, _ = pt.Substring(0, 5)
-		}()
+	checkConcurrentReads := func(wantText, wantFirstLine string, wantLineCount int) {
+		t.Helper()
+
+		const readers = 100
+		errs := make(chan error, readers)
+		var wg sync.WaitGroup
+		for i := 0; i < readers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if got := pt.Text(); got != wantText {
+					errs <- fmt.Errorf("Text() = %q, want %q", got, wantText)
+					return
+				}
+				if got := pt.LineCount(); got != wantLineCount {
+					errs <- fmt.Errorf("LineCount() = %d, want %d", got, wantLineCount)
+					return
+				}
+				if got, err := pt.Line(0); err != nil || got != wantFirstLine {
+					errs <- fmt.Errorf("Line(0) = %q, %v; want %q, nil", got, err, wantFirstLine)
+					return
+				}
+				if got, err := pt.Substring(0, 5); err != nil || got != wantText[:5] {
+					errs <- fmt.Errorf("Substring(0, 5) = %q, %v; want %q, nil", got, err, wantText[:5])
+					return
+				}
+				if got, err := pt.OffsetToLineCol(13); err != nil || got.Line < 0 || got.Col < 0 {
+					errs <- fmt.Errorf("OffsetToLineCol(13) = %+v, %v", got, err)
+					return
+				}
+				if _, err := pt.LineColToOffset(LineCol{Line: 1, Col: 1}); err != nil {
+					errs <- fmt.Errorf("LineColToOffset(1:1): %w", err)
+					return
+				}
+				if got := pt.LineStartOffset(1); got <= 0 {
+					errs <- fmt.Errorf("LineStartOffset(1) = %d, want > 0", got)
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Error(err)
+		}
 	}
-	wg.Wait()
+
+	// Exercise the eagerly maintained line index before and after serialized
+	// edits, then fan out concurrent reads of every index consumer.
+	checkConcurrentReads("hello world\nsecond line\nthird line\n", "hello world", 4)
+	if err := pt.Insert(0, "zero\n"); err != nil {
+		t.Fatal(err)
+	}
+	checkConcurrentReads("zero\nhello world\nsecond line\nthird line\n", "zero", 5)
+	if err := pt.Delete(0, len("zero\n")); err != nil {
+		t.Fatal(err)
+	}
+	checkConcurrentReads("hello world\nsecond line\nthird line\n", "hello world", 4)
+}
+
+func TestPieceTable_LineIndexAfterEdits(t *testing.T) {
+	pt := NewFromString("alpha\nbeta\ngamma\n")
+
+	check := func() {
+		t.Helper()
+		want := lineStartsForText(pt.Text())
+		if !slices.Equal(pt.lineStarts, want) {
+			t.Fatalf("line starts = %v, want %v for %q", pt.lineStarts, want, pt.Text())
+		}
+		if got := pt.LineCount(); got != len(want) {
+			t.Fatalf("LineCount() = %d, want %d", got, len(want))
+		}
+	}
+
+	check()
+	if err := pt.Insert(0, "zero\n"); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	if err := pt.Insert(pt.LineStartOffset(2), "middle\npart"); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	if err := pt.Insert(pt.Length(), "tail\n"); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	if err := pt.Delete(4, 1); err != nil { // Remove the newline after "zero".
+		t.Fatal(err)
+	}
+	check()
+	if err := pt.Delete(pt.LineStartOffset(2)-1, 1); err != nil { // Merge two interior lines.
+		t.Fatal(err)
+	}
+	check()
 }
 
 // --- Benchmarks ---
@@ -350,7 +432,9 @@ func BenchmarkPieceTable_InsertSingle(b *testing.B) {
 	}
 }
 
-func BenchmarkPieceTable_InsertLargeFile(b *testing.B) {
+// BenchmarkPieceTable_OpenAndInsertLargeFile includes PieceTable construction,
+// eager line indexing, and one insert per operation.
+func BenchmarkPieceTable_OpenAndInsertLargeFile(b *testing.B) {
 	var sb strings.Builder
 	for i := 0; i < 100_000; i++ {
 		fmt.Fprintf(&sb, "Line %d: some content\n", i)
@@ -364,7 +448,9 @@ func BenchmarkPieceTable_InsertLargeFile(b *testing.B) {
 	}
 }
 
-func BenchmarkPieceTable_DeleteLargeFile(b *testing.B) {
+// BenchmarkPieceTable_OpenAndDeleteLargeFile includes PieceTable construction,
+// eager line indexing, and one delete per operation.
+func BenchmarkPieceTable_OpenAndDeleteLargeFile(b *testing.B) {
 	var sb strings.Builder
 	for i := 0; i < 100_000; i++ {
 		fmt.Fprintf(&sb, "Line %d: some content\n", i)

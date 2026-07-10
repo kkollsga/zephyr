@@ -240,6 +240,25 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   padding: 0;
 }
 
+.terminal-install {
+  background: var(--bg-card);
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 28px;
+}
+
+.terminal-install strong {
+  display: block;
+  color: var(--green);
+  margin-bottom: 10px;
+}
+
+.terminal-install pre {
+  background: var(--bg);
+  margin: 0 0 10px;
+}
+
 /* ── Modal ── */
 .modal-overlay {
   display: none;
@@ -404,4 +423,53 @@ nav a {
 nav a:hover {
   color: var(--fg);
   text-decoration: none;
+}
+
+/* ── Copyable terminal commands ── */
+.command-copy {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.command-copy > pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.copy-command {
+  min-width: 78px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: var(--bg-card);
+  color: var(--fg);
+  font: 600 0.82rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.copy-command:hover,
+.copy-command:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+}
+
+.copy-command.copied {
+  border-color: var(--green);
+  background: rgba(78, 201, 176, 0.1);
+  color: var(--green);
+}
+
+@media (max-width: 620px) {
+  .command-copy {
+    flex-direction: column;
+  }
+
+  .copy-command {
+    min-height: 42px;
+  }
 }

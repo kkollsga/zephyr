@@ -48,11 +48,12 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 			key.Filter{Focus: st.tag, Optional: key.ModShortcut | key.ModShift | key.ModAlt},
 			key.Filter{Focus: st.tag, Name: key.NameTab},
 			key.Filter{Focus: st.tag, Name: key.NameTab, Optional: key.ModShift},
-			pointer.Filter{Target: st.tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll | pointer.Move, ScrollY: scrollRange},
+			pointer.Filter{Target: st.tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Scroll | pointer.Move | pointer.Enter | pointer.Leave | pointer.Cancel, ScrollY: scrollRange},
 		)
 		if !ok {
 			break
 		}
+		st.notePerformanceInput(ev)
 		switch ke := ev.(type) {
 		case key.Event:
 			if ke.State == key.Press {
@@ -383,11 +384,12 @@ func (st *appState) handleKey(ke key.Event) {
 }
 
 func (st *appState) handlePointer(pe pointer.Event) {
+	defer st.tracePointer(pe)
 	st.hoverX = int(pe.Position.X)
 	st.hoverY = int(pe.Position.Y)
 
 	switch pe.Kind {
-	case pointer.Move:
+	case pointer.Move, pointer.Enter:
 		// Check for incoming tab transfers when pointer is in the tab bar
 		if int(pe.Position.Y) < st.tabBarHeight {
 			st.checkIncomingTabTransfer()
@@ -398,6 +400,13 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		}
 
 	case pointer.Press:
+		// Secondary and tertiary mouse buttons must not trigger primary actions.
+		if !isPrimaryPointerPress(pe) {
+			return
+		}
+		st.activePointer = pe.PointerID
+		st.pointerActive = true
+
 		// Save menu takes priority over everything
 		if st.saveMenu.visible {
 			st.handleSaveMenuClick(int(pe.Position.X), int(pe.Position.Y))
@@ -440,7 +449,8 @@ func (st *appState) handlePointer(pe pointer.Event) {
 			return
 		}
 
-		// Code block copy buttons and checkboxes in markdown read mode
+		// Code block copy buttons and checkboxes in markdown read mode.
+		// General text selection is handled after overlays and status controls.
 		if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
 			px, py := int(pe.Position.X), int(pe.Position.Y)
 			for _, btn := range ts.mdCopyBtns {
@@ -458,13 +468,6 @@ func (st *appState) handlePointer(pe pointer.Event) {
 					return
 				}
 			}
-			// Start text selection
-			absY := py - st.tabBarHeight + int(ts.mdScrollY)
-			off := mdCharOffset(ts.mdSelBlocks, px, absY)
-			ts.mdSelAnchor = off
-			ts.mdSelCursor = off
-			ts.mdSelActive = true
-			st.window.Invalidate()
 		}
 
 		sr := st.statusRend
@@ -528,6 +531,19 @@ func (st *appState) handlePointer(pe pointer.Event) {
 			return
 		}
 
+		// Markdown read-mode selection consumes editor-area presses without
+		// moving the hidden edit-mode cursor.
+		if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+			px, py := int(pe.Position.X), int(pe.Position.Y)
+			absY := py - st.tabBarHeight + int(ts.mdScrollY)
+			off := mdCharOffset(ts.mdSelBlocks, px, absY)
+			ts.mdSelAnchor = off
+			ts.mdSelCursor = off
+			ts.mdSelActive = true
+			st.window.Invalidate()
+			return
+		}
+
 		ed := st.activeEd()
 		if ed == nil {
 			return
@@ -548,6 +564,9 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		st.cursorRend.ResetBlink()
 
 	case pointer.Drag:
+		if !st.pointerActive || pe.PointerID != st.activePointer {
+			return
+		}
 		// Tab drag takes priority over text selection drag
 		if st.tabDrag.active {
 			st.handleTabBarDrag(int(pe.Position.X), int(pe.Position.Y))
@@ -574,6 +593,10 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		st.cursorRend.ResetBlink()
 
 	case pointer.Release:
+		if st.pointerActive && pe.PointerID != st.activePointer {
+			return
+		}
+		st.pointerActive = false
 		if st.tabDrag.active {
 			st.handleTabBarRelease(int(pe.Position.X), int(pe.Position.Y))
 			return
@@ -617,7 +640,47 @@ func (st *appState) handlePointer(pe pointer.Event) {
 				}
 			}
 		}
+
+	case pointer.Leave:
+		st.tooltipTabIdx = -1
+		st.tooltipEnter = time.Time{}
+		if st.window != nil {
+			st.window.Invalidate()
+		}
+
+	case pointer.Cancel:
+		st.cancelPointerGesture()
 	}
+}
+
+func isPrimaryPointerPress(pe pointer.Event) bool {
+	return pe.Source != pointer.Mouse || pe.Buttons.Contain(pointer.ButtonPrimary)
+}
+
+func (st *appState) cancelPointerGesture() {
+	st.pointerActive = false
+	st.dragging = false
+	st.tabDrag.active = false
+	st.tabDrag.started = false
+	st.tabDrag.fromDropdown = false
+	if ts := st.activeTabState(); ts != nil {
+		ts.mdSelActive = false
+	}
+	if st.window != nil {
+		st.window.Invalidate()
+	}
+}
+
+func visualLineAtY(firstLine, pixelOffset, adjustedY, lineHeight int) int {
+	if lineHeight <= 0 {
+		return firstLine
+	}
+	value := adjustedY + pixelOffset
+	lineDelta := value / lineHeight
+	if value < 0 && value%lineHeight != 0 {
+		lineDelta--
+	}
+	return firstLine + lineDelta
 }
 
 func (st *appState) pointerToLineCol(pos f32.Point) (line, col int) {
@@ -632,17 +695,18 @@ func (st *appState) pointerToLineCol(pos f32.Point) (line, col int) {
 		dispCol = 0
 	}
 	adjustedY := int(pos.Y) - st.tabBarHeight - editorTopPad
+	visLine := visualLineAtY(ts.viewport.FirstLine, ts.viewport.PixelOffset, adjustedY, st.textRend.LineHeightPx)
 
 	if ts.wrapMap != nil {
-		visLine := ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
 		bufLine, segIdx := ts.wrapMap.bufferLineForVisual(visLine)
 		segStart, _ := ts.wrapMap.segmentRange(bufLine, segIdx)
-		col = dispCol + segStart
+		lineText, _ := ed.Buffer.Line(bufLine)
+		col = displayColToRuneCol(lineText, dispCol+segStart, 4)
 		line = bufLine
 		return
 	}
 
-	displayLine := ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
+	displayLine := visLine
 
 	// Convert display line to buffer line when folds are active
 	fs := ts.foldState
@@ -651,7 +715,8 @@ func (st *appState) pointerToLineCol(pos f32.Point) (line, col int) {
 	} else {
 		line = displayLine
 	}
-	col = dispCol
+	lineText, _ := ed.Buffer.Line(line)
+	col = displayColToRuneCol(lineText, dispCol, 4)
 	return
 }
 
@@ -690,7 +755,7 @@ func (st *appState) handleGutterClick(pe pointer.Event) {
 	if st.textRend == nil || st.textRend.LineHeightPx == 0 {
 		return
 	}
-	displayLine := ts.viewport.FirstLine + adjustedY/st.textRend.LineHeightPx
+	displayLine := visualLineAtY(ts.viewport.FirstLine, ts.viewport.PixelOffset, adjustedY, st.textRend.LineHeightPx)
 
 	fs := ts.foldState
 	var bufLine int

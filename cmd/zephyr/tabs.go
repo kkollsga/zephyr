@@ -28,7 +28,7 @@ func (st *appState) tabMetrics() tabLayout {
 		closeW:   st.dp(10),
 		rightPad: st.dp(6),
 		tabGap:   st.dp(2),
-		plusW:     st.dp(28),
+		plusW:    st.dp(28),
 		titleGap: st.dp(16),
 	}
 }
@@ -205,7 +205,7 @@ func (st *appState) handleTabBarDrag(x, y int) {
 	}
 
 	// Detect drag outside window → write IPC offer for cross-instance transfer
-	if pointerOutsideWindow() {
+	if st.window != nil && pointerOutsideWindow() {
 		idx := st.tabDrag.tabIdx
 		st.tabDrag.active = false
 		st.tabDrag.started = false

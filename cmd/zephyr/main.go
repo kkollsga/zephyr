@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/text"
@@ -23,8 +24,11 @@ import (
 )
 
 func main() {
+	tracePerformanceEvent("process_start")
+	defer appPerfTracer.close()
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		printVersion()
+		appPerfTracer.close()
 		os.Exit(0)
 	}
 	setupTitlebar()
@@ -59,17 +63,17 @@ type tabState struct {
 	sourceBuf      []byte // reusable buffer for tree-sitter source
 
 	// Markdown preview state
-	mode       viewMode
-	mdDoc      *render.MarkdownDoc // parsed markdown for read mode
-	mdScrollY  float64             // pixel scroll offset for read mode
-	mdTotalH   int                 // total rendered height for scroll clamping
-	mdCopyBtns   []codeCopyBtn  // code block copy button hit areas
-	mdCheckboxes []mdCheckbox  // task list checkbox hit areas
-	mdSelActive  bool          // true during a drag-select
-	mdSelAnchor  int           // character offset where selection started
-	mdSelCursor  int           // character offset where selection currently is
-	mdSelText    string        // full plain text of the document for selection
-	mdSelBlocks  []mdSelBlock  // per-block layout info for selection mapping
+	mode         viewMode
+	mdDoc        *render.MarkdownDoc // parsed markdown for read mode
+	mdScrollY    float64             // pixel scroll offset for read mode
+	mdTotalH     int                 // total rendered height for scroll clamping
+	mdCopyBtns   []codeCopyBtn       // code block copy button hit areas
+	mdCheckboxes []mdCheckbox        // task list checkbox hit areas
+	mdSelActive  bool                // true during a drag-select
+	mdSelAnchor  int                 // character offset where selection started
+	mdSelCursor  int                 // character offset where selection currently is
+	mdSelText    string              // full plain text of the document for selection
+	mdSelBlocks  []mdSelBlock        // per-block layout info for selection mapping
 
 	// Word wrap
 	wrapMap *wrapMap // visual line mapping (nil when wrap is off)
@@ -78,65 +82,67 @@ type tabState struct {
 	foldState *render.FoldState // fold regions and collapsed state
 
 	// Navigator mode
-	bufType bufferType              // file, directory, or status
-	gitDiff *git.FileDiff           // diff data for this file (nil if unchanged or not in repo)
+	bufType   bufferType              // file, directory, or status
+	gitDiff   *git.FileDiff           // diff data for this file (nil if unchanged or not in repo)
 	dirBuf    *navigator.DirBuffer    // directory buffer data (non-nil when bufType == bufDirectory)
 	statusBuf *navigator.StatusBuffer // status buffer data (non-nil when bufType == bufStatus)
 }
 
 type appState struct {
-	tabBar    *ui.TabBar
-	tabStates map[*editor.Editor]*tabState
-	theme     config.Theme
-	shaper    *text.Shaper
-	textRend  *render.TextRenderer
-	gutterRend *render.GutterRenderer
-	cursorRend *render.CursorRenderer
-	colorMap   highlight.TokenColorMap
-	statusRend *render.TextRenderer
-	tabRend    *render.TextRenderer // font for tab bar
-	plusRend   *render.TextRenderer // larger font for "+" button
-	tag        *bool
-	langSel    *ui.LanguageSelector
-	findBar      *ui.FindReplaceBar
-	scrollbarRend *render.ScrollbarRenderer
-	langLabelX int
-	lastMaxY   int
-	lastMaxX   int
+	tabBar          *ui.TabBar
+	tabStates       map[*editor.Editor]*tabState
+	theme           config.Theme
+	shaper          *text.Shaper
+	textRend        *render.TextRenderer
+	gutterRend      *render.GutterRenderer
+	cursorRend      *render.CursorRenderer
+	colorMap        highlight.TokenColorMap
+	statusRend      *render.TextRenderer
+	tabRend         *render.TextRenderer // font for tab bar
+	plusRend        *render.TextRenderer // larger font for "+" button
+	tag             *bool
+	langSel         *ui.LanguageSelector
+	findBar         *ui.FindReplaceBar
+	scrollbarRend   *render.ScrollbarRenderer
+	langLabelX      int
+	lastMaxY        int
+	lastMaxX        int
 	dragging        bool
+	activePointer   pointer.ID
+	pointerActive   bool
 	quitInProgress  bool
 	scrollAccum     float32 // accumulated fractional scroll delta
 	window          *app.Window
-	lastWindowTitle string  // dedup title updates to avoid Configure() thrash
-	darkMode        bool   // true = dark theme, false = light theme
-	themeName       string              // active theme bundle name
-	themeBundle     config.ThemeBundle   // loaded theme bundle
-	fontCfg         config.FontConfig   // font configuration from theme
-	mdRend          *mdRenderers        // cached markdown preview renderers
-	mdToggleX       int                 // left edge of Edit/Read toggle button
-	mdToggleW       int                 // width of the toggle button
-	themeMenuReady  bool                // true once native theme menu has been set up
-	wordWrap        bool                // true when word wrap is enabled
-	wrapMenuReady   bool                // true once native word wrap menu has been set up
+	lastWindowTitle string             // dedup title updates to avoid Configure() thrash
+	darkMode        bool               // true = dark theme, false = light theme
+	themeName       string             // active theme bundle name
+	themeBundle     config.ThemeBundle // loaded theme bundle
+	fontCfg         config.FontConfig  // font configuration from theme
+	mdRend          *mdRenderers       // cached markdown preview renderers
+	mdToggleX       int                // left edge of Edit/Read toggle button
+	mdToggleW       int                // width of the toggle button
+	themeMenuReady  bool               // true once native theme menu has been set up
+	wordWrap        bool               // true when word wrap is enabled
+	wrapMenuReady   bool               // true once native word wrap menu has been set up
 
-	tabBarHeight   int      // computed from display scale to match native titlebar
-	trafficLightPx int     // traffic light padding in pixels (scaled from Dp)
-	hoverX, hoverY int     // last pointer position for hover effects
+	tabBarHeight   int                 // computed from display scale to match native titlebar
+	trafficLightPx int                 // traffic light padding in pixels (scaled from Dp)
+	hoverX, hoverY int                 // last pointer position for hover effects
 	dp             func(v unit.Dp) int // cached scale function from latest gtx
 
 	// Tab tooltip state
-	tooltipTabIdx  int       // tab index the pointer is hovering (-1 = none)
-	tooltipEnter   time.Time // when the pointer entered the tab
-	tooltipX       int       // X position of the hovered tab (for tooltip placement)
+	tooltipTabIdx int       // tab index the pointer is hovering (-1 = none)
+	tooltipEnter  time.Time // when the pointer entered the tab
+	tooltipX      int       // X position of the hovered tab (for tooltip placement)
 
 	// Tab overflow state
-	overflowOpen         bool  // true when the overflow dropdown is visible
-	overflowStartIdx     int   // first tab index that overflows (== len(Tabs) if none)
-	overflowBtnX         int   // left edge X of the ">" button (for click detection)
-	overflowBtnW         int   // width of the ">" button
-	barTabIdxs           []int // tab indices shown in the bar (computed each frame)
-	dropdownTabIdxs      []int // tab indices shown in the dropdown (computed each frame)
-	dropdownHeader       int   // tab index shown as first dropdown item for continuity (-1 = none)
+	overflowOpen     bool  // true when the overflow dropdown is visible
+	overflowStartIdx int   // first tab index that overflows (== len(Tabs) if none)
+	overflowBtnX     int   // left edge X of the ">" button (for click detection)
+	overflowBtnW     int   // width of the ">" button
+	barTabIdxs       []int // tab indices shown in the bar (computed each frame)
+	dropdownTabIdxs  []int // tab indices shown in the dropdown (computed each frame)
+	dropdownHeader   int   // tab index shown as first dropdown item for continuity (-1 = none)
 
 	// Debounced reparse state
 	reparsePending  bool
@@ -154,17 +160,17 @@ type appState struct {
 	saveMenu struct {
 		visible        bool
 		tabIdx         int
-		forQuit        bool   // continue quit flow after action
-		closeAfterSave bool   // close tab after save (close-tab flow)
-		saveAsExpanded bool   // true when Save As rows are shown for file-backed tabs
+		forQuit        bool // continue quit flow after action
+		closeAfterSave bool // close tab after save (close-tab flow)
+		saveAsExpanded bool // true when Save As rows are shown for file-backed tabs
 
 		// Save As fields
-		filename  []rune
-		cursor    int    // rune position in filename
-		selectAll bool   // entire filename is selected
-		dir              string // directory to save in
+		filename         []rune
+		cursor           int     // rune position in filename
+		selectAll        bool    // entire filename is selected
+		dir              string  // directory to save in
 		tags             [7]bool // macOS Finder tags: Red, Orange, Yellow, Green, Blue, Purple, Gray
-		confirmOverwrite bool   // true when waiting for overwrite confirmation
+		confirmOverwrite bool    // true when waiting for overwrite confirmation
 	}
 
 	// Vim mode
@@ -182,17 +188,22 @@ type appState struct {
 
 	// Navigator root dropdown
 	navRootDropdown struct {
-		open    bool
-		x, w    int // hit area of the folder name in the header
-		items   []string // recent root paths to display
+		open  bool
+		x, w  int      // hit area of the folder name in the header
+		items []string // recent root paths to display
 	}
-	navCachedPath     string // cached display path for breadcrumb
-	navCachedPathKey  string // key: filePath or dirBufPath that produced the cached path
-	navCachedHome     string // cached os.UserHomeDir result
-	navPrevTabIdx     int    // tab index before opening directory buffer (for toggle)
+	navCachedPath    string // cached display path for breadcrumb
+	navCachedPathKey string // key: filePath or dirBufPath that produced the cached path
+	navCachedHome    string // cached os.UserHomeDir result
+	navPrevTabIdx    int    // tab index before opening directory buffer (for toggle)
 
 	// File watcher for external changes
 	watcher *fileio.Watcher
+
+	// Test-build performance telemetry.
+	perfFrameCount       uint64
+	perfPendingEventAt   time.Time
+	perfPendingEventKind string
 
 	// Tab drag state
 	tabDrag struct {
@@ -209,6 +220,7 @@ type appState struct {
 		dropSlot      int  // gap position within bar or dropdown section
 	}
 }
+
 const editorTopPad = 10 // top margin above first line of text
 
 // tabLayout holds scaled pixel values for tab bar layout.
@@ -357,6 +369,7 @@ func run() {
 		app.Size(unit.Dp(900), unit.Dp(600)),
 		app.MinSize(unit.Dp(400), unit.Dp(300)),
 	)
+	tracePerformanceEvent("window_requested")
 
 	var ops op.Ops
 
@@ -365,6 +378,7 @@ func run() {
 		switch e := evt.(type) {
 		case app.DestroyEvent:
 			if !st.hasUnsavedChanges() {
+				appPerfTracer.close()
 				os.Exit(0)
 			}
 			// Has unsaved changes — re-create window and show save prompt.
@@ -380,6 +394,7 @@ func run() {
 			st.startQuitFlow()
 
 		case app.FrameEvent:
+			frameStart := time.Now()
 			gtx := app.NewContext(&ops, e)
 			st.initRenderers(gtx)
 			setUnsavedFlag(st.hasUnsavedChanges())
@@ -396,6 +411,7 @@ func run() {
 
 			// Check if graceful exit delay has elapsed
 			if st.exitPending && !time.Now().Before(st.exitDeadline) {
+				appPerfTracer.close()
 				os.Exit(0)
 			}
 
@@ -421,13 +437,20 @@ func run() {
 				st.updateWindowTitle()
 				w.Invalidate()
 			}
+			eventStart := time.Now()
 			if !st.exitPending {
 				st.handleEvents(gtx, w)
 				st.flushReparse()
 				st.pollFileWatcher()
 			}
+			eventDuration := time.Since(eventStart)
+			// Theme-dependent state may be invalidated by this frame's events.
+			// Rebuild it before drawing so the frame uses one renderer generation.
+			drawStart := time.Now()
+			st.initRenderers(gtx)
 			st.draw(gtx, w)
 			e.Frame(gtx.Ops)
+			st.recordPerformanceFrame(frameStart, eventDuration, time.Since(drawStart))
 			ensureTrafficLights()
 
 			// Keep requesting frames during exit countdown
@@ -452,7 +475,15 @@ func (st *appState) updateWindowTitle() {
 	}
 	if title != st.lastWindowTitle {
 		st.lastWindowTitle = title
-		st.window.Option(app.Title(title))
+		if st.window != nil {
+			st.window.Option(app.Title(title))
+		}
+	}
+}
+
+func (st *appState) invalidate() {
+	if st.window != nil {
+		st.window.Invalidate()
 	}
 }
 
@@ -466,7 +497,7 @@ func (st *appState) gracefulExit() {
 	st.exitDeadline = time.Now().Add(500 * time.Millisecond)
 	st.notification = "Closing\u2026"
 	st.notificationUntil = st.exitDeadline.Add(time.Second) // keep visible until exit
-	st.window.Invalidate()
+	st.invalidate()
 }
 
 func (st *appState) initRenderers(gtx layout.Context) {
@@ -539,6 +570,20 @@ func (st *appState) initRenderers(gtx layout.Context) {
 	}
 }
 
+// resetRenderers discards state derived from the current theme and fonts.
+// initRenderers must be called before the next draw.
+func (st *appState) resetRenderers() {
+	st.shaper = nil
+	st.textRend = nil
+	st.gutterRend = nil
+	st.cursorRend = nil
+	st.statusRend = nil
+	st.tabRend = nil
+	st.plusRend = nil
+	st.scrollbarRend = nil
+	st.mdRend = nil
+}
+
 // applyTheme switches to a new theme at runtime, rebuilding derived state.
 func (st *appState) applyTheme(theme config.Theme) {
 	st.theme = theme
@@ -546,9 +591,8 @@ func (st *appState) applyTheme(theme config.Theme) {
 		st.theme.TabAccent = vimGreen
 	}
 	st.colorMap = render.TokenColorMap(theme)
-	st.shaper = nil  // forces initRenderers to re-run next frame
-	st.mdRend = nil  // rebuild markdown renderers with new theme
-	st.window.Invalidate()
+	st.resetRenderers()
+	st.invalidate()
 }
 
 // toggleTheme switches between dark and light mode within the current bundle.

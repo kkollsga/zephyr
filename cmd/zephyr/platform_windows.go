@@ -16,14 +16,14 @@ import (
 )
 
 var (
-	comdlg32         = syscall.NewLazyDLL("comdlg32.dll")
-	shell32          = syscall.NewLazyDLL("shell32.dll")
-	ole32            = syscall.NewLazyDLL("ole32.dll")
-	getSaveFileNameW = comdlg32.NewProc("GetSaveFileNameW")
-	shBrowseForFolder = shell32.NewProc("SHBrowseForFolderW")
+	comdlg32            = syscall.NewLazyDLL("comdlg32.dll")
+	shell32             = syscall.NewLazyDLL("shell32.dll")
+	ole32               = syscall.NewLazyDLL("ole32.dll")
+	getSaveFileNameW    = comdlg32.NewProc("GetSaveFileNameW")
+	shBrowseForFolder   = shell32.NewProc("SHBrowseForFolderW")
 	shGetPathFromIDList = shell32.NewProc("SHGetPathFromIDListW")
-	coInitialize     = ole32.NewProc("CoInitialize")
-	coUninitialize   = ole32.NewProc("CoUninitialize")
+	coInitialize        = ole32.NewProc("CoInitialize")
+	coUninitialize      = ole32.NewProc("CoUninitialize")
 )
 
 // platformDecorated returns true — Windows uses native window chrome.
@@ -76,14 +76,14 @@ const (
 
 // BROWSEINFOW is the Win32 BROWSEINFO struct for folder picker.
 type browseInfoW struct {
-	owner        uintptr
-	root         uintptr
-	displayName  *uint16
-	title        *uint16
-	flags        uint32
-	callback     uintptr
-	param        uintptr
-	image        int32
+	owner       uintptr
+	root        uintptr
+	displayName *uint16
+	title       *uint16
+	flags       uint32
+	callback    uintptr
+	param       uintptr
+	image       int32
 }
 
 const (

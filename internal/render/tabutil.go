@@ -45,6 +45,36 @@ func RuneColToDisplayCol(lineText string, runeCol, tabSize int) int {
 	return dispCol
 }
 
+// DisplayColToRuneCol converts a display column back to a rune-based column,
+// accounting for tab expansion. A position in the first half of an expanded
+// tab maps before the tab; the second half maps after it.
+func DisplayColToRuneCol(lineText string, displayCol, tabSize int) int {
+	if displayCol <= 0 {
+		return 0
+	}
+	if tabSize <= 0 {
+		tabSize = 1
+	}
+	disp := 0
+	runeCol := 0
+	for _, r := range lineText {
+		width := 1
+		if r == '\t' {
+			width = tabSize - (disp % tabSize)
+		}
+		next := disp + width
+		if displayCol < next {
+			if r == '\t' && displayCol-disp >= (width+1)/2 {
+				return runeCol + 1
+			}
+			return runeCol
+		}
+		disp = next
+		runeCol++
+	}
+	return runeCol
+}
+
 // MatchDisplayLen returns the display width (in columns) of a match starting
 // at runeCol with the given byte length, accounting for tab expansion.
 func MatchDisplayLen(lineText string, runeCol, byteLen, tabSize int) int {

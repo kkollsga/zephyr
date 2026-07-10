@@ -172,6 +172,10 @@ func runeColToDisplayCol(lineText string, runeCol, tabSize int) int {
 	return render.RuneColToDisplayCol(lineText, runeCol, tabSize)
 }
 
+func displayColToRuneCol(lineText string, displayCol, tabSize int) int {
+	return render.DisplayColToRuneCol(lineText, displayCol, tabSize)
+}
+
 func matchDisplayLen(lineText string, runeCol, byteLen, tabSize int) int {
 	return render.MatchDisplayLen(lineText, runeCol, byteLen, tabSize)
 }

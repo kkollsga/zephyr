@@ -9,14 +9,14 @@ import (
 
 // Editor holds the core state of a single editor pane.
 type Editor struct {
-	Buffer       *buffer.PieceTable
-	Cursor       Cursor
-	Selection    Selection
-	Cursors      []Cursor     // Additional cursors for multi-cursor mode
-	Selections   []Selection  // Selections for each additional cursor
-	History      *History
-	FilePath     string
-	Modified     bool
+	Buffer     *buffer.PieceTable
+	Cursor     Cursor
+	Selection  Selection
+	Cursors    []Cursor    // Additional cursors for multi-cursor mode
+	Selections []Selection // Selections for each additional cursor
+	History    *History
+	FilePath   string
+	Modified   bool
 }
 
 // NewEditor creates an editor for the given piece table.
@@ -238,6 +238,8 @@ func (e *Editor) Undo() {
 	case ActionDelete:
 		// Undo delete = insert
 		e.Buffer.Insert(action.Offset, action.Text)
+	case ActionReplace:
+		e.Buffer = buffer.NewFromString(action.Text)
 	}
 
 	e.Cursor = action.Cursor
@@ -252,6 +254,7 @@ func (e *Editor) Redo() {
 		return
 	}
 
+	modified := true
 	switch action.Type {
 	case ActionInsert:
 		e.Buffer.Insert(action.Offset, action.Text)
@@ -260,10 +263,14 @@ func (e *Editor) Redo() {
 	case ActionDelete:
 		e.Buffer.Delete(action.Offset, len(action.Text))
 		e.setCursorFromOffset(action.Offset)
+	case ActionReplace:
+		e.Buffer = buffer.NewFromString(action.Replacement)
+		e.Cursor = action.AfterCursor
+		modified = false
 	}
 
 	e.Selection.Clear()
-	e.Modified = true
+	e.Modified = modified
 }
 
 // Save writes the buffer content to the file.
@@ -285,9 +292,8 @@ func (e *Editor) Reload() error {
 	if e.FilePath == "" {
 		return nil
 	}
-	// Record the current content for undo before replacing
 	oldContent := e.Buffer.Text()
-	e.History.RecordExternalChange(oldContent, e.Cursor)
+	oldCursor := e.Cursor
 
 	pt, err := buffer.NewFromFile(e.FilePath)
 	if err != nil {
@@ -297,15 +303,16 @@ func (e *Editor) Reload() error {
 	e.Modified = false
 	e.Cursor.Clamp(e.Buffer)
 	e.Selection.Clear()
+	e.History.RecordExternalChange(oldContent, e.Buffer.Text(), oldCursor, e.Cursor)
 	return nil
 }
 
 // SaveAs writes the buffer content to the given path and updates FilePath.
 func (e *Editor) SaveAs(path string) error {
-	e.FilePath = path
-	if err := fileio.SaveFile(e.Buffer, e.FilePath); err != nil {
+	if err := fileio.SaveFile(e.Buffer, path); err != nil {
 		return err
 	}
+	e.FilePath = path
 	e.Modified = false
 	return nil
 }
@@ -404,8 +411,8 @@ func (e *Editor) InsertTextAtAllCursors(text string) {
 
 	// Collect all cursors and sort by offset (descending) to preserve positions
 	type cursorInfo struct {
-		cursor *Cursor
-		offset int
+		cursor    *Cursor
+		offset    int
 		isPrimary bool
 	}
 

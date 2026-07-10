@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,61 +84,4 @@ func EnsureDefaultThemes() error {
 	}
 
 	return os.WriteFile(path, defaultThemeYAML, 0644)
-}
-
-// marshalThemeJSON converts a Theme to its JSON representation.
-func marshalThemeJSON(t Theme) ([]byte, error) {
-	tj := themeJSON{
-		Name:          t.Name,
-		Background:    ColorToHex(t.Background),
-		Foreground:    ColorToHex(t.Foreground),
-		Gutter:        ColorToHex(t.Gutter),
-		GutterBg:      ColorToHex(t.GutterBg),
-		Cursor:        ColorToHex(t.Cursor),
-		Selection:     ColorToHex(t.Selection),
-		LineHighlight: ColorToHex(t.LineHighlight),
-		StatusBg:      ColorToHex(t.StatusBg),
-		StatusFg:      ColorToHex(t.StatusFg),
-		Tokens: map[string]string{
-			"keyword":  ColorToHex(t.Keyword),
-			"string":   ColorToHex(t.String),
-			"comment":  ColorToHex(t.Comment),
-			"function": ColorToHex(t.Function),
-			"type":     ColorToHex(t.Type),
-			"number":   ColorToHex(t.Number),
-			"operator": ColorToHex(t.Operator),
-			"variable": ColorToHex(t.Variable),
-		},
-		Find: map[string]string{
-			"match":   ColorToHex(t.FindMatch),
-			"current": ColorToHex(t.FindCurrent),
-		},
-		UI: map[string]string{
-			"tabBarBg":       ColorToHex(t.TabBarBg),
-			"tabActiveBg":    ColorToHex(t.TabActiveBg),
-			"tabBorder":      ColorToHex(t.TabBorder),
-			"tabDimFg":       ColorToHex(t.TabDimFg),
-			"tabModifiedDot": ColorToHex(t.TabModifiedDot),
-			"tabCloseBtn":    ColorToHex(t.TabCloseBtn),
-			"tabCloseHover":  ColorToHex(t.TabCloseHover),
-			"tabPlusHover":   ColorToHex(t.TabPlusHover),
-			"tabAccent":      ColorToHex(t.TabAccent),
-			"tabBarGradTop":  ColorToHex(t.TabBarGradTop),
-			"tabBarGradBot":  ColorToHex(t.TabBarGradBot),
-			"titleFg":        ColorToHex(t.TitleFg),
-			"subtitleFg":     ColorToHex(t.SubtitleFg),
-			"statusBorder":   ColorToHex(t.StatusBorder),
-			"gutterSep":      ColorToHex(t.GutterSep),
-			"scrollbarThumb": ColorToHex(t.ScrollbarThumb),
-			"findBarBg":      ColorToHex(t.FindBarBg),
-			"findBarBorder":  ColorToHex(t.FindBarBorder),
-			"findBarInputBg": ColorToHex(t.FindBarInputBg),
-			"findBarFocus":   ColorToHex(t.FindBarFocus),
-			"findBarText":    ColorToHex(t.FindBarText),
-			"findBarDim":     ColorToHex(t.FindBarDim),
-			"dropdownBg":     ColorToHex(t.DropdownBg),
-			"dropdownSel":    ColorToHex(t.DropdownSel),
-		},
-	}
-	return json.MarshalIndent(tj, "", "  ")
 }

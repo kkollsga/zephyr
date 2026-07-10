@@ -46,10 +46,68 @@ jobs:
       - name: Test
         run: go test ./... -count=1
 
+      - name: Race detector
+        if: runner.os != 'Windows'
+        run: go test -race ./... -count=1
+
+      - name: Piece table race stress
+        if: runner.os != 'Windows'
+        run: go test -race ./internal/buffer -run '^TestPieceTable_ConcurrentReads$' -count=10
+
       - name: Build
         if: runner.os != 'Windows'
         run: go build -o /dev/null ./cmd/zephyr
 
+      - name: Test macOS terminal installer
+        if: runner.os == 'macOS'
+        run: ./scripts/install-test.sh
+
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: go build -o NUL ./cmd/zephyr
+
+  quality:
+    runs-on: ubuntu-latest
+    name: Static analysis and security
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev \
+            libvulkan-dev
+
+      - name: Verify module graph
+        run: |
+          go mod verify
+          go mod tidy -diff
+
+      - name: Documentation install path
+        run: ./scripts/docs-test.sh
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
+      - name: Coverage
+        run: go test ./... -coverprofile=coverage.out -count=1
+
+      - name: PieceTable fuzz smoke
+        run: go test ./internal/buffer -run '^$' -fuzz=FuzzPieceTableEditModel -fuzztime=10s
+
+      - name: Unified diff fuzz smoke
+        run: go test ./internal/git -run '^$' -fuzz=FuzzParseUnifiedDiff -fuzztime=10s
+
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out

@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 
@@ -98,27 +99,61 @@ func (h *Highlighter) Parse(source []byte) {
 	if h.simple {
 		return
 	}
-	h.tree = h.parser.Parse(nil, source)
+	next, err := h.parser.ParseCtx(context.Background(), nil, source)
+	if err == nil {
+		h.replaceTree(next)
+	}
 }
 
 // Update performs an incremental update after an edit.
 func (h *Highlighter) Update(source []byte, edit sitter.EditInput) {
-	if h.tree != nil {
-		h.tree.Edit(edit)
+	previous := h.tree
+	if previous != nil {
+		previous.Edit(edit)
 	}
 	h.source = source
-	h.tree = h.parser.Parse(h.tree, source)
+	// tree-sitter needs the edited previous tree for the duration of Parse.
+	// replaceTree closes it only after the replacement has been produced.
+	next, err := h.parser.ParseCtx(context.Background(), previous, source)
+	if err == nil {
+		h.replaceTree(next)
+	}
 }
 
 // UpdateMulti applies multiple sequential edits and reparses incrementally.
 func (h *Highlighter) UpdateMulti(source []byte, edits []sitter.EditInput) {
-	if h.tree != nil {
+	previous := h.tree
+	if previous != nil {
 		for _, edit := range edits {
-			h.tree.Edit(edit)
+			previous.Edit(edit)
 		}
 	}
 	h.source = source
-	h.tree = h.parser.Parse(h.tree, source)
+	next, err := h.parser.ParseCtx(context.Background(), previous, source)
+	if err == nil {
+		h.replaceTree(next)
+	}
+}
+
+// replaceTree transfers ownership of next to the highlighter and releases the
+// previous native tree. The previous tree must remain alive until Parser.Parse
+// returns because incremental parsing reads it while building next.
+func (h *Highlighter) replaceTree(next *sitter.Tree) {
+	previous := h.tree
+	h.tree = next
+	if previous != nil && previous != next {
+		previous.Close()
+	}
+}
+
+// releaseTree relinquishes the current tree exactly once. Clearing the field
+// before closing also keeps repeated Evict and Close calls idempotent.
+func (h *Highlighter) releaseTree() {
+	tree := h.tree
+	h.tree = nil
+	if tree != nil {
+		tree.Close()
+	}
 }
 
 // UpdateFromEdits converts buffer.EditInfo slices to tree-sitter EditInputs
@@ -255,10 +290,7 @@ func (h *Highlighter) Language() string {
 // Evict releases the source buffer and parsed tree to free memory.
 // The parser and query are retained so a subsequent Parse can restore them.
 func (h *Highlighter) Evict() {
-	if h.tree != nil {
-		h.tree.Close()
-		h.tree = nil
-	}
+	h.releaseTree()
 	h.source = nil
 }
 
@@ -272,10 +304,14 @@ func (h *Highlighter) NeedsParse() bool {
 
 // Close releases resources.
 func (h *Highlighter) Close() {
-	if h.tree != nil {
-		h.tree.Close()
+	h.releaseTree()
+	h.source = nil
+	if h.query != nil {
+		h.query.Close()
+		h.query = nil
 	}
 	if h.parser != nil {
 		h.parser.Close()
+		h.parser = nil
 	}
 }

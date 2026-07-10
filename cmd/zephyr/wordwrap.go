@@ -8,7 +8,7 @@ type wrapEntry struct {
 
 // wrapMap maps buffer lines to visual lines for word-wrap rendering.
 type wrapMap struct {
-	entries    []wrapEntry
+	entries     []wrapEntry
 	totalVisual int // total number of visual lines
 }
 

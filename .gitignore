@@ -8,6 +8,7 @@ Zephyr.app/
 *.AppImage
 *.ico
 dist/
+.artifacts/
 appimagetool
 Zephyr.AppDir/
 Zephyr-*-setup.exe

@@ -6,7 +6,7 @@ title: "Zephyr — The caffeinated editor"
 <nav>
   <a href="#features">Features</a>
   <a href="#download">Download</a>
-  <a href="#install">Install</a>
+  <a href="{{ '/install/' | relative_url }}">Install</a>
   <a href="#changelog">Changelog</a>
   <a href="{{ site.repo }}">GitHub</a>
 </nav>
@@ -57,7 +57,7 @@ title: "Zephyr — The caffeinated editor"
       <p>Dark and light themes configurable via YAML. Toggle with a single click in the tab bar.</p>
     </div>
     <div class="feature">
-      <strong>Find & Replace</strong>
+      <strong>Find &amp; Replace</strong>
       <p>Inline search with regex and case-sensitive modes. Navigate matches with keyboard shortcuts.</p>
     </div>
     <div class="feature">
@@ -75,14 +75,17 @@ title: "Zephyr — The caffeinated editor"
     <!-- macOS -->
     <div class="modal-os" id="modal-macos">
       <div class="modal-icon">&#63743;</div>
-      <h2>Download for macOS</h2>
-      <a id="link-macos-dmg" href="{{ site.release_url }}" class="btn btn-primary modal-btn">Download DMG</a>
+      <h2>Install Zephyr for macOS</h2>
       <div class="modal-note">
-        <h4>After installing</h4>
-        <p>macOS blocks apps that aren't signed with an Apple Developer ID. After dragging Zephyr to Applications, open <strong>Terminal</strong> and run:</p>
-        <pre><code>xattr -cr /Applications/Zephyr.app</code></pre>
-        <p>Then open Zephyr normally. You only need to do this once.</p>
+        <h4>Install or upgrade in Terminal</h4>
+        <div class="command-copy">
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/kkollsga/zephyr/main/install.sh | bash</code></pre>
+          <button type="button" class="copy-command" onclick="copyInstallCommand(this)" aria-label="Copy macOS install command" aria-live="polite">Copy</button>
+        </div>
+        <p>For macOS 12 or later. Run the same command later to upgrade; it verifies the release checksum, installs the app, and adds the <code>zephyr</code> command.</p>
       </div>
+      <a href="{{ '/install/' | relative_url }}" class="btn btn-primary modal-btn">Installation guide</a>
+      <a id="link-macos-dmg" href="{{ site.release_url }}" class="btn btn-secondary modal-btn">Manual DMG download</a>
     </div>
 
     <!-- Windows -->
@@ -111,7 +114,7 @@ title: "Zephyr — The caffeinated editor"
       </div>
       <div class="modal-note">
         <p><strong>AppImage</strong> — no install needed. Make executable and run:</p>
-        <pre><code>chmod +x Zephyr-*.AppImage && ./Zephyr-*.AppImage</code></pre>
+        <pre><code>chmod +x Zephyr-*.AppImage &amp;&amp; ./Zephyr-*.AppImage</code></pre>
         <p><strong>Debian/Ubuntu:</strong> <code>sudo dpkg -i zephyr_*_amd64.deb</code></p>
         <p><strong>Fedora/RHEL:</strong> <code>sudo rpm -i zephyr-*-1.x86_64.rpm</code></p>
       </div>
@@ -133,8 +136,8 @@ title: "Zephyr — The caffeinated editor"
     <div class="download-card" onclick="showModal('macos')">
       <div class="platform">&#63743;</div>
       <h3>macOS</h3>
-      <span class="btn btn-primary" style="width: 100%;">Download DMG</span>
-      <p class="formats">Drag to Applications</p>
+      <span class="btn btn-primary" style="width: 100%;">Install in Terminal</span>
+      <p class="formats">One command to install or upgrade</p>
     </div>
     <div class="download-card" onclick="showModal('windows')">
       <div class="platform">&#8862;</div>
@@ -153,6 +156,14 @@ title: "Zephyr — The caffeinated editor"
 
 <div class="container install-content" id="install">
   <h2 class="section-title">Installation</h2>
+  <div class="terminal-install">
+    <strong>macOS — install or upgrade</strong>
+    <div class="command-copy">
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/kkollsga/zephyr/main/install.sh | bash</code></pre>
+      <button type="button" class="copy-command" onclick="copyInstallCommand(this)" aria-label="Copy macOS install command" aria-live="polite">Copy</button>
+    </div>
+    <a href="{{ '/install/' | relative_url }}">Open the complete macOS installation guide →</a>
+  </div>
   {% capture install_content %}{% include install.md %}{% endcapture %}
   {{ install_content | markdownify }}
 </div>
@@ -178,7 +189,7 @@ function detectOS() {
 (function() {
   var os = detectOS();
   var btn = document.getElementById("hero-download");
-  var labels = { macos: "Download for macOS", windows: "Download for Windows", linux: "Download for Linux" };
+  var labels = { macos: "Install on macOS", windows: "Download for Windows", linux: "Download for Linux" };
   btn.textContent = labels[os] || "Download";
 })();
 

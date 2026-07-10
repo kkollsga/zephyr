@@ -1,7 +1,9 @@
 package fileio
 
 import (
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -12,15 +14,28 @@ type FileEvent struct {
 	Op   fsnotify.Op
 }
 
-// Watcher monitors files for external changes.
+type ownWrite struct{}
+
+const ownWriteSettleDelay = 50 * time.Millisecond
+
+// Watcher monitors files for external changes. It watches parent directories
+// and filters their events to registered files. Directory watches survive the
+// temp-file rename used by atomic saves, unlike inode-bound file watches.
 type Watcher struct {
-	watcher    *fsnotify.Watcher
-	Events     chan FileEvent
-	mu         sync.Mutex
-	ownWrites  map[string]bool // paths we recently wrote (to ignore our own saves)
+	watcher *fsnotify.Watcher
+	Events  chan FileEvent
+
+	mu           sync.Mutex
+	watchedFiles map[string]struct{}
+	watchedDirs  map[string]int
+	ownWrites    map[string]*ownWrite
+	stop         chan struct{}
+	done         chan struct{}
+	closeOnce    sync.Once
+	closeErr     error
 }
 
-// NewWatcher creates a new file watcher.
+// NewWatcher creates a new Watcher.
 func NewWatcher() (*Watcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -28,9 +43,13 @@ func NewWatcher() (*Watcher, error) {
 	}
 
 	fw := &Watcher{
-		watcher:   w,
-		Events:    make(chan FileEvent, 16),
-		ownWrites: make(map[string]bool),
+		watcher:      w,
+		Events:       make(chan FileEvent, 16),
+		watchedFiles: make(map[string]struct{}),
+		watchedDirs:  make(map[string]int),
+		ownWrites:    make(map[string]*ownWrite),
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
 	}
 
 	go fw.run()
@@ -38,21 +57,37 @@ func NewWatcher() (*Watcher, error) {
 }
 
 func (fw *Watcher) run() {
+	defer close(fw.done)
+	defer close(fw.Events)
 	for {
 		select {
+		case <-fw.stop:
+			return
 		case event, ok := <-fw.watcher.Events:
 			if !ok {
 				return
 			}
-			if event.Has(fsnotify.Write) || event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-				fw.mu.Lock()
-				isOwn := fw.ownWrites[event.Name]
-				delete(fw.ownWrites, event.Name)
-				fw.mu.Unlock()
+			if event.Name == "" {
+				continue
+			}
+			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) &&
+				!event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
+				continue
+			}
 
-				if !isOwn {
-					fw.Events <- FileEvent{Path: event.Name, Op: event.Op}
-				}
+			path := filepath.Clean(event.Name)
+			fw.mu.Lock()
+			_, watched := fw.watchedFiles[path]
+			own := fw.ownWrites[path]
+			fw.mu.Unlock()
+			if !watched || own != nil {
+				continue
+			}
+
+			select {
+			case fw.Events <- FileEvent{Path: path, Op: event.Op}:
+			case <-fw.stop:
+				return
 			}
 		case _, ok := <-fw.watcher.Errors:
 			if !ok {
@@ -62,25 +97,136 @@ func (fw *Watcher) run() {
 	}
 }
 
-// Watch adds a file to the watch list.
+// Watch adds a file to the watch list. Parent-directory watching keeps the
+// registration valid when an atomic save replaces the file's inode.
 func (fw *Watcher) Watch(path string) error {
-	return fw.watcher.Add(path)
+	path = filepath.Clean(path)
+	dir := filepath.Dir(path)
+
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	if _, exists := fw.watchedFiles[path]; exists {
+		return nil
+	}
+	if fw.watchedDirs[dir] == 0 {
+		if err := fw.watcher.Add(dir); err != nil {
+			return err
+		}
+	}
+	fw.watchedFiles[path] = struct{}{}
+	fw.watchedDirs[dir]++
+	return nil
 }
 
 // Unwatch removes a file from the watch list.
 func (fw *Watcher) Unwatch(path string) error {
-	return fw.watcher.Remove(path)
+	path = filepath.Clean(path)
+	dir := filepath.Dir(path)
+
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	delete(fw.ownWrites, path)
+	if _, exists := fw.watchedFiles[path]; !exists {
+		return fsnotify.ErrNonExistentWatch
+	}
+	delete(fw.watchedFiles, path)
+	fw.watchedDirs[dir]--
+	if fw.watchedDirs[dir] > 0 {
+		return nil
+	}
+	delete(fw.watchedDirs, dir)
+	return fw.watcher.Remove(dir)
 }
 
-// MarkOwnWrite marks a path as recently written by us (to ignore the next change event).
-func (fw *Watcher) MarkOwnWrite(path string) {
+// MoveWatch transfers a registration after Save As without dropping a shared
+// parent-directory watch. This avoids a remove/add gap when both paths are in
+// the same directory and attaches the destination directory before detaching
+// the source when they differ.
+func (fw *Watcher) MoveWatch(oldPath, newPath string) error {
+	oldPath = filepath.Clean(oldPath)
+	newPath = filepath.Clean(newPath)
+	if oldPath == newPath {
+		return fw.Watch(newPath)
+	}
+	oldDir := filepath.Dir(oldPath)
+	newDir := filepath.Dir(newPath)
+
 	fw.mu.Lock()
-	fw.ownWrites[path] = true
+	defer fw.mu.Unlock()
+	if _, exists := fw.watchedFiles[newPath]; !exists {
+		if fw.watchedDirs[newDir] == 0 {
+			if err := fw.watcher.Add(newDir); err != nil {
+				return err
+			}
+		}
+		fw.watchedFiles[newPath] = struct{}{}
+		fw.watchedDirs[newDir]++
+	}
+
+	delete(fw.ownWrites, oldPath)
+	if _, exists := fw.watchedFiles[oldPath]; !exists {
+		return nil
+	}
+	delete(fw.watchedFiles, oldPath)
+	fw.watchedDirs[oldDir]--
+	if fw.watchedDirs[oldDir] > 0 {
+		return nil
+	}
+	delete(fw.watchedDirs, oldDir)
+	return fw.watcher.Remove(oldDir)
+}
+
+// MarkOwnWrite suppresses events generated by an atomic save until Rewatch
+// marks the replacement complete.
+func (fw *Watcher) MarkOwnWrite(path string) {
+	path = filepath.Clean(path)
+	fw.mu.Lock()
+	fw.ownWrites[path] = &ownWrite{}
 	fw.mu.Unlock()
+}
+
+// CancelOwnWrite clears event suppression after an atomic save fails.
+func (fw *Watcher) CancelOwnWrite(path string) {
+	path = filepath.Clean(path)
+	fw.mu.Lock()
+	delete(fw.ownWrites, path)
+	fw.mu.Unlock()
+}
+
+// Rewatch completes an atomic save. Directory watching requires no inode
+// reattachment; a short bounded settling window absorbs queued self-events.
+func (fw *Watcher) Rewatch(path string) (err error) {
+	path = filepath.Clean(path)
+	defer func() {
+		if err != nil {
+			fw.CancelOwnWrite(path)
+		}
+	}()
+	if err = fw.Watch(path); err != nil {
+		return err
+	}
+	fw.mu.Lock()
+	own := fw.ownWrites[path]
+	fw.mu.Unlock()
+	if own == nil {
+		return nil
+	}
+	time.AfterFunc(ownWriteSettleDelay, func() {
+		fw.mu.Lock()
+		if fw.ownWrites[path] == own {
+			delete(fw.ownWrites, path)
+		}
+		fw.mu.Unlock()
+	})
+	return nil
 }
 
 // Close stops the watcher.
 func (fw *Watcher) Close() error {
-	close(fw.Events)
-	return fw.watcher.Close()
+	fw.closeOnce.Do(func() {
+		close(fw.stop)
+		fw.closeErr = fw.watcher.Close()
+		<-fw.done
+	})
+	return fw.closeErr
 }

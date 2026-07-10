@@ -16,13 +16,13 @@ import (
 type BlockKind int
 
 const (
-	BlockParagraph    BlockKind = iota
-	BlockHeading                // Level stored in Block.Level (1-6)
-	BlockCodeBlock              // Fenced or indented code block
-	BlockBlockquote             // Blockquote container
-	BlockListItem               // A single list item (ordered or unordered)
-	BlockThematicBreak          // Horizontal rule
-	BlockTable                  // Pipe table
+	BlockParagraph     BlockKind = iota
+	BlockHeading                 // Level stored in Block.Level (1-6)
+	BlockCodeBlock               // Fenced or indented code block
+	BlockBlockquote              // Blockquote container
+	BlockListItem                // A single list item (ordered or unordered)
+	BlockThematicBreak           // Horizontal rule
+	BlockTable                   // Pipe table
 )
 
 // InlineSpan represents a styled run of text within a block.
@@ -37,17 +37,17 @@ type InlineSpan struct {
 // Block is a single rendered element in the markdown document.
 type Block struct {
 	Kind             BlockKind
-	Level            int           // heading level (1-6) or list indent depth
-	Spans            []InlineSpan  // inline content for text blocks
-	CodeText         string        // full text for code blocks
-	CodeLang         string        // language hint for code blocks
-	Children         []Block       // nested blocks (blockquotes, sub-lists)
-	Ordered          bool          // true for ordered list items
-	Marker           string        // list marker text ("•", "1.", etc.)
+	Level            int              // heading level (1-6) or list indent depth
+	Spans            []InlineSpan     // inline content for text blocks
+	CodeText         string           // full text for code blocks
+	CodeLang         string           // language hint for code blocks
+	Children         []Block          // nested blocks (blockquotes, sub-lists)
+	Ordered          bool             // true for ordered list items
+	Marker           string           // list marker text ("•", "1.", etc.)
 	TableCells       [][]string       // rows × cols for tables
 	TableAlign       []east.Alignment // per-column alignment
-	BlankLinesBefore int           // number of blank lines before this block in source
-	SourceOffset     int           // byte offset in source for checkbox toggling
+	BlankLinesBefore int              // number of blank lines before this block in source
+	SourceOffset     int              // byte offset in source for checkbox toggling
 }
 
 // MarkdownDoc holds the parsed block structure of a markdown file.
@@ -239,9 +239,7 @@ func walkBlocks(n ast.Node, source []byte, blocks *[]Block, depth int) {
 		case *east.Table:
 			b := Block{Kind: BlockTable}
 			// Collect alignment
-			for _, align := range node.Alignments {
-				b.TableAlign = append(b.TableAlign, align)
-			}
+			b.TableAlign = append(b.TableAlign, node.Alignments...)
 			// Walk header and body rows
 			for row := node.FirstChild(); row != nil; row = row.NextSibling() {
 				var cells []string

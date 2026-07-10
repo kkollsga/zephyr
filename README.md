@@ -76,17 +76,42 @@ Architectural foundations exist for these features:
 
 ## Installation
 
-Download the latest release from the [releases page](https://github.com/kkollsga/zephyr/releases/latest).
-
 ### macOS
 
-Download the `.dmg` file, open it, and drag **Zephyr.app** to your Applications folder.
+Requires macOS 12 or later.
 
-> **Gatekeeper warning:** macOS blocks apps that aren't signed with an Apple Developer ID. After dragging Zephyr to Applications, open Terminal and run:
-> ```
-> xattr -cr /Applications/Zephyr.app
-> ```
-> Then open the app normally. You only need to do this once.
+Install from Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kkollsga/zephyr/main/install.sh | bash
+```
+
+Run the same command again at any time to upgrade to the latest release. It
+requires and verifies the release SHA-256 checksum, installs
+**Zephyr.app** in `/Applications`, clears quarantine, registers the app with
+Launch Services, and creates `/usr/local/bin/zephyr`.
+
+```bash
+zephyr --version
+open /Applications/Zephyr.app
+```
+
+For a user-local installation without `sudo`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kkollsga/zephyr/main/install.sh | \
+  bash -s -- --install-dir "$HOME/Applications" --bin-dir "$HOME/.local/bin"
+```
+
+Add `$HOME/.local/bin` to your `PATH` if it is not already present.
+
+See the [complete macOS installation and upgrade guide](https://kkollsga.github.io/zephyr/install/)
+for version pinning, manual verification, and uninstall instructions.
+
+**Manual alternative:** download the `.dmg` from the
+[latest release](https://github.com/kkollsga/zephyr/releases/latest), open it,
+and drag **Zephyr.app** to Applications. The Terminal command above is the
+supported path because it handles installation and future upgrades together.
 
 Or build from source:
 
@@ -96,6 +121,8 @@ open Zephyr.app
 ```
 
 ### Windows
+
+Download the latest release from the [releases page](https://github.com/kkollsga/zephyr/releases/latest).
 
 **Installer** — Download the `-setup.exe` and run it. Includes optional desktop shortcut, "Add to PATH", and "Open with Zephyr" context menu. Uninstaller included.
 
@@ -146,7 +173,7 @@ make build
 
 ## Building from Source
 
-Requires Go 1.22+ and a C compiler (for tree-sitter).
+Requires Go 1.26.1+ and a C compiler (for tree-sitter).
 
 ```bash
 make build          # native build
@@ -155,6 +182,19 @@ make bench          # run benchmarks
 make app            # macOS .app bundle
 ./zephyr --version  # check version
 ```
+
+### Quality and performance program
+
+```bash
+make baseline             # tests, stress/race, build, coverage, installer/docs, benchmarks
+make gui-test-regression  # real macOS mouse/input and capture scenarios
+make perf                 # launch, first-frame, steady-frame, and RSS evidence
+```
+
+See the [current macOS baseline](docs/baseline-2026-07-09.md),
+[evidence-ranked improvement plan](docs/improvement-plan-2026-07-09.md), and
+[GUI/performance test guide](docs/gui-testing.md) for exact scope, metrics,
+permissions, and remaining release gaps.
 
 ## Keyboard Shortcuts
 

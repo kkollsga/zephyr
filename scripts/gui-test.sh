@@ -1,0 +1,378 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+STATE_DIR=${ZEPHYR_GUI_STATE_DIR:-"$ROOT/.artifacts/gui-test"}
+APP="$STATE_DIR/Zephyr GUI Test.app"
+CONTENTS="$APP/Contents"
+BIN="$CONTENTS/MacOS/zephyr-gui-test"
+DRIVER="$STATE_DIR/bin/zephyr-gui-driver"
+DRIVER_SOURCE="$ROOT/tools/gui-driver/main.swift"
+HOME_DIR="$STATE_DIR/home"
+PID_FILE="$STATE_DIR/zephyr.pid"
+LOG_FILE="${TMPDIR:-/tmp}/zephyr-gui-test-${UID}.log"
+STDOUT_LOG="${TMPDIR:-/tmp}/zephyr-gui-test-${UID}.stdout.log"
+LOG_LINK="$STATE_DIR/zephyr.log"
+STDOUT_LOG_LINK="$STATE_DIR/zephyr.stdout.log"
+DEFAULT_FIXTURE="$ROOT/testdata/gui/mouse_fixture.go"
+MARKDOWN_FIXTURE="$ROOT/testdata/gui/markdown_fixture.md"
+
+usage() {
+    cat <<'EOF'
+usage: ./scripts/gui-test.sh COMMAND [ARGS]
+  build                              Build debug app and GUI driver
+  launch [FIXTURE]                   Launch with isolated HOME and fixture
+  run [FIXTURE]                      Run in foreground for managed tool sessions
+  stop                               Stop the isolated Zephyr instance
+  status                             Show process, window, and permissions
+  permissions [--request]            Check/request macOS automation permissions
+  window                             Print the Zephyr window geometry as JSON
+  capture [PATH]                     Capture the Zephyr window
+  click X Y [left|right|middle]      Click window-local coordinates
+  drag X1 Y1 X2 Y2 [DURATION]        Drag between window-local coordinates
+  scroll X Y DELTA_Y                 Send a pixel scroll event
+  scroll-lines X Y DELTA_Y           Send a discrete wheel-line event
+  type TEXT                          Type Unicode text into the focused field
+  key KEY [MODIFIERS...]             Press a key with optional modifiers
+  logs                               Tail the application log
+  trace                              Show structured pointer-event telemetry
+  smoke                              Run a basic real-input/capture smoke test
+  regression                         Run pointer and mode-transition regressions
+EOF
+}
+
+ensure_directories() {
+    mkdir -p "$STATE_DIR/bin" "$STATE_DIR/artifacts" "$HOME_DIR"
+    ln -sfn "$LOG_FILE" "$LOG_LINK"
+    ln -sfn "$STDOUT_LOG" "$STDOUT_LOG_LINK"
+}
+
+build_driver() {
+    ensure_directories
+    if [[ ! -x "$DRIVER" || "$DRIVER_SOURCE" -nt "$DRIVER" ]]; then
+        swiftc -O -framework ApplicationServices -framework CoreGraphics \
+            -o "$DRIVER" "$DRIVER_SOURCE"
+    fi
+}
+
+build_app() {
+    ensure_directories
+    mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+    go build -gcflags='all=-N -l' \
+        -ldflags '-X main.version=gui-test -X main.commit=local -X main.date=debug' \
+        -o "$BIN" ./cmd/zephyr
+    cp "$ROOT/Info.plist" "$CONTENTS/Info.plist"
+    cp "$ROOT/assets/icon.icns" "$CONTENTS/Resources/icon.icns"
+    plutil -replace CFBundleExecutable -string zephyr-gui-test "$CONTENTS/Info.plist"
+    plutil -replace CFBundleIdentifier -string com.kristianweb.zephyr.gui-test "$CONTENTS/Info.plist"
+    plutil -replace CFBundleName -string 'Zephyr GUI Test' "$CONTENTS/Info.plist"
+    plutil -replace CFBundleDisplayName -string 'Zephyr GUI Test' "$CONTENTS/Info.plist"
+    codesign --force --sign - "$APP" >/dev/null
+    build_driver
+}
+
+current_pid() {
+    [[ -f "$PID_FILE" ]] || return 1
+    local pid
+    pid=$(<"$PID_FILE")
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    printf '%s\n' "$pid"
+}
+
+stop_app() {
+    local pid
+    if ! pid=$(current_pid); then
+        rm -f "$PID_FILE"
+        return 0
+    fi
+    local command
+    command=$(ps -p "$pid" -o command=)
+    if [[ "$command" != *"$BIN"* ]]; then
+        echo "refusing to stop pid $pid: it is not the GUI-test binary" >&2
+        return 1
+    fi
+    kill "$pid"
+    for _ in {1..30}; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            return 0
+        fi
+        sleep 0.1
+    done
+    kill -9 "$pid" 2>/dev/null || true
+    rm -f "$PID_FILE"
+}
+
+launch_app() {
+    local fixture=${1:-"$DEFAULT_FIXTURE"}
+    [[ -f "$fixture" ]] || { echo "fixture not found: $fixture" >&2; return 1; }
+    fixture=$(cd "$(dirname "$fixture")" && pwd)/$(basename "$fixture")
+    [[ -x "$BIN" ]] || build_app
+    stop_app
+    : >"$LOG_FILE"
+    : >"$STDOUT_LOG"
+    # Launch the bundled executable directly. LaunchServices can acknowledge an
+    # app launch while leaving a Gio window inactive in non-interactive agent
+    # sessions; a detached direct launch reliably creates the native window.
+    env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
+        GOTRACEBACK=all ZEPHYR_GUI_TRACE=1 \
+        nohup "$BIN" "$fixture" >"$STDOUT_LOG" 2>"$LOG_FILE" </dev/null &
+    local launcher_pid=$!
+    local pid=""
+    local window_info=""
+    for _ in {1..600}; do
+        pid=$launcher_pid
+        if [[ -z "$pid" ]]; then
+            if ! kill -0 "$launcher_pid" 2>/dev/null; then
+                echo "Zephyr exited before its window appeared" >&2
+                tail -n 100 "$LOG_FILE" >&2
+                return 1
+            fi
+            sleep 0.1
+            continue
+        fi
+        printf '%s\n' "$pid" >"$PID_FILE"
+        window_info=$("$DRIVER" windows "$pid")
+        if grep -q '"id"' <<<"$window_info"; then
+            echo "Zephyr GUI Test ready (pid $pid)"
+            printf '%s\n' "$window_info"
+            return 0
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "Zephyr exited during launch" >&2
+            tail -n 100 "$LOG_FILE" >&2
+            return 1
+        fi
+        sleep 0.1
+    done
+    echo "Zephyr launched but no window appeared" >&2
+    return 1
+}
+
+run_app() {
+    local fixture=${1:-"$DEFAULT_FIXTURE"}
+    [[ -f "$fixture" ]] || { echo "fixture not found: $fixture" >&2; return 1; }
+    fixture=$(cd "$(dirname "$fixture")" && pwd)/$(basename "$fixture")
+    [[ -x "$BIN" ]] || build_app
+    stop_app
+    : >"$LOG_FILE"
+    printf '%s\n' "$$" >"$PID_FILE"
+    exec env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" GOTRACEBACK=all ZEPHYR_GUI_TRACE=1 \
+        "$BIN" "$fixture" >>"$LOG_FILE" 2>&1
+}
+
+require_pid() {
+    local pid
+    if ! pid=$(current_pid); then
+        echo "Zephyr GUI Test is not running; use: $0 launch" >&2
+        return 1
+    fi
+    printf '%s\n' "$pid"
+}
+
+require_permissions() {
+    local permissions
+    permissions=$("$DRIVER" permissions)
+    if ! grep -q '"postEvents" : true' <<<"$permissions" || \
+       ! grep -q '"screenCapture" : true' <<<"$permissions"; then
+        echo "Accessibility and Screen Recording permissions are required." >&2
+        echo "Run: $0 permissions --request" >&2
+        echo "$permissions" >&2
+        return 1
+    fi
+}
+
+command=${1:-}
+shift || true
+
+case "$command" in
+build)
+    build_app
+    echo "$APP"
+    ;;
+launch)
+    build_driver
+    launch_app "${1:-$DEFAULT_FIXTURE}"
+    ;;
+run)
+    build_driver
+    run_app "${1:-$DEFAULT_FIXTURE}"
+    ;;
+stop)
+    stop_app
+    ;;
+status)
+    build_driver
+    "$DRIVER" permissions
+    if pid=$(current_pid); then
+        ps -p "$pid" -o pid=,etime=,command=
+        "$DRIVER" windows "$pid"
+    else
+        echo "Zephyr GUI Test is not running"
+    fi
+    ;;
+permissions)
+    build_driver
+    "$DRIVER" permissions "$@"
+    ;;
+window)
+    build_driver
+    pid=$(require_pid)
+    "$DRIVER" windows "$pid"
+    ;;
+capture)
+    build_driver
+    pid=$(require_pid)
+    output=${1:-"$STATE_DIR/artifacts/window.png"}
+    "$DRIVER" capture "$pid" "$output"
+    echo "$output"
+    ;;
+click)
+    build_driver
+    pid=$(require_pid)
+    "$DRIVER" click "$pid" "$@"
+    ;;
+drag)
+    build_driver
+    pid=$(require_pid)
+    "$DRIVER" drag "$pid" "$@"
+    ;;
+scroll)
+    build_driver
+    pid=$(require_pid)
+    "$DRIVER" scroll "$pid" "$@"
+    ;;
+scroll-lines)
+    build_driver
+    pid=$(require_pid)
+    "$DRIVER" scroll-lines "$pid" "$@"
+    ;;
+type)
+    build_driver
+    pid=$(require_pid)
+    "$DRIVER" type "$pid" "$@"
+    ;;
+key)
+    build_driver
+    pid=$(require_pid)
+    "$DRIVER" key "$pid" "$@"
+    ;;
+logs)
+    tail -n 100 "$LOG_FILE"
+    ;;
+trace)
+    grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | tail -n 100
+    ;;
+smoke)
+    build_app
+    require_permissions
+    launch_app "$DEFAULT_FIXTURE"
+    trap stop_app EXIT
+    pid=$(require_pid)
+    sleep 0.7
+    "$DRIVER" capture "$pid" "$STATE_DIR/artifacts/00-launch.png"
+    "$DRIVER" click "$pid" 360 165 left
+    sleep 0.2
+    "$DRIVER" click "$pid" 360 165 left
+    "$DRIVER" type "$pid" '/* gui-smoke */'
+    "$DRIVER" drag "$pid" 260 165 520 245 0.4
+    sleep 0.2
+    "$DRIVER" scroll-lines "$pid" 601 301 -4
+    sleep 0.4
+    grep -q '"kind":"Press"' "$LOG_FILE" || { echo "no pointer press was recorded" >&2; exit 1; }
+    grep -q '"selection":true' "$LOG_FILE" || { echo "no drag selection was recorded" >&2; exit 1; }
+    grep -q '"kind":"Scroll"' "$LOG_FILE" || { echo "no scroll event was recorded" >&2; exit 1; }
+    "$DRIVER" capture "$pid" "$STATE_DIR/artifacts/01-interacted.png"
+    "$DRIVER" preview "$STATE_DIR/artifacts/00-launch.png" \
+        "$STATE_DIR/artifacts/00-launch.jpg"
+    "$DRIVER" preview "$STATE_DIR/artifacts/01-interacted.png" \
+        "$STATE_DIR/artifacts/01-interacted.jpg"
+    echo "Smoke test completed; artifacts: $STATE_DIR/artifacts"
+    stop_app
+    trap - EXIT
+    ;;
+regression)
+    build_app
+    require_permissions
+    stop_app
+    rm -rf "$HOME_DIR"
+    mkdir -p "$HOME_DIR"
+    launch_app "$DEFAULT_FIXTURE"
+    trap stop_app EXIT
+    pid=$(require_pid)
+    sleep 0.7
+
+    trace_cursor() {
+        grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | tail -n 1 | \
+            sed -E -n 's/.*"cursorLine":([0-9]+),"cursorCol":([0-9]+).*/\1:\2/p'
+    }
+    capture_checked() {
+        local name=$1
+        local png="$STATE_DIR/artifacts/$name.png"
+        "$DRIVER" capture "$pid" "$png"
+        [[ -s "$png" ]] || { echo "empty capture: $png" >&2; exit 1; }
+        sips -g pixelWidth -g pixelHeight "$png" >/dev/null
+        "$DRIVER" preview "$png" "$STATE_DIR/artifacts/$name.jpg"
+    }
+
+    capture_checked 10-pointer-launch
+    "$DRIVER" click "$pid" 260 165 left
+    sleep 0.15
+    primary_cursor=$(trace_cursor)
+    [[ -n "$primary_cursor" ]] || { echo "primary click did not set a traceable cursor" >&2; exit 1; }
+    "$DRIVER" click "$pid" 620 300 right
+    sleep 0.15
+    [[ "$(trace_cursor)" == "$primary_cursor" ]] || { echo "secondary click moved the cursor" >&2; exit 1; }
+    "$DRIVER" click "$pid" 620 340 middle
+    sleep 0.15
+    [[ "$(trace_cursor)" == "$primary_cursor" ]] || { echo "middle click moved the cursor" >&2; exit 1; }
+
+    "$DRIVER" drag "$pid" 260 165 520 245 0.4
+    sleep 0.15
+    grep -q '"kind":"Drag".*"selection":true' "$LOG_FILE" || { echo "drag selection failed" >&2; exit 1; }
+    "$DRIVER" scroll "$pid" 600 300 -7
+    sleep 0.3
+    grep -Eq '"kind":"Scroll".*"viewportOffset":[1-9][0-9]*' "$LOG_FILE" || { echo "fractional pixel scroll was not retained" >&2; exit 1; }
+    capture_checked 11-pointer-actions
+
+    "$DRIVER" key "$pid" v cmd shift
+    sleep 0.3
+    capture_checked 12-vim-on
+    "$DRIVER" key "$pid" v cmd shift
+    "$DRIVER" key "$pid" n cmd shift
+    sleep 0.4
+    capture_checked 13-navigator-on
+    "$DRIVER" key "$pid" n cmd shift
+    "$DRIVER" key "$pid" v cmd shift
+    sleep 0.2
+
+    stop_app
+    launch_app "$MARKDOWN_FIXTURE"
+    pid=$(require_pid)
+    sleep 0.7
+    capture_checked 14-markdown-read
+    "$DRIVER" drag "$pid" 180 150 560 300 0.4
+    sleep 0.2
+    md_drag=$(grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | grep '"kind":"Drag"' | tail -n 1)
+    grep -q '"markdownSelect":true' <<<"$md_drag" || { echo "markdown drag selection was not active" >&2; exit 1; }
+    if grep -q '"cursorLine"\|"cursorCol"' <<<"$md_drag"; then
+        echo "markdown read-mode selection fell through to the hidden editor" >&2
+        exit 1
+    fi
+    "$DRIVER" key "$pid" e cmd
+    sleep 0.35
+    capture_checked 15-markdown-edit
+    "$DRIVER" key "$pid" e cmd
+    sleep 0.35
+    capture_checked 16-markdown-read-restored
+
+    echo "GUI regression test completed; artifacts: $STATE_DIR/artifacts"
+    stop_app
+    trap - EXIT
+    ;;
+*)
+    usage
+    exit 2
+    ;;
+esac

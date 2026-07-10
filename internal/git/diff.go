@@ -149,15 +149,31 @@ func ParseUnifiedDiff(data []byte) []FileDiff {
 			if currentHunk != nil {
 				current.Hunks = append(current.Hunks, *currentHunk)
 			}
-			oldStart, _ := strconv.Atoi(matches[1])
+			oldStart, err := strconv.Atoi(matches[1])
+			if err != nil {
+				currentHunk = nil
+				continue
+			}
 			oldCount := 1
 			if matches[2] != "" {
-				oldCount, _ = strconv.Atoi(matches[2])
+				oldCount, err = strconv.Atoi(matches[2])
+				if err != nil {
+					currentHunk = nil
+					continue
+				}
 			}
-			newStart, _ := strconv.Atoi(matches[3])
+			newStart, err := strconv.Atoi(matches[3])
+			if err != nil {
+				currentHunk = nil
+				continue
+			}
 			newCount := 1
 			if matches[4] != "" {
-				newCount, _ = strconv.Atoi(matches[4])
+				newCount, err = strconv.Atoi(matches[4])
+				if err != nil {
+					currentHunk = nil
+					continue
+				}
 			}
 			currentHunk = &Hunk{
 				OldStart: oldStart,
@@ -186,9 +202,6 @@ func ParseUnifiedDiff(data []byte) []FileDiff {
 					Type:    DiffLineContext,
 					Content: line[1:],
 				})
-			} else if strings.HasPrefix(line, `\`) {
-				// "\ No newline at end of file" — skip
-				continue
 			}
 		}
 	}
@@ -251,10 +264,16 @@ func (fd *FileDiff) ChangedNewLines() []int {
 	if fd == nil {
 		return nil
 	}
-	// Pre-allocate estimate
+	// Pre-allocate from parsed content rather than trusting the hunk's declared
+	// count. Apart from being exact, this keeps malformed or adversarial headers
+	// from overflowing the capacity calculation.
 	total := 0
 	for _, h := range fd.Hunks {
-		total += h.NewCount
+		for _, line := range h.Lines {
+			if line.Type == DiffLineAdd {
+				total++
+			}
+		}
 	}
 	lines := make([]int, 0, total)
 	for _, h := range fd.Hunks {

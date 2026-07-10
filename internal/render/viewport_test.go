@@ -66,3 +66,35 @@ func TestViewport_ScrollBy(t *testing.T) {
 		t.Fatalf("got firstLine %d, want 60 (clamped)", v.FirstLine)
 	}
 }
+
+func TestViewport_PixelScrollingAndBounds(t *testing.T) {
+	v := &Viewport{VisibleLines: 5, TotalLines: 20}
+	v.ScrollByPixels(25, 20)
+	if v.FirstLine != 1 || v.PixelOffset != 5 || v.LastLine() != 6 {
+		t.Fatalf("down scroll = line %d offset %d last %d", v.FirstLine, v.PixelOffset, v.LastLine())
+	}
+	v.ScrollByPixels(-10, 20)
+	if v.FirstLine != 0 || v.PixelOffset != 15 {
+		t.Fatalf("up scroll = line %d offset %d", v.FirstLine, v.PixelOffset)
+	}
+	v.ScrollByPixels(-100, 20)
+	if v.FirstLine != 0 || v.PixelOffset != 0 {
+		t.Fatalf("top clamp = line %d offset %d", v.FirstLine, v.PixelOffset)
+	}
+	v.ScrollByPixels(10000, 20)
+	if v.FirstLine != 15 || v.PixelOffset != 0 {
+		t.Fatalf("bottom clamp = line %d offset %d", v.FirstLine, v.PixelOffset)
+	}
+	v.ScrollByPixels(1, 0)
+}
+
+func TestViewport_ScrollablePixels(t *testing.T) {
+	v := &Viewport{FirstLine: 3, PixelOffset: 7, VisibleLines: 5, TotalLines: 20}
+	up, down := v.ScrollablePixels(20)
+	if up != 67 || down != 233 {
+		t.Fatalf("ScrollablePixels = (%d,%d), want (67,233)", up, down)
+	}
+	if got := NewViewport().ScrollMargin; got != 3 {
+		t.Fatalf("NewViewport margin = %d", got)
+	}
+}

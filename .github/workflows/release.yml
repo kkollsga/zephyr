@@ -20,41 +20,68 @@ jobs:
         with:
           go-version-file: ${{ env.GO_VERSION_FILE }}
 
+      - name: Validate source and installer
+        run: |
+          go test ./... -count=1
+          ./scripts/install-test.sh
+          ./scripts/docs-test.sh
+
       - name: Determine version
         id: version
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || {
+            echo "invalid release tag: $VERSION" >&2
+            exit 1
+          }
+          APP_VERSION=${VERSION#v}
+          APP_VERSION=${APP_VERSION%%[-+]*}
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build binary
+      - name: Build universal binary
         env:
           VERSION: ${{ steps.version.outputs.tag }}
           COMMIT: ${{ github.sha }}
         run: |
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          go build -ldflags "-X main.version=$VERSION -X main.commit=${COMMIT:0:8} -X main.date=$DATE" \
-            -o zephyr ./cmd/zephyr
+          LDFLAGS="-X main.version=$VERSION -X main.commit=${COMMIT:0:8} -X main.date=$DATE"
+          CGO_ENABLED=1 GOARCH=arm64 go build -ldflags "$LDFLAGS" -o zephyr-arm64 ./cmd/zephyr
+          CGO_ENABLED=1 GOARCH=amd64 go build -ldflags "$LDFLAGS" -o zephyr-amd64 ./cmd/zephyr
+          lipo -create zephyr-arm64 zephyr-amd64 -output zephyr
+          lipo -info zephyr
 
       - name: Create .app bundle
         env:
           VERSION: ${{ steps.version.outputs.tag }}
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
         run: |
           mkdir -p Zephyr.app/Contents/{MacOS,Resources}
           cp zephyr Zephyr.app/Contents/MacOS/
           cp Info.plist Zephyr.app/Contents/
-          plutil -replace CFBundleVersion -string "$VERSION" Zephyr.app/Contents/Info.plist
-          plutil -replace CFBundleShortVersionString -string "$VERSION" Zephyr.app/Contents/Info.plist
+          plutil -replace CFBundleVersion -string "$APP_VERSION" Zephyr.app/Contents/Info.plist
+          plutil -replace CFBundleShortVersionString -string "$APP_VERSION" Zephyr.app/Contents/Info.plist
           cp assets/icon.icns Zephyr.app/Contents/Resources/
           codesign --force --sign - Zephyr.app
+          plutil -lint Zephyr.app/Contents/Info.plist
+          lipo Zephyr.app/Contents/MacOS/zephyr -verify_arch arm64 x86_64
+          codesign --verify --deep --strict Zephyr.app
+          test "$(plutil -extract CFBundleShortVersionString raw Zephyr.app/Contents/Info.plist)" = "$APP_VERSION"
+          Zephyr.app/Contents/MacOS/zephyr --version | grep -F "$VERSION"
 
       - name: Create DMG
         env:
           VERSION: ${{ steps.version.outputs.tag }}
-        run: bash build/macos/create-dmg.sh
+        run: |
+          bash build/macos/create-dmg.sh
+          hdiutil verify "Zephyr-${VERSION}-macos.dmg"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-artifacts
           path: "Zephyr-*.dmg"
+          if-no-files-found: error
 
   # ─── Windows ────────────────────────────────────────────────
   windows:
@@ -108,6 +135,7 @@ jobs:
           path: |
             Zephyr-*.zip
             Zephyr-*-setup.exe
+          if-no-files-found: error
 
   # ─── Linux ──────────────────────────────────────────────────
   linux:
@@ -174,6 +202,7 @@ jobs:
             zephyr-*.rpm
             Zephyr-*.AppImage
             zephyr-*-linux-amd64.tar.gz
+          if-no-files-found: error
 
   # ─── Create GitHub Release ──────────────────────────────────
   release:
@@ -186,6 +215,28 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Create checksums
+        run: |
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 shasum -a 256 \
+            | sed 's#  \./#  #' > SHA256SUMS
+
+      - name: Validate release artifacts
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          APP_VERSION=${TAG#v}
+          test -s "dist/Zephyr-${TAG}-macos.dmg"
+          test -s "dist/Zephyr-${TAG}-windows-amd64.zip"
+          test -s "dist/Zephyr-${APP_VERSION}-setup.exe"
+          test -s "dist/Zephyr-${TAG}-x86_64.AppImage"
+          test -s "dist/zephyr_${APP_VERSION}_amd64.deb"
+          test -s "dist/zephyr-${APP_VERSION}-1.x86_64.rpm"
+          test -s "dist/zephyr-${TAG}-linux-amd64.tar.gz"
+          grep -F "  Zephyr-${TAG}-macos.dmg" dist/SHA256SUMS
 
       - name: Create Release
         env:

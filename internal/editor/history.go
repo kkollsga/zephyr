@@ -8,15 +8,18 @@ type ActionType int
 const (
 	ActionInsert ActionType = iota
 	ActionDelete
+	ActionReplace
 )
 
 // EditAction represents a single edit operation for undo/redo.
 type EditAction struct {
-	Type      ActionType
-	Offset    int
-	Text      string
-	Cursor    Cursor // cursor position before the action
-	Timestamp time.Time
+	Type        ActionType
+	Offset      int
+	Text        string
+	Replacement string
+	Cursor      Cursor // cursor position before the action
+	AfterCursor Cursor // cursor position after a full-buffer replacement
+	Timestamp   time.Time
 }
 
 // History manages undo/redo stacks with operation coalescing.
@@ -130,15 +133,15 @@ func (h *History) Clear() {
 }
 
 // RecordExternalChange records a full content replacement as a single undo step.
-// Call this before replacing the buffer with externally-changed content so the
-// user can Cmd+Z back to the pre-change state.
-func (h *History) RecordExternalChange(oldContent string, oldCursor Cursor) {
+// The old and new snapshots make the replacement exactly undoable and redoable.
+func (h *History) RecordExternalChange(oldContent, newContent string, oldCursor, newCursor Cursor) {
 	h.undoStack = append(h.undoStack, EditAction{
-		Type:      ActionDelete,
-		Offset:    0,
-		Text:      oldContent,
-		Cursor:    oldCursor,
-		Timestamp: time.Now(),
+		Type:        ActionReplace,
+		Text:        oldContent,
+		Replacement: newContent,
+		Cursor:      oldCursor,
+		AfterCursor: newCursor,
+		Timestamp:   time.Now(),
 	})
 	h.redoStack = nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -323,7 +324,6 @@ func (st *appState) continueQuitFlow() {
 	st.gracefulExit()
 }
 
-
 // --- Save As text input helpers ---
 
 func (st *appState) saveAsInsertText(text string) {
@@ -382,11 +382,19 @@ func (st *appState) saveTab(tab *ui.Tab) bool {
 		st.watcher.MarkOwnWrite(tab.Editor.FilePath)
 	}
 	if err := tab.Editor.Save(); err != nil {
+		if st.watcher != nil {
+			st.watcher.CancelOwnWrite(tab.Editor.FilePath)
+		}
 		fmt.Fprintf(os.Stderr, "save error: %v\n", err)
 		return false
 	}
-	// Re-watch (inode may change from atomic rename)
-	st.watchEditorFile(tab.Editor)
+	// Wait for the old inode watch to be invalidated before attaching to the
+	// replacement created by the atomic save.
+	if st.watcher != nil {
+		if err := st.watcher.Rewatch(tab.Editor.FilePath); err != nil {
+			fmt.Fprintf(os.Stderr, "rewatch error: %v\n", err)
+		}
+	}
 	st.refreshGitDiffForEditor(tab.Editor)
 	return true
 }
@@ -407,11 +415,18 @@ func (st *appState) refreshGitDiffForEditor(ed *editor.Editor) {
 	}
 }
 
-
 func (st *appState) saveTabToPath(tab *ui.Tab, path string) bool {
+	oldPath := tab.Editor.FilePath
 	if err := tab.Editor.SaveAs(path); err != nil {
 		fmt.Fprintf(os.Stderr, "save error: %v\n", err)
 		return false
+	}
+	if st.watcher != nil && oldPath != "" && oldPath != tab.Editor.FilePath {
+		if err := st.watcher.MoveWatch(oldPath, tab.Editor.FilePath); err != nil {
+			fmt.Fprintf(os.Stderr, "watch transfer error: %v\n", err)
+		}
+	} else {
+		st.watchEditorFile(tab.Editor)
 	}
 	tab.Title = filepath.Base(path)
 	tab.IsUntitled = false
@@ -420,14 +435,16 @@ func (st *appState) saveTabToPath(tab *ui.Tab, path string) bool {
 	if ts != nil {
 		ts.langLabel = detectLanguage(path)
 		h := highlight.NewHighlighter(path)
+		if ts.highlighter != nil {
+			ts.highlighter.Close()
+		}
+		ts.highlighter = h
 		if h != nil {
-			if ts.highlighter != nil {
-				ts.highlighter.Close()
-			}
-			ts.highlighter = h
 			source := tab.Editor.Buffer.TextBytes(ts.sourceBuf)
 			ts.sourceBuf = source
 			h.Parse(source)
+		} else {
+			ts.sourceBuf = nil
 		}
 	}
 	st.refreshGitDiffForEditor(tab.Editor)
@@ -484,6 +501,13 @@ func (st *appState) handleExternalFileChange(path string) {
 			st.notification = "File changed externally: " + filepath.Base(path)
 			st.notificationUntil = time.Now().Add(10 * time.Second)
 		} else {
+			// Directory-backed watches can observe a late event from our own
+			// atomic save. If disk and buffer already agree, no reload or undo
+			// history entry is necessary.
+			if disk, err := os.ReadFile(path); err == nil &&
+				bytes.Equal(disk, tab.Editor.Buffer.TextBytes(nil)) {
+				break
+			}
 			// No unsaved edits — reload silently
 			st.reloadEditorFromDisk(tab.Editor)
 			st.notification = "Reloaded: " + filepath.Base(path)

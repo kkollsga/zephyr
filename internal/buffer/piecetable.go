@@ -4,21 +4,24 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
 
 // PieceTable implements a piece table data structure for efficient text editing.
 // It maintains an immutable original buffer and an append-only add buffer,
-// with a sequence of pieces that reference spans in either buffer.
+// with a sequence of pieces that reference spans in either buffer. Concurrent
+// reads are safe. Callers must externally serialize Insert, Delete, and
+// DrainEdits with all other operations.
 type PieceTable struct {
 	original string
 	add      strings.Builder
 	pieces   []Piece
 
-	// Cached line starts (byte offsets). Invalidated on edit.
+	// Line starts (byte offsets). Edits update this eagerly, so read operations
+	// never mutate shared state and remain safe to call concurrently.
 	lineStarts []int
-	linesDirty bool
 
 	// Accumulated edit info for incremental tree-sitter updates.
 	pendingEdits []EditInfo
@@ -28,7 +31,7 @@ type PieceTable struct {
 func NewFromString(s string) *PieceTable {
 	pt := &PieceTable{
 		original:   s,
-		linesDirty: true,
+		lineStarts: lineStartsForText(s),
 	}
 	if len(s) > 0 {
 		pt.pieces = []Piece{{Source: Original, Offset: 0, Length: len(s)}}
@@ -119,7 +122,7 @@ func (pt *PieceTable) Insert(offset int, text string) error {
 
 	if len(pt.pieces) == 0 {
 		pt.pieces = []Piece{newPiece}
-		pt.linesDirty = true
+		pt.updateLineStartsForInsert(offset, text)
 		return nil
 	}
 
@@ -129,7 +132,7 @@ func (pt *PieceTable) Insert(offset int, text string) error {
 		if offset == pos {
 			// Insert before this piece
 			pt.pieces = splice(pt.pieces, i, 0, newPiece)
-			pt.linesDirty = true
+			pt.updateLineStartsForInsert(offset, text)
 			return nil
 		}
 		if offset < pos+p.Length {
@@ -137,7 +140,7 @@ func (pt *PieceTable) Insert(offset int, text string) error {
 			left := Piece{Source: p.Source, Offset: p.Offset, Length: offset - pos}
 			right := Piece{Source: p.Source, Offset: p.Offset + (offset - pos), Length: p.Length - (offset - pos)}
 			pt.pieces = splice(pt.pieces, i, 1, left, newPiece, right)
-			pt.linesDirty = true
+			pt.updateLineStartsForInsert(offset, text)
 			return nil
 		}
 		pos += p.Length
@@ -145,7 +148,7 @@ func (pt *PieceTable) Insert(offset int, text string) error {
 
 	// Append at end
 	pt.pieces = append(pt.pieces, newPiece)
-	pt.linesDirty = true
+	pt.updateLineStartsForInsert(offset, text)
 	return nil
 }
 
@@ -202,7 +205,7 @@ func (pt *PieceTable) Delete(offset, length int) error {
 	}
 
 	pt.pieces = newPieces
-	pt.linesDirty = true
+	pt.updateLineStartsForDelete(offset, length)
 	return nil
 }
 
@@ -251,42 +254,79 @@ func (pt *PieceTable) Substring(offset, length int) (string, error) {
 	return b.String(), nil
 }
 
-// buildLineStarts computes the byte offsets of each line start.
-func (pt *PieceTable) buildLineStarts() {
-	if !pt.linesDirty {
-		return
+func lineStartsForText(text string) []int {
+	starts := make([]int, strings.Count(text, "\n")+1)
+	start := 0
+	for line := 1; line < len(starts); line++ {
+		newline := strings.IndexByte(text[start:], '\n')
+		start += newline + 1
+		starts[line] = start
 	}
-	pt.lineStarts = []int{0}
-	offset := 0
-	for _, p := range pt.pieces {
-		text := pt.bufferText(p)
-		for i := 0; i < len(text); i++ {
-			if text[i] == '\n' {
-				pt.lineStarts = append(pt.lineStarts, offset+i+1)
-			}
+	return starts
+}
+
+func (pt *PieceTable) updateLineStartsForInsert(offset int, text string) {
+	insertAt := sort.Search(len(pt.lineStarts), func(i int) bool {
+		return pt.lineStarts[i] > offset
+	})
+
+	newlineCount := strings.Count(text, "\n")
+	oldLen := len(pt.lineStarts)
+	if newlineCount > 0 {
+		newLen := oldLen + newlineCount
+		if newLen > cap(pt.lineStarts) {
+			starts := make([]int, newLen)
+			copy(starts, pt.lineStarts[:insertAt])
+			copy(starts[insertAt+newlineCount:], pt.lineStarts[insertAt:])
+			pt.lineStarts = starts
+		} else {
+			pt.lineStarts = pt.lineStarts[:newLen]
+			copy(pt.lineStarts[insertAt+newlineCount:], pt.lineStarts[insertAt:oldLen])
 		}
-		offset += p.Length
 	}
-	pt.linesDirty = false
+
+	for i := insertAt + newlineCount; i < len(pt.lineStarts); i++ {
+		pt.lineStarts[i] += len(text)
+	}
+	line := insertAt
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\n' {
+			pt.lineStarts[line] = offset + i + 1
+			line++
+		}
+	}
+}
+
+func (pt *PieceTable) updateLineStartsForDelete(offset, length int) {
+	deleteEnd := offset + length
+	keepEnd := sort.Search(len(pt.lineStarts), func(i int) bool {
+		return pt.lineStarts[i] > offset
+	})
+	suffixStart := sort.Search(len(pt.lineStarts), func(i int) bool {
+		return pt.lineStarts[i] > deleteEnd
+	})
+	for i := suffixStart; i < len(pt.lineStarts); i++ {
+		pt.lineStarts[keepEnd+i-suffixStart] = pt.lineStarts[i] - length
+	}
+	pt.lineStarts = pt.lineStarts[:keepEnd+len(pt.lineStarts)-suffixStart]
 }
 
 // LineCount returns the number of lines. A trailing newline adds an empty final line.
 func (pt *PieceTable) LineCount() int {
-	pt.buildLineStarts()
 	return len(pt.lineStarts)
 }
 
 // Line returns the content of the given 0-based line, excluding the trailing newline.
 func (pt *PieceTable) Line(n int) (string, error) {
-	pt.buildLineStarts()
-	if n < 0 || n >= len(pt.lineStarts) {
-		return "", fmt.Errorf("line %d out of range [0, %d)", n, len(pt.lineStarts))
+	lineStarts := pt.lineStarts
+	if n < 0 || n >= len(lineStarts) {
+		return "", fmt.Errorf("line %d out of range [0, %d)", n, len(lineStarts))
 	}
 
-	start := pt.lineStarts[n]
+	start := lineStarts[n]
 	var end int
-	if n+1 < len(pt.lineStarts) {
-		end = pt.lineStarts[n+1]
+	if n+1 < len(lineStarts) {
+		end = lineStarts[n+1]
 	} else {
 		end = pt.Length()
 	}
@@ -384,11 +424,11 @@ func (pt *PieceTable) WriteTo(w io.Writer) (int64, error) {
 // LineStartOffset returns the byte offset of the given 0-based line.
 // Returns 0 for out-of-range lines.
 func (pt *PieceTable) LineStartOffset(line int) int {
-	pt.buildLineStarts()
-	if line < 0 || line >= len(pt.lineStarts) {
+	lineStarts := pt.lineStarts
+	if line < 0 || line >= len(lineStarts) {
 		return 0
 	}
-	return pt.lineStarts[line]
+	return lineStarts[line]
 }
 
 // DrainEdits returns and clears accumulated edit info.

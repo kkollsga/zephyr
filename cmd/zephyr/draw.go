@@ -411,6 +411,8 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 	// Selection (skip when find bar is active — FindCurrent highlight replaces it)
 	if ed.Selection.Active && !ed.Selection.IsEmpty() && !st.findBar.Visible {
 		start, end := ed.Selection.Ordered()
+		startCol := runeColToDisplayCol2(ed, start.Line, start.Col, 4)
+		endCol := runeColToDisplayCol2(ed, end.Line, end.Col, 4)
 		startDisp := start.Line
 		endDisp := end.Line
 		if hasFolds {
@@ -418,7 +420,7 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 			endDisp = fs.BufToDisplay(end.Line)
 		}
 		st.cursorRend.RenderSelection(gtx.Ops, st.theme.Selection,
-			startDisp, start.Col, endDisp, end.Col,
+			startDisp, startCol, endDisp, endCol,
 			firstLine, gutterWidth+st.textRend.CharWidth, gtx.Constraints.Max.Y,
 			func(line int) int {
 				bufLine := line
@@ -426,7 +428,7 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 					bufLine = fs.DisplayToBuf(line)
 				}
 				l, _ := ed.Buffer.Line(bufLine)
-				return utf8.RuneCountInString(l)
+				return utf8.RuneCountInString(expandTabs(l, 4))
 			})
 	}
 
@@ -435,7 +437,8 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 	if st.cursorRend.UpdateBlink() {
 		w.Invalidate()
 	}
-	st.cursorRend.RenderCursor(gtx.Ops, cursorLine, ed.Cursor.Col, firstLine, gutterWidth+st.textRend.CharWidth)
+	cursorCol := runeColToDisplayCol2(ed, ed.Cursor.Line, ed.Cursor.Col, 4)
+	st.cursorRend.RenderCursor(gtx.Ops, cursorLine, cursorCol, firstLine, gutterWidth+st.textRend.CharWidth)
 
 	padOff.Pop()
 }
@@ -863,7 +866,7 @@ func (st *appState) drawNavRootDropdown(gtx layout.Context) {
 	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	topB.Pop()
-	botB := clip.Rect{Min: image.Pt(0, dropH - 1), Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
+	botB := clip.Rect{Min: image.Pt(0, dropH-1), Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
 	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	botB.Pop()
@@ -871,7 +874,7 @@ func (st *appState) drawNavRootDropdown(gtx layout.Context) {
 	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	leftB.Pop()
-	rightB := clip.Rect{Min: image.Pt(dropW - 1, 0), Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
+	rightB := clip.Rect{Min: image.Pt(dropW-1, 0), Max: image.Pt(dropW, dropH)}.Push(gtx.Ops)
 	paint.ColorOp{Color: st.theme.TabBorder}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	rightB.Pop()

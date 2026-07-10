@@ -2,6 +2,35 @@
 
 All notable changes to Zephyr are documented here.
 
+## Unreleased
+
+### Reliability and testing
+
+- Fixed primary/secondary/middle mouse isolation, pointer-gesture identity,
+  fractional scrolling, tab-aware hit testing, and Markdown selection routing.
+- Preserved symlink targets, permissions, and macOS extended attributes during
+  atomic saves; added parent-directory watching and sync/failure coverage.
+- Added 356 deterministic tests, two fuzzers, race/stress gates, headless
+  controller coverage, and a real macOS input/screenshot regression harness.
+
+### Performance
+
+- Eliminated retained Tree-sitter trees across reparses.
+- Reduced the combined large-document open/index/edit workload from roughly
+  1.6 ms and 4.10 MiB to 0.85 ms and 0.77 MiB on the baseline Apple M4.
+- Added repeatable first-frame, frame CPU, event-to-submit, RSS, and soak
+  measurement tooling.
+
+### Installation
+
+- Added a terminal-first macOS installer/upgrader with checksum verification,
+  transactional rollback, a `zephyr` command, and universal arm64/x86_64
+  release builds.
+- Added a dedicated GitHub Pages installation guide at `/install/` and CI
+  checks that keep its primary command aligned with the README and installer.
+- Replaced manual quarantine instructions with the supported one-command
+  install/upgrade path and added copy buttons to the Pages install surfaces.
+
 ## [0.1.0-alpha] — 2026-03-25
 
 First public pre-release.

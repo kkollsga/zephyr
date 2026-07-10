@@ -216,4 +216,3 @@ func (st *appState) drawFinderTagRow(gtx layout.Context, tr *render.TextRenderer
 	sepRect.Pop()
 	sepOff.Pop()
 }
-

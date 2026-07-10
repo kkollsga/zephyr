@@ -23,8 +23,9 @@ jobs:
         run: |
           mkdir -p docs/_includes docs/assets
 
-          # Extract Installation section from README
-          sed -n '/^## Installation$/,/^## [^I]/{ /^## [^I]/d; p; }' README.md > docs/_includes/install.md
+          # The homepage has its own terminal-first macOS block. Add the
+          # remaining platform instructions from README below it.
+          sed -n '/^### Windows$/,/^## [^I]/{ /^## [^I]/d; p; }' README.md > docs/_includes/install.md
 
           # Copy changelog (strip the top title line)
           tail -n +3 CHANGELOG.md > docs/_includes/changelog.md

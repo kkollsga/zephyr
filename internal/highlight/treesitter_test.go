@@ -1,10 +1,25 @@
 package highlight
 
 import (
+	"reflect"
 	"testing"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
+
+// treeIsClosed reads go-tree-sitter's close state without dereferencing the
+// released native tree. This is intentionally a lifecycle regression check
+// against the pinned dependency rather than an application behavior check.
+func treeIsClosed(t *sitter.Tree) bool {
+	if t == nil || t.BaseTree == nil {
+		return false
+	}
+	closed := reflect.ValueOf(t.BaseTree).Elem().FieldByName("isClosed")
+	if !closed.IsValid() || closed.Kind() != reflect.Bool {
+		panic("go-tree-sitter BaseTree no longer exposes an isClosed bool")
+	}
+	return closed.Bool()
+}
 
 func TestHighlighter_ParseGo_Keywords(t *testing.T) {
 	h := NewHighlighter("test.go")
@@ -155,6 +170,119 @@ func TestHighlighter_IncrementalParse(t *testing.T) {
 	if !hasComment {
 		t.Fatal("expected comment token after incremental update")
 	}
+}
+
+func TestHighlighter_ParseClosesReplacedTree(t *testing.T) {
+	h := NewHighlighter("test.go")
+	if h == nil {
+		t.Fatal("expected highlighter")
+	}
+	defer h.Close()
+
+	h.Parse([]byte("package first\n"))
+	previous := h.tree
+	h.Parse([]byte("package second\n"))
+
+	if previous == h.tree {
+		t.Fatal("full parse should replace the syntax tree")
+	}
+	if !treeIsClosed(previous) {
+		t.Fatal("full parse did not close the replaced syntax tree")
+	}
+	if treeIsClosed(h.tree) {
+		t.Fatal("replacement syntax tree is already closed")
+	}
+}
+
+func TestHighlighter_UpdateClosesReplacedTree(t *testing.T) {
+	h := NewHighlighter("test.go")
+	if h == nil {
+		t.Fatal("expected highlighter")
+	}
+	defer h.Close()
+
+	src := []byte("package main\nfunc main() {}\n")
+	h.Parse(src)
+	previous := h.tree
+	newSrc := []byte("// comment\npackage main\nfunc main() {}\n")
+	h.Update(newSrc, sitter.EditInput{
+		StartIndex:  0,
+		OldEndIndex: 0,
+		NewEndIndex: 11,
+		StartPoint:  sitter.Point{Row: 0, Column: 0},
+		OldEndPoint: sitter.Point{Row: 0, Column: 0},
+		NewEndPoint: sitter.Point{Row: 1, Column: 0},
+	})
+
+	if previous == h.tree {
+		t.Fatal("incremental parse should replace the syntax tree")
+	}
+	if !treeIsClosed(previous) {
+		t.Fatal("incremental parse did not close the replaced syntax tree")
+	}
+	if treeIsClosed(h.tree) {
+		t.Fatal("replacement syntax tree is already closed")
+	}
+	if len(h.Tokens()) == 0 {
+		t.Fatal("replacement syntax tree is not usable")
+	}
+}
+
+func TestHighlighter_UpdateMultiClosesReplacedTree(t *testing.T) {
+	h := NewHighlighter("test.go")
+	if h == nil {
+		t.Fatal("expected highlighter")
+	}
+	defer h.Close()
+
+	src := []byte("package main\n")
+	h.Parse(src)
+	previous := h.tree
+	newSrc := []byte("// comment\npackage main\n")
+	h.UpdateMulti(newSrc, []sitter.EditInput{{
+		StartIndex:  0,
+		OldEndIndex: 0,
+		NewEndIndex: 11,
+		StartPoint:  sitter.Point{Row: 0, Column: 0},
+		OldEndPoint: sitter.Point{Row: 0, Column: 0},
+		NewEndPoint: sitter.Point{Row: 1, Column: 0},
+	}})
+
+	if !treeIsClosed(previous) {
+		t.Fatal("multi-edit parse did not close the replaced syntax tree")
+	}
+	if treeIsClosed(h.tree) {
+		t.Fatal("replacement syntax tree is already closed")
+	}
+}
+
+func TestHighlighter_EvictAndCloseReleaseTreeOnce(t *testing.T) {
+	h := NewHighlighter("test.go")
+	if h == nil {
+		t.Fatal("expected highlighter")
+	}
+
+	h.Parse([]byte("package main\n"))
+	parsed := h.tree
+	h.Evict()
+	if !treeIsClosed(parsed) {
+		t.Fatal("evict did not close the syntax tree")
+	}
+	if h.tree != nil || !h.NeedsParse() {
+		t.Fatal("evict did not clear the syntax tree")
+	}
+
+	h.Evict() // idempotent
+	h.Parse([]byte("package main\n"))
+	reparsed := h.tree
+	h.Close()
+	if !treeIsClosed(reparsed) {
+		t.Fatal("close did not close the syntax tree")
+	}
+	if h.tree != nil || h.parser != nil || h.query != nil {
+		t.Fatal("close retained native resources")
+	}
+	h.Close() // idempotent
 }
 
 func TestHighlighter_TokensForRange(t *testing.T) {

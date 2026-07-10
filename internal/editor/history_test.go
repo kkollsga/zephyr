@@ -138,7 +138,12 @@ func TestHistory_RecordExternalChange(t *testing.T) {
 	h := NewHistory()
 	h.Record(EditAction{Type: ActionInsert, Offset: 0, Text: "user edit"})
 
-	h.RecordExternalChange("original content", Cursor{Line: 0, Col: 0})
+	h.RecordExternalChange(
+		"original content",
+		"external content",
+		Cursor{Line: 0, Col: 0},
+		Cursor{Line: 1, Col: 0},
+	)
 
 	// Should have 2 entries: user edit + external change
 	if len(h.undoStack) != 2 {
@@ -146,7 +151,7 @@ func TestHistory_RecordExternalChange(t *testing.T) {
 	}
 
 	top := h.undoStack[len(h.undoStack)-1]
-	if top.Type != ActionDelete || top.Text != "original content" {
+	if top.Type != ActionReplace || top.Text != "original content" || top.Replacement != "external content" {
 		t.Errorf("external change = %+v", top)
 	}
 	if h.CanRedo() {

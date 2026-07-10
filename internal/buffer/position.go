@@ -21,17 +21,17 @@ func (pt *PieceTable) OffsetToLineCol(offset int) (LineCol, error) {
 		return LineCol{}, fmt.Errorf("offset %d out of range [0, %d]", offset, pt.Length())
 	}
 
-	pt.buildLineStarts()
+	lineStarts := pt.lineStarts
 
 	// Binary search: find the last lineStart <= offset
-	line := sort.Search(len(pt.lineStarts), func(i int) bool {
-		return pt.lineStarts[i] > offset
+	line := sort.Search(len(lineStarts), func(i int) bool {
+		return lineStarts[i] > offset
 	}) - 1
 	if line < 0 {
 		line = 0
 	}
 
-	lineStart := pt.lineStarts[line]
+	lineStart := lineStarts[line]
 	segLen := offset - lineStart
 	if segLen == 0 {
 		return LineCol{Line: line, Col: 0}, nil
@@ -49,14 +49,14 @@ func (pt *PieceTable) OffsetToLineCol(offset int) (LineCol, error) {
 // Uses binary search on lineStarts — O(log n) with zero allocation.
 // Column is a byte offset within the line, not a rune count.
 func (pt *PieceTable) offsetToPoint(offset int) (row, col int) {
-	pt.buildLineStarts()
-	row = sort.Search(len(pt.lineStarts), func(i int) bool {
-		return pt.lineStarts[i] > offset
+	lineStarts := pt.lineStarts
+	row = sort.Search(len(lineStarts), func(i int) bool {
+		return lineStarts[i] > offset
 	}) - 1
 	if row < 0 {
 		row = 0
 	}
-	col = offset - pt.lineStarts[row]
+	col = offset - lineStarts[row]
 	return
 }
 
@@ -69,13 +69,13 @@ func (pt *PieceTable) LineColToOffset(lc LineCol) (int, error) {
 		return 0, fmt.Errorf("invalid line:col %d:%d", lc.Line, lc.Col)
 	}
 
-	pt.buildLineStarts()
+	lineStarts := pt.lineStarts
 
-	if lc.Line >= len(pt.lineStarts) {
-		return 0, fmt.Errorf("line %d out of range [0, %d)", lc.Line, len(pt.lineStarts))
+	if lc.Line >= len(lineStarts) {
+		return 0, fmt.Errorf("line %d out of range [0, %d)", lc.Line, len(lineStarts))
 	}
 
-	lineStart := pt.lineStarts[lc.Line]
+	lineStart := lineStarts[lc.Line]
 
 	if lc.Col == 0 {
 		return lineStart, nil
@@ -83,8 +83,8 @@ func (pt *PieceTable) LineColToOffset(lc LineCol) (int, error) {
 
 	// Compute the byte length of this line (excluding newline)
 	var lineEnd int
-	if lc.Line+1 < len(pt.lineStarts) {
-		lineEnd = pt.lineStarts[lc.Line+1] - 1 // exclude the '\n'
+	if lc.Line+1 < len(lineStarts) {
+		lineEnd = lineStarts[lc.Line+1] - 1 // exclude the '\n'
 	} else {
 		lineEnd = pt.Length()
 	}
