@@ -29,6 +29,9 @@ All notable changes to Zephyr are documented here.
 
 - The repository root `VERSION` file is now the version source of truth for
   local builds, with `scripts/bump-version.sh` to bump patch/minor/major.
+- Pushing a `VERSION` change to `main` now automatically tags `vX.Y.Z` and
+  dispatches the release pipeline, so installers pick up new versions
+  without a manual tag.
 
 ### Reliability and testing
 
