@@ -3,7 +3,7 @@
 ## Versioning and releases
 
 - `VERSION` at the repo root is the version source of truth (plain `X.Y.Z`, no `v` prefix). The Makefile injects it via ldflags; the app shows it in the macOS Zephyr menu.
-- **Every commit+push must bump the patch version**: run `./scripts/bump-version.sh` (defaults to patch) and include the `VERSION` change in the commit being pushed. Pushing always requires explicit user permission.
+- **Bump the patch version on commit+push only if the current `VERSION` has actually been released** (a published GitHub release for `vX.Y.Z` exists): run `./scripts/bump-version.sh` (defaults to patch) and include the `VERSION` change in the commit being pushed. If the current version is unreleased (e.g. its release pipeline failed), do NOT bump — push the fix with the same version and the auto-release workflow re-tags and retries it. Version numbers track published releases, not attempts. Pushing always requires explicit user permission.
 - **Never bump the minor or major version without the user's explicit permission** for that specific release. Patch bumps are automatic; minor/major are user-initiated only.
 - Releases are tag-driven (`v*` tags trigger `.github/workflows/release.yml`); creating tags/releases also requires explicit user permission.
 
