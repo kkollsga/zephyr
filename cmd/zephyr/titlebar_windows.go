@@ -41,4 +41,18 @@ func wordWrapToggled() bool { return false }
 
 func updateWordWrapMenuCheck(checked bool) {}
 
+func setupAppMenuVersionItem(title string) {}
+
+func setupAutoIndentMenu(checked bool) {}
+
+func autoIndentToggled() bool { return false }
+
+func updateAutoIndentMenuCheck(checked bool) {}
+
+func setupIndentWidthMenu(activeWidth int) {}
+
+func checkIndentWidthSelection() int { return 0 }
+
+func updateIndentWidthMenuCheck(activeWidth int) {}
+
 func checkOpenFile() string { return "" }
