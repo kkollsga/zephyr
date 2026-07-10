@@ -149,9 +149,11 @@ func (st *appState) ensureMdRenderers(gtx layout.Context) *mdRenderers {
 	if st.shaper == nil {
 		return nil // shaper not yet initialized (theme change mid-frame)
 	}
-	heading := st.fontCfg.Heading
-	body := st.fontCfg.Body
-	mono := st.fontCfg.Monospace
+	// Append the platform color-emoji family so emoji runes not covered by the
+	// primary faces resolve to a color font instead of tofu.
+	heading := render.AppendEmojiFamily(st.fontCfg.Heading)
+	body := render.AppendEmojiFamily(st.fontCfg.Body)
+	mono := render.AppendEmojiFamily(st.fontCfg.Monospace)
 	fg := st.theme.Foreground
 
 	mk := func(size float32, lh float32, ls float32, face string, weight font.Weight, style font.Style) *render.TextRenderer {
@@ -164,6 +166,9 @@ func (st *appState) ensureMdRenderers(gtx layout.Context) *mdRenderers {
 			Weight:        weight,
 			FontStyle:     style,
 		})
+		// Markdown read mode uses proportional advances, so emitting the color
+		// bitmap layer is safe here (unlike the editor's monospace grid).
+		r.ColorBitmaps = true
 		r.ComputeMetrics(gtx)
 		return r
 	}

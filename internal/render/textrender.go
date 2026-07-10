@@ -35,6 +35,11 @@ type TextRenderer struct {
 	CharWidth    int
 	CharAdvance  float64 // exact fractional advance per character
 	LineHeightPx int
+	// ColorBitmaps enables emission of the color bitmap glyph layer
+	// (sbix/CBDT emoji) after the vector outlines. It is opt-in because the
+	// editor's monospace grid assumes one cell per rune and must keep its
+	// current behavior; only the proportional markdown renderers set it.
+	ColorBitmaps bool
 }
 
 // NewTextRenderer creates a text renderer with the given shaper and style.
@@ -210,6 +215,15 @@ func (tr *TextRenderer) renderText(ops *op.Ops, gtx layout.Context, s string, x,
 	paint.ColorOp{Color: c}.Add(ops)
 	paint.PaintOp{}.Add(ops)
 	outline.Pop()
+
+	// Color bitmap glyph layer (sbix/CBDT emoji). Mirrors Gio's
+	// widget/label.go: after the outlines, add the recorded bitmap call.
+	// Positioned within the same affine transform as the outlines.
+	if tr.ColorBitmaps {
+		if call := tr.Shaper.Bitmaps(glyphs); call != (op.CallOp{}) {
+			call.Add(ops)
+		}
+	}
 
 	aff.Pop()
 }

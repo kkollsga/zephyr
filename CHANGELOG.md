@@ -4,6 +4,12 @@ All notable changes to Zephyr are documented here.
 
 ## Unreleased
 
+### Markdown
+
+- Markdown read mode now renders color emoji on macOS, including ZWJ
+  sequences (👨‍👩‍👧‍👦), flags, and variation selectors, in body text, headings,
+  and code blocks.
+
 ### Editing
 
 - Added syntax/format error detection with red gutter markers: JSON is
