@@ -241,7 +241,7 @@ expect_buffer() {
 # and listed in SCENARIOS. It launches its own app, traps stop_app, and states a
 # pass condition read off the app or the filesystem — never off a screenshot.
 
-SCENARIOS=(smoke regression clipboard save-as)
+SCENARIOS=(smoke regression clipboard save-as tear-out)
 
 list_scenarios() {
     printf '%s\n' "${SCENARIOS[@]}"
@@ -326,6 +326,139 @@ scenario_save_as() {
     echo "Save As scenario completed; artifacts: $STATE_DIR/artifacts"
     stop_app
     trap - EXIT
+}
+
+# --- tear-out ---------------------------------------------------------------
+#
+# Tearing a tab out spawns a second Zephyr, so this is the one scenario the
+# harness's single-PID model does not cover: PID_FILE names the instance the
+# harness launched, and stop_app refuses any other pid. Cleanup therefore works
+# off the process list instead.
+
+# tear_out_pids lists every process running the GUI-test binary. The path is
+# inside the state dir and unique to the harness, so a Zephyr the developer is
+# running themselves can never match it.
+tear_out_pids() {
+    pgrep -f "$BIN" 2>/dev/null || true
+}
+
+# tear_out_cleanup stops every process the scenario started, whether it reached
+# the end or died in the middle, and fails loudly if one survives — an orphan
+# Zephyr holds the global input stream and would poison every later run.
+tear_out_cleanup() {
+    local status=$? p attempt
+    for attempt in 1 2 3; do
+        local pids
+        pids=$(tear_out_pids)
+        [[ -n "$pids" ]] || break
+        for p in $pids; do
+            kill "$p" 2>/dev/null || true
+        done
+        sleep 0.5
+    done
+    for p in $(tear_out_pids); do
+        kill -9 "$p" 2>/dev/null || true
+    done
+    sleep 0.3
+    rm -f "$PID_FILE"
+    local left
+    left=$(tear_out_pids)
+    if [[ -n "$left" ]]; then
+        echo "tear-out cleanup left Zephyr processes running: $left" >&2
+        exit 1
+    fi
+    exit "$status"
+}
+
+# scenario_tear_out drags a tab out of the window and asserts that a second
+# Zephyr process exists with a window of its own, holding the file the tab was
+# on. Both processes are killed on the way out, pass or fail.
+scenario_tear_out() {
+    local work="$STATE_DIR/artifacts/tear-out"
+    rm -rf "$work"
+    mkdir -p "$work"
+    local src="$work/mouse_fixture.go"
+    cp "$DEFAULT_FIXTURE" "$src"
+
+    # Start from a known process count: a straggler from an earlier run would
+    # make "a second process appeared" true without this scenario doing it.
+    stop_app
+    local strays
+    strays=$(tear_out_pids)
+    if [[ -n "$strays" ]]; then
+        echo "a GUI-test Zephyr was already running: $strays" >&2
+        return 1
+    fi
+
+    launch_app "$src"
+    trap tear_out_cleanup EXIT
+    pid=$(require_pid)
+    sleep 0.7
+
+    local geometry width height
+    geometry=$("$DRIVER" windows "$pid")
+    width=$(sed -E -n 's/.*"width" : ([0-9]+).*/\1/p' <<<"$geometry")
+    height=$(sed -E -n 's/.*"height" : ([0-9]+).*/\1/p' <<<"$geometry")
+    [[ -n "$width" && -n "$height" ]] || {
+        echo "could not read the window geometry: $geometry" >&2
+        exit 1
+    }
+
+    # A second tab: the drag-out is a no-op on the last remaining one.
+    "$DRIVER" key "$pid" t cmd
+    sleep 0.5
+    capture_checked 40-tear-out-two-tabs
+
+    # Drag the first tab from the tab bar to a point below the window, which is
+    # what the app reads as "outside every window of this application".
+    "$DRIVER" drag "$pid" 110 14 $((width / 2)) $((height + 200)) 0.8
+
+    local torn="" waited
+    for waited in {1..40}; do
+        local pids
+        pids=$(tear_out_pids)
+        torn=$(grep -v "^$pid$" <<<"$pids" | head -n 1 || true)
+        [[ -z "$torn" ]] || break
+        sleep 0.25
+    done
+    [[ -n "$torn" ]] || {
+        echo "the drag out of the window did not start a second Zephyr" >&2
+        exit 1
+    }
+
+    local count
+    count=$(tear_out_pids | wc -l | tr -d ' ')
+    [[ "$count" == "2" ]] || {
+        echo "expected two Zephyr processes after the tear-out, found $count" >&2
+        tear_out_pids >&2
+        exit 1
+    }
+
+    local torn_command
+    torn_command=$(ps -p "$torn" -o command=)
+    [[ "$torn_command" == *"$src"* ]] || {
+        echo "the second process is not holding the torn-out file: $torn_command" >&2
+        exit 1
+    }
+
+    local torn_window=""
+    for waited in {1..60}; do
+        torn_window=$("$DRIVER" windows "$torn")
+        grep -q '"id"' <<<"$torn_window" && break
+        torn_window=""
+        sleep 0.25
+    done
+    [[ -n "$torn_window" ]] || {
+        echo "the torn-out tab's process never opened a window" >&2
+        exit 1
+    }
+
+    capture_checked 41-tear-out-source
+    "$DRIVER" capture "$torn" "$STATE_DIR/artifacts/42-tear-out-detached.png"
+    "$DRIVER" preview "$STATE_DIR/artifacts/42-tear-out-detached.png" \
+        "$STATE_DIR/artifacts/42-tear-out-detached.jpg"
+
+    echo "Tear-out scenario completed; artifacts: $STATE_DIR/artifacts"
 }
 
 # CLIPBOARD_BACKUP holds whatever was on the pasteboard before the clipboard

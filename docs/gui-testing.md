@@ -99,6 +99,16 @@ around the run — including when the run fails part-way.
 the overwrite prompt: Escape goes back with the target's bytes untouched,
 Return overwrites it with the buffer. Both are asserted from the target file.
 
+`tear-out` drags a tab out of the window and asserts that a second Zephyr
+process exists, holds the torn-out file, and has a window of its own. It is the
+one scenario that ends with more than one process, so it does not use
+`stop_app`, whose single-PID model would leave the detached instance running:
+its trap kills every process running the GUI-test binary — a path inside the
+state dir, so a Zephyr you are running yourself can never match it — and fails
+the run if one survives. It also refuses to start when a GUI-test Zephyr is
+already running, since a straggler would satisfy "a second process appeared"
+on its own.
+
 Run the end-to-end input and screenshot smoke test with:
 
 ```sh
