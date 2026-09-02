@@ -465,6 +465,31 @@ func (st *appState) vimExecuteOperator(ed *editor.Editor, action vim.Action, op 
 	}
 }
 
+// selectLineSpan selects the text of lines [startLine, endLine] with no
+// surrounding line break and returns it.
+func selectLineSpan(ed *editor.Editor, startLine, endLine int) string {
+	last, _ := ed.Buffer.Line(endLine)
+	ed.Selection.Anchor = editor.Cursor{Line: startLine, Col: 0}
+	ed.Selection.Head = editor.Cursor{Line: endLine, Col: utf8.RuneCountInString(last)}
+	ed.Selection.Active = true
+	return ed.SelectedText()
+}
+
+// extendSelectionOverLineBreak grows a line-span selection to swallow one line
+// break, so deleting it removes the lines rather than emptying them. The break
+// after the span is preferred; at EOF the one before it is taken instead, and a
+// single-line document has neither.
+func extendSelectionOverLineBreak(ed *editor.Editor, startLine, endLine int) {
+	if endLine < ed.Buffer.LineCount()-1 {
+		ed.Selection.Head = editor.Cursor{Line: endLine + 1, Col: 0}
+		return
+	}
+	if startLine > 0 {
+		prev, _ := ed.Buffer.Line(startLine - 1)
+		ed.Selection.Anchor = editor.Cursor{Line: startLine - 1, Col: utf8.RuneCountInString(prev)}
+	}
+}
+
 // vimExecuteLineOp handles dd, yy, cc (line-wise operations).
 func (st *appState) vimExecuteLineOp(ed *editor.Editor, count int, op vim.Operator) {
 	startLine := ed.Cursor.Line
@@ -472,44 +497,36 @@ func (st *appState) vimExecuteLineOp(ed *editor.Editor, count int, op vim.Operat
 	if endLine >= ed.Buffer.LineCount() {
 		endLine = ed.Buffer.LineCount() - 1
 	}
-
-	// Select the lines
-	ed.Selection.Anchor = editor.Cursor{Line: startLine, Col: 0}
-	lastLineText, _ := ed.Buffer.Line(endLine)
-	ed.Selection.Head = editor.Cursor{Line: endLine, Col: utf8.RuneCountInString(lastLineText)}
-	ed.Selection.Active = true
-
-	// Include the newline after the last line if possible
-	text := ed.SelectedText()
-	if endLine < ed.Buffer.LineCount()-1 {
-		text += "\n"
-		ed.Selection.Head = editor.Cursor{Line: endLine + 1, Col: 0}
-	} else if startLine > 0 {
-		// Last lines: include the newline before instead
-		offset, _ := ed.Buffer.LineColToOffset(buffer.LineCol{Line: startLine, Col: 0})
-		if offset > 0 {
-			ed.Selection.Anchor = editor.Cursor{Line: startLine - 1, Col: 0}
-			prevLine, _ := ed.Buffer.Line(startLine - 1)
-			ed.Selection.Anchor = editor.Cursor{Line: startLine - 1, Col: utf8.RuneCountInString(prevLine)}
-			text = "\n" + text
-		}
+	if startLine > endLine {
+		return
 	}
+
+	content := selectLineSpan(ed, startLine, endLine)
+	// A linewise register always reads "<line>\n", including at EOF where the
+	// document itself has no trailing newline. Recording the break on the
+	// leading side instead would make p paste the text charwise into the
+	// current line.
+	register := content + "\n"
 
 	switch op {
 	case vim.OpDelete:
-		st.vimState.Registers.RecordDelete(text, true, st.vimState.Register)
+		st.vimState.Registers.RecordDelete(register, true, st.vimState.Register)
+		extendSelectionOverLineBreak(ed, startLine, endLine)
 		ed.DeleteSelection()
 		ed.Cursor.SetPosition(ed.Buffer, startLine, 0)
 		vimMoveFirstNonBlank(ed)
 		st.afterEdit()
 	case vim.OpChange:
-		st.vimState.Registers.RecordDelete(text, true, st.vimState.Register)
+		// cc empties the lines into one blank line and opens insert there; the
+		// line itself survives, so no line break is taken.
+		st.vimState.Registers.RecordDelete(register, true, st.vimState.Register)
 		ed.DeleteSelection()
+		ed.Selection.Clear()
 		ed.Cursor.SetPosition(ed.Buffer, startLine, 0)
 		st.afterEdit()
 		st.vimState.Mode = vim.ModeInsert
 	case vim.OpYank:
-		st.vimState.Registers.RecordYank(text, st.vimState.Register)
+		st.vimState.Registers.RecordYank(register, st.vimState.Register)
 		ed.Selection.Clear()
 		ed.Cursor.SetPosition(ed.Buffer, startLine, 0)
 	}

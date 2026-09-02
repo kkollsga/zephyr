@@ -71,6 +71,10 @@ All notable changes to Zephyr are documented here.
   content can never be written over your working file — and `go` again brings
   the buffer back exactly as it was, unsaved edits, cursor and undo history
   included. A file with nothing at HEAD is reported instead of swapped.
+- Refreshing a directory listing or the git status buffer (toggling hidden
+  files, staging, collapsing a section) now resets the state derived from the
+  replaced listing, so folds and the viewport's cursor tracking describe the
+  listing on screen.
 - The `ih` hunk text object now works: `dih`, `yih` and `cih` operate on the
   run of changed lines under the cursor, linewise and as one undo step. It
   covers the changed lines only — a context line inside a hunk is not part of
@@ -108,6 +112,12 @@ All notable changes to Zephyr are documented here.
   search matches describing the replaced text.
 - Undo and redo now drop extra cursors, which pointed at positions that need
   not exist in the restored document.
+- Vim `cc` now clears the line and opens insert on it, as vim does, instead of
+  deleting the line and starting insert on the following one.
+- Vim `yy` and `dd` on the last line of a file now fill the register linewise.
+  The line break was recorded ahead of the text rather than after it, so `p`
+  and `P` pasted the last line into the middle of the current one instead of
+  onto a line of its own.
 - Typing or deleting on a line containing non-ASCII characters no longer
   risks landing the edit at the top of the file: a cursor column past the end
   of such a line is clamped to the line's last character instead of resolving

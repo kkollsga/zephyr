@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/kristianweb/zephyr/internal/buffer"
 	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/render"
 )
@@ -81,4 +82,23 @@ func (st *appState) afterOffsetsMoved(ts *tabState) {
 	}
 	ts.lastCursorLine = -1
 	ts.lastCursorCol = -1
+}
+
+// replaceListingBuffer swaps a regenerated navigator listing (directory or git
+// status) into the tab and puts the cursor back on line, clamped to the new
+// document. Every listing rebuild goes through it so the state derived from the
+// buffer object it replaced — highlighter tree, fold regions, pending
+// incremental edits, the viewport's cursor cache — is reset with it.
+func (st *appState) replaceListingBuffer(ed *editor.Editor, ts *tabState, content string, line int) {
+	ed.Buffer = buffer.NewFromString(content)
+	if ts != nil {
+		st.afterBufferSwap(ed, ts)
+	}
+	if line >= ed.Buffer.LineCount() {
+		line = ed.Buffer.LineCount() - 1
+	}
+	if line < 0 {
+		line = 0
+	}
+	ed.Cursor.SetPosition(ed.Buffer, line, 0)
 }

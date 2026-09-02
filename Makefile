@@ -105,11 +105,11 @@ gui-test-regression:
 ## Scope today: the Insert/Delete rule only. Whole-buffer swaps (assigning a
 ## new piece table into ed.Buffer) are the same hazard for derived state and
 ## are NOT checked yet. Outside internal/editor they live in cmd/zephyr:
-## applyFormattedBuffer in format.go and the HEAD-view toggle in headview.go,
-## both of which resync through afterBufferSwap, and four listing rebuilds in
-## navigator.go, which do not (their buffers carry no highlighter or fold
-## state). internal/editor swaps in Undo/Redo and Reload; UndoStep/RedoStep
-## report the swap so the caller can resync.
+## applyFormattedBuffer in format.go, the HEAD-view toggle in headview.go, and
+## the navigator listing rebuilds via replaceListingBuffer in bufferswap.go —
+## all of which resync through afterBufferSwap. internal/editor swaps in
+## Undo/Redo and Reload; UndoStep/RedoStep report the swap so the caller can
+## resync.
 ##
 ## Tests are exempt: a test may plant an unrecorded edit deliberately to prove
 ## the recorded path is the one being exercised.

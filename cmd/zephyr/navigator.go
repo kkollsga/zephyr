@@ -416,9 +416,7 @@ func (st *appState) navToggleHidden() {
 		diffStat, _ = st.gitCache.DiffStat()
 	}
 	ts.dirBuf.Refresh(statuses, diffStat, repoRoot)
-	content := ts.dirBuf.GenerateText()
-	ed.Buffer = buffer.NewFromString(content)
-	ed.Cursor.SetPosition(ed.Buffer, 2, 0)
+	st.replaceListingBuffer(ed, ts, ts.dirBuf.GenerateText(), 2)
 }
 
 // handleDirBufferAction handles keybindings specific to directory buffers.
@@ -503,16 +501,7 @@ func (st *appState) navRefreshStatus() {
 
 	cursorLine := ed.Cursor.Line
 	ts.statusBuf.Refresh(st.gitRepo, st.gitCache)
-	content := ts.statusBuf.GenerateText()
-	ed.Buffer = buffer.NewFromString(content)
-	// Clamp cursor
-	if cursorLine >= ed.Buffer.LineCount() {
-		cursorLine = ed.Buffer.LineCount() - 1
-	}
-	if cursorLine < 0 {
-		cursorLine = 0
-	}
-	ed.Cursor.SetPosition(ed.Buffer, cursorLine, 0)
+	st.replaceListingBuffer(ed, ts, ts.statusBuf.GenerateText(), cursorLine)
 }
 
 // navStage stages the file at cursor in the status buffer.
@@ -614,14 +603,8 @@ func (st *appState) navToggleDiff() {
 		}
 	}
 
-	// Regenerate buffer
 	cursorLine := ed.Cursor.Line
-	content := ts.statusBuf.GenerateText()
-	ed.Buffer = buffer.NewFromString(content)
-	if cursorLine >= ed.Buffer.LineCount() {
-		cursorLine = ed.Buffer.LineCount() - 1
-	}
-	ed.Cursor.SetPosition(ed.Buffer, cursorLine, 0)
+	st.replaceListingBuffer(ed, ts, ts.statusBuf.GenerateText(), cursorLine)
 }
 
 // navSectionNext moves to the next section header in the status buffer.
@@ -749,13 +732,7 @@ func (st *appState) navToggleCollapse() {
 		return
 	}
 	ts.statusBuf.ToggleCollapse(ed.Cursor.Line)
-	cursorLine := ed.Cursor.Line
-	content := ts.statusBuf.GenerateText()
-	ed.Buffer = buffer.NewFromString(content)
-	if cursorLine >= ed.Buffer.LineCount() {
-		cursorLine = ed.Buffer.LineCount() - 1
-	}
-	ed.Cursor.SetPosition(ed.Buffer, cursorLine, 0)
+	st.replaceListingBuffer(ed, ts, ts.statusBuf.GenerateText(), ed.Cursor.Line)
 }
 
 // navNextChangedFile opens the next changed file and jumps to its first hunk.
