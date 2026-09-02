@@ -26,3 +26,12 @@ docs/assets/hero-dark.svg
 
 # Claude config
 .claude/
+
+# Local dev working state — never committed. Layout and lifecycle tiers are
+# documented inside each folder's own README; the size/free-space bound is
+# `make check-dev-docs`, which `make gate` runs first. No tracked exception is
+# carved out here: Zephyr's hand-authored harnesses already live in tracked
+# scripts/ (gui-test.sh, perf-test.sh, baseline.sh), so nothing under these
+# folders exists in exactly one unbacked copy.
+/dev-docs/
+/inbox/
