@@ -112,8 +112,11 @@ launch_app() {
     fixture=$(cd "$(dirname "$fixture")" && pwd)/$(basename "$fixture")
     [[ -x "$BIN" ]] || build_app
     stop_app
-    : >"$LOG_FILE"
-    : >"$STDOUT_LOG"
+    # Unlink rather than truncate, so the redirect below creates a new inode.
+    # Truncating leaves any process still holding the old fd — an orphan from an
+    # interrupted run, a torn-out second Zephyr — writing at its old offset, and
+    # the gap it leaves ahead of the new log reads back as NUL bytes.
+    rm -f "$LOG_FILE" "$STDOUT_LOG"
     # Launch the bundled executable directly. LaunchServices can acknowledge an
     # app launch while leaving a Gio window inactive in non-interactive agent
     # sessions; a detached direct launch reliably creates the native window.
@@ -159,7 +162,7 @@ run_app() {
     fixture=$(cd "$(dirname "$fixture")" && pwd)/$(basename "$fixture")
     [[ -x "$BIN" ]] || build_app
     stop_app
-    : >"$LOG_FILE"
+    rm -f "$LOG_FILE"
     printf '%s\n' "$$" >"$PID_FILE"
     exec env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
         ZEPHYR_GUI_STATE_DIR="$STATE_DIR" GOTRACEBACK=all ZEPHYR_GUI_TRACE=1 \
@@ -189,10 +192,25 @@ require_permissions() {
 
 # --- scenario helpers -------------------------------------------------------
 
+# trace_grep is the only way a scenario reads the trace log, and it passes -a so
+# grep reads the log as text no matter what bytes are in it.
+#
+# The log is a plain file that more than one process can end up holding open. A
+# writer whose file offset outlives a truncation goes on writing past the new
+# end, and the gap between reads back as NUL bytes. grep then classifies the
+# whole file as binary and reports no match — ugrep, this repo's usual grep on
+# macOS, prints nothing and exits 1 for every pattern in the file, including the
+# records that are plainly there. Every assertion below would then fail with a
+# message blaming the app for a byte the app never wrote, which is the exact
+# shape of a gate people learn to ignore.
+trace_grep() {
+    grep -a "$@" "$LOG_FILE"
+}
+
 # trace_cursor prints LINE:COL from the most recent trace record that carries a
 # cursor position.
 trace_cursor() {
-    grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | tail -n 1 | \
+    trace_grep 'ZEPHYR_GUI_TRACE' | tail -n 1 | \
         sed -E -n 's/.*"cursorLine":([0-9]+),"cursorCol":([0-9]+).*/\1:\2/p'
 }
 
@@ -200,7 +218,7 @@ trace_cursor() {
 # trace record, so a scenario can assert what the buffer holds without reading
 # pixels. Empty when no such record has been emitted yet.
 trace_buffer_hash() {
-    grep -o '"bufferHash":"[0-9a-f]*"' "$LOG_FILE" | tail -n 1 | \
+    trace_grep -o '"bufferHash":"[0-9a-f]*"' | tail -n 1 | \
         sed -E 's/.*:"([0-9a-f]*)"/\1/'
 }
 
@@ -589,9 +607,9 @@ scenario_smoke() {
     sleep 0.2
     "$DRIVER" scroll-lines "$pid" 601 301 -4
     sleep 0.4
-    grep -q '"kind":"Press"' "$LOG_FILE" || { echo "no pointer press was recorded" >&2; exit 1; }
-    grep -q '"selection":true' "$LOG_FILE" || { echo "no drag selection was recorded" >&2; exit 1; }
-    grep -q '"kind":"Scroll"' "$LOG_FILE" || { echo "no scroll event was recorded" >&2; exit 1; }
+    trace_grep -q '"kind":"Press"' || { echo "no pointer press was recorded" >&2; exit 1; }
+    trace_grep -q '"selection":true' || { echo "no drag selection was recorded" >&2; exit 1; }
+    trace_grep -q '"kind":"Scroll"' || { echo "no scroll event was recorded" >&2; exit 1; }
     "$DRIVER" capture "$pid" "$STATE_DIR/artifacts/01-interacted.png"
     "$DRIVER" preview "$STATE_DIR/artifacts/00-launch.png" \
         "$STATE_DIR/artifacts/00-launch.jpg"
@@ -625,10 +643,10 @@ scenario_regression() {
 
     "$DRIVER" drag "$pid" 260 165 520 245 0.4
     sleep 0.15
-    grep -q '"kind":"Drag".*"selection":true' "$LOG_FILE" || { echo "drag selection failed" >&2; exit 1; }
+    trace_grep -q '"kind":"Drag".*"selection":true' || { echo "drag selection failed" >&2; exit 1; }
     "$DRIVER" scroll "$pid" 600 300 -7
     sleep 0.3
-    grep -Eq '"kind":"Scroll".*"viewportOffset":[1-9][0-9]*' "$LOG_FILE" || { echo "fractional pixel scroll was not retained" >&2; exit 1; }
+    trace_grep -Eq '"kind":"Scroll".*"viewportOffset":[1-9][0-9]*' || { echo "fractional pixel scroll was not retained" >&2; exit 1; }
     capture_checked 11-pointer-actions
 
     "$DRIVER" key "$pid" v cmd shift
@@ -649,7 +667,7 @@ scenario_regression() {
     capture_checked 14-markdown-read
     "$DRIVER" drag "$pid" 180 150 560 300 0.4
     sleep 0.2
-    md_drag=$(grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | grep '"kind":"Drag"' | tail -n 1)
+    md_drag=$(trace_grep 'ZEPHYR_GUI_TRACE' | grep -a '"kind":"Drag"' | tail -n 1)
     grep -q '"markdownSelect":true' <<<"$md_drag" || { echo "markdown drag selection was not active" >&2; exit 1; }
     if grep -q '"cursorLine"\|"cursorCol"' <<<"$md_drag"; then
         echo "markdown read-mode selection fell through to the hidden editor" >&2
@@ -746,7 +764,7 @@ logs)
     tail -n 100 "$LOG_FILE"
     ;;
 trace)
-    grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | tail -n 100
+    trace_grep 'ZEPHYR_GUI_TRACE' | tail -n 100
     ;;
 scenarios)
     list_scenarios

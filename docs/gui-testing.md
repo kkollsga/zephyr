@@ -160,6 +160,15 @@ rather than from pixels; `trace_cursor` and `trace_buffer_hash` in
 `scripts/gui-test.sh` read the latest of each. Normal application launches do
 not emit this telemetry.
 
+Scenarios read the log only through `trace_grep`, which passes `grep -a`. The
+log is one file in `$TMPDIR` that a second process can still hold open, and a
+writer whose offset outlived a truncation leaves a NUL gap ahead of the current
+records; grep then treats the whole log as binary and reports no match for
+records that are plainly in it, so an assertion fails blaming the app for a byte
+the app never wrote. Each launch also unlinks the log rather than truncating it,
+so a stale writer keeps the old inode and cannot reach the new one. Add a
+trace assertion through `trace_grep`, never with a bare `grep "$LOG_FILE"`.
+
 ## Performance program
 
 Run five isolated launch/first-frame samples with:
