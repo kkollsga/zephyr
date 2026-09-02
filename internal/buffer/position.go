@@ -81,15 +81,7 @@ func (pt *PieceTable) LineColToOffset(lc LineCol) (int, error) {
 		return lineStart, nil
 	}
 
-	// Compute the byte length of this line (excluding newline)
-	var lineEnd int
-	if lc.Line+1 < len(lineStarts) {
-		lineEnd = lineStarts[lc.Line+1] - 1 // exclude the '\n'
-	} else {
-		lineEnd = pt.Length()
-	}
-
-	lineLen := lineEnd - lineStart
+	lineLen := pt.lineEndOffset(lc.Line) - lineStart
 	if lineLen <= 0 {
 		return 0, fmt.Errorf("column %d exceeds line length", lc.Col)
 	}
@@ -114,13 +106,30 @@ func (pt *PieceTable) LineColToOffset(lc LineCol) (int, error) {
 	return lineStart + byteOff, nil
 }
 
-// LineColToOffsetSafe converts a 0-based line/column to a byte offset.
-// Returns 0 if the position is invalid. This is a convenience wrapper
-// around LineColToOffset for callers that don't need error handling.
+// LineColToOffsetSafe converts a 0-based line/column to a byte offset for
+// callers that don't need error handling. A column past the end of a real line
+// clamps to that line's end: returning 0 there would silently relocate the
+// caller's edit to the top of the file. Only a line number outside the buffer
+// (or negative) yields 0.
 func (pt *PieceTable) LineColToOffsetSafe(line, col int) int {
 	off, err := pt.LineColToOffset(LineCol{Line: line, Col: col})
-	if err != nil {
+	if err == nil {
+		return off
+	}
+	if line < 0 || line >= len(pt.lineStarts) {
 		return 0
 	}
-	return off
+	if col < 0 {
+		return pt.lineStarts[line]
+	}
+	return pt.lineEndOffset(line)
+}
+
+// lineEndOffset returns the byte offset just past the last character of the
+// line, excluding its newline. The line index must be in range.
+func (pt *PieceTable) lineEndOffset(line int) int {
+	if line+1 < len(pt.lineStarts) {
+		return pt.lineStarts[line+1] - 1
+	}
+	return pt.Length()
 }

@@ -183,3 +183,50 @@ func TestCursor_PreferredCol_Preserved(t *testing.T) {
 		t.Fatalf("expected preferred col 6 restored, got %d", c.Col)
 	}
 }
+
+// Cursor.Col counts runes everywhere else in the editor, so SetPosition must
+// clamp against the rune count. Clamping against the byte length admitted a
+// column past the end of a multibyte line, which then failed to convert to an
+// offset at all.
+func TestCursorSetPosition_ClampsInRunes(t *testing.T) {
+	pt := buffer.NewFromString("héllo wörld\nplain")
+	var c Cursor
+	c.SetPosition(pt, 0, 999)
+	if c.Col != 11 {
+		t.Fatalf("Col = %d, want 11 (rune count of %q)", c.Col, "héllo wörld")
+	}
+	c.SetPosition(pt, 0, 12)
+	if c.Col != 11 {
+		t.Fatalf("Col = %d past the line's 11 runes", c.Col)
+	}
+	c.SetPosition(pt, 9, 0)
+	if c.Line != 1 {
+		t.Fatalf("Line = %d, want 1 (last line)", c.Line)
+	}
+}
+
+// An out-of-range column used to convert to offset 0, so the edit landed at the
+// top of the file instead of at the cursor's line.
+func TestInsertAfterOverflowingColumnLandsAtLineEnd(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("first\nhéllo wörld\nlast"), "")
+	ed.Cursor.SetPosition(ed.Buffer, 1, 999)
+	ed.InsertText("!")
+
+	if got := ed.Buffer.Text(); got != "first\nhéllo wörld!\nlast" {
+		t.Fatalf("insert landed wrong: %q", got)
+	}
+}
+
+// The cursor moves back over the runes the bytes held, not over the byte count.
+func TestDeleteBackwardN_MovesCursorByRunes(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("aöb"), "")
+	ed.Cursor.SetPosition(ed.Buffer, 0, 3)
+	ed.DeleteBackwardN(3) // "öb": three bytes, two runes
+
+	if got := ed.Buffer.Text(); got != "a" {
+		t.Fatalf("text = %q, want %q", got, "a")
+	}
+	if ed.Cursor.Col != 1 {
+		t.Fatalf("Col = %d, want 1", ed.Cursor.Col)
+	}
+}

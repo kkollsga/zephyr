@@ -98,3 +98,30 @@ func TestLineColToOffset_NegativeValues(t *testing.T) {
 		t.Fatal("expected error for negative line")
 	}
 }
+
+// A column past the end of a real line clamps to that line's end. Returning 0
+// instead would silently move a caller's edit to the top of the file; only an
+// invalid line number is a 0.
+func TestLineColToOffsetSafe_ColumnOverflowClampsToLineEnd(t *testing.T) {
+	pt := NewFromString("first\nhéllo wörld\nlast")
+	lineStart := pt.LineStartOffset(1)
+	wantEnd := lineStart + len("héllo wörld")
+
+	if got := pt.LineColToOffsetSafe(1, 999); got != wantEnd {
+		t.Fatalf("overflow column = %d, want %d (end of line 1)", got, wantEnd)
+	}
+	if got := pt.LineColToOffsetSafe(2, 4); got != pt.Length() {
+		t.Fatalf("overflow on the last line = %d, want %d", got, pt.Length())
+	}
+	// An empty line has no runes to walk: clamp to the line start, not to 0.
+	pt2 := NewFromString("abc\n\ndef")
+	if got := pt2.LineColToOffsetSafe(1, 3); got != 4 {
+		t.Fatalf("overflow on an empty line = %d, want 4", got)
+	}
+	if got := pt.LineColToOffsetSafe(99, 0); got != 0 {
+		t.Fatalf("invalid line = %d, want 0", got)
+	}
+	if got := pt.LineColToOffsetSafe(-1, 0); got != 0 {
+		t.Fatalf("negative line = %d, want 0", got)
+	}
+}

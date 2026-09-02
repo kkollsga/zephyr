@@ -55,13 +55,17 @@ func (st *appState) softTabBackspace() bool {
 	if err != nil {
 		return false
 	}
-	if col > len(line) {
+	runes := []rune(line)
+	if col > len(runes) {
 		return false
 	}
-	prefix := line[:col]
+	// Cursor.Col counts runes, so the text before it has to be taken by rune.
+	prefix := string(runes[:col])
 	if strings.TrimLeft(prefix, " ") != "" {
 		return false
 	}
+	// The prefix is all spaces, so its byte length is also its rune count and
+	// the byte count handed to DeleteBackwardN is a whole number of runes.
 	remove := len(prefix) % 4
 	if remove == 0 {
 		remove = 4

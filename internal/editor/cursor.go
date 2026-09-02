@@ -143,13 +143,16 @@ func (c *Cursor) PageUp(pt *buffer.PieceTable, pageSize int) {
 }
 
 // SetPosition sets the cursor to an exact line/col, clamping to valid range.
+// Col counts runes, so the clamp is against the line's rune count: clamping
+// against its byte length would admit a column past the end of a multibyte
+// line, which then has no byte offset to convert to.
 func (c *Cursor) SetPosition(pt *buffer.PieceTable, line, col int) {
 	c.Line = max(0, min(line, pt.LineCount()-1))
 	lineText, err := pt.Line(c.Line)
 	if err != nil {
 		c.Col = 0
 	} else {
-		c.Col = max(0, min(col, len(lineText)))
+		c.Col = max(0, min(col, utf8.RuneCountInString(lineText)))
 	}
 	c.PreferredCol = -1
 }

@@ -132,7 +132,11 @@ func (e *Editor) DeleteBackward() {
 	e.Cursor.PreferredCol = -1
 }
 
-// DeleteBackwardN deletes n bytes behind the cursor (used for soft-tab backspace).
+// DeleteBackwardN deletes the n bytes behind the cursor as one undo step (used
+// for soft-tab backspace). n is a byte count; the cursor moves back by the
+// number of runes those bytes held. Callers must pass a whole number of runes
+// from the cursor's own line — a count that splits a rune leaves invalid UTF-8,
+// and one that reaches across a line break leaves Cursor.Line stale.
 func (e *Editor) DeleteBackwardN(n int) {
 	if e.Selection.Active && !e.Selection.IsEmpty() {
 		e.DeleteSelection()
@@ -157,7 +161,10 @@ func (e *Editor) DeleteBackwardN(n int) {
 
 	e.Buffer.Delete(offset-n, n)
 	e.Modified = true
-	e.Cursor.Col -= n
+	e.Cursor.Col -= utf8.RuneCountInString(deleted)
+	if e.Cursor.Col < 0 {
+		e.Cursor.Col = 0
+	}
 	e.Cursor.PreferredCol = -1
 }
 
@@ -471,18 +478,20 @@ func (e *Editor) SaveAs(path string) error {
 }
 
 // cursorOffset returns the byte offset for the current cursor position.
-// If the cursor is out of bounds, it is clamped to a valid position first.
+// If the cursor is out of bounds, it is clamped to a valid position first;
+// a column still out of range then falls back to the end of the cursor's line.
+// Falling back to 0 would put the caller's edit at the top of the file.
 func (e *Editor) cursorOffset() int {
 	offset, err := e.Buffer.LineColToOffset(buffer.LineCol{Line: e.Cursor.Line, Col: e.Cursor.Col})
-	if err != nil {
-		// Clamp cursor to valid position and retry
-		e.Cursor.Clamp(e.Buffer)
-		offset, err = e.Buffer.LineColToOffset(buffer.LineCol{Line: e.Cursor.Line, Col: e.Cursor.Col})
-		if err != nil {
-			return 0
-		}
+	if err == nil {
+		return offset
 	}
-	return offset
+	e.Cursor.Clamp(e.Buffer)
+	offset, err = e.Buffer.LineColToOffset(buffer.LineCol{Line: e.Cursor.Line, Col: e.Cursor.Col})
+	if err == nil {
+		return offset
+	}
+	return e.Buffer.LineColToOffsetSafe(e.Cursor.Line, e.Cursor.Col)
 }
 
 // setCursorFromOffset sets the cursor position from a byte offset.

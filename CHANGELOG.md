@@ -35,6 +35,13 @@ All notable changes to Zephyr are documented here.
   search matches describing the replaced text.
 - Undo and redo now drop extra cursors, which pointed at positions that need
   not exist in the restored document.
+- Typing or deleting on a line containing non-ASCII characters no longer
+  risks landing the edit at the top of the file: a cursor column past the end
+  of such a line is clamped to the line's last character instead of resolving
+  to offset 0.
+- Soft-tab backspace measures the indentation before the cursor by character
+  rather than by byte, and leaves the cursor in the right column afterwards on
+  a line with non-ASCII text.
 - Added syntax/format error detection with red gutter markers: JSON is
   validated with the standard parser and tree-sitter languages are checked
   for parse errors, on every Enter and after five seconds of typing
