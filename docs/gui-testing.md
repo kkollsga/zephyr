@@ -90,6 +90,11 @@ condition read off the app or the filesystem — the trace, a captured file's
 bytes — never off a screenshot. `smoke` and `regression` remain as aliases for
 `scenario smoke` and `scenario regression`.
 
+`clipboard` drives copy, paste, paste over a full selection, two undos and a
+save through real keystrokes. It runs against a copy of the fixture inside the
+state dir, never the tracked one, and it saves and restores the pasteboard
+around the run — including when the run fails part-way.
+
 Run the end-to-end input and screenshot smoke test with:
 
 ```sh

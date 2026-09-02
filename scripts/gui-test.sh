@@ -215,13 +215,33 @@ capture_checked() {
     "$DRIVER" preview "$png" "$STATE_DIR/artifacts/$name.jpg"
 }
 
+# buffer_hash_of prints the checksum the app's trace would carry for a document
+# with these bytes: the first 8 bytes of its SHA-256, hex-encoded.
+buffer_hash_of() {
+    shasum -a 256 "$1" | cut -c1-16
+}
+
+# expect_buffer fails the scenario unless the most recent trace record says the
+# buffer holds exactly the bytes of the expected file.
+expect_buffer() {
+    local label=$1 expected=$2
+    local want got
+    want=$(buffer_hash_of "$expected")
+    got=$(trace_buffer_hash)
+    if [[ "$got" != "$want" ]]; then
+        echo "buffer after $label = ${got:-<no trace record>}, want $want" >&2
+        echo "  expected content: $expected" >&2
+        exit 1
+    fi
+}
+
 # --- scenarios --------------------------------------------------------------
 #
 # Every scenario is a function named scenario_<name with dashes as underscores>
 # and listed in SCENARIOS. It launches its own app, traps stop_app, and states a
 # pass condition read off the app or the filesystem — never off a screenshot.
 
-SCENARIOS=(smoke regression)
+SCENARIOS=(smoke regression clipboard)
 
 list_scenarios() {
     printf '%s\n' "${SCENARIOS[@]}"
@@ -239,6 +259,104 @@ run_scenario() {
     echo "unknown scenario: $name" >&2
     echo "known scenarios: ${SCENARIOS[*]}" >&2
     return 2
+}
+
+# CLIPBOARD_BACKUP holds whatever was on the pasteboard before the clipboard
+# scenario ran. A harness that keeps someone's clipboard is a harness they stop
+# running, so it is restored from the EXIT trap whether the run passed or not.
+CLIPBOARD_BACKUP=""
+
+clipboard_cleanup() {
+    if [[ -n "$CLIPBOARD_BACKUP" && -f "$CLIPBOARD_BACKUP" ]]; then
+        pbcopy <"$CLIPBOARD_BACKUP" || true
+    fi
+    stop_app
+}
+
+# scenario_clipboard drives copy, paste, paste-over-selection, undo and save
+# through real keystrokes, and reads its pass conditions off the buffer
+# checksum in the trace and off the bytes Zephyr wrote to disk.
+#
+# It runs against a copy of the fixture inside the state dir. The scenario
+# saves the file, and a scenario that writes to a tracked fixture would leave
+# the working tree dirty on every run.
+scenario_clipboard() {
+    local work="$STATE_DIR/artifacts/clipboard"
+    rm -rf "$work"
+    mkdir -p "$work"
+    local target="$work/clipboard_fixture.go"
+    cp "$DEFAULT_FIXTURE" "$target"
+
+    CLIPBOARD_BACKUP="$work/pasteboard.bak"
+    pbpaste >"$CLIPBOARD_BACKUP" 2>/dev/null || : >"$CLIPBOARD_BACKUP"
+
+    # The three documents the run must pass through, built here rather than
+    # captured from the app, so the assertions are independent of it. The word
+    # is the first seven characters of the fixture: "package".
+    local word="package"
+    local original="$work/expected-original.go"
+    local pasted="$work/expected-pasted.go"
+    local replaced="$work/expected-replaced.go"
+    cp "$DEFAULT_FIXTURE" "$original"
+    cat "$original" >"$pasted"
+    printf '%s' "$word" >>"$pasted"
+    printf '%s' "$word" >"$replaced"
+
+    launch_app "$target"
+    trap clipboard_cleanup EXIT
+    pid=$(require_pid)
+    sleep 0.7
+    capture_checked 20-clipboard-launch
+
+    "$DRIVER" click "$pid" 300 165 left
+    sleep 0.2
+    "$DRIVER" key "$pid" up cmd
+    sleep 0.15
+    local i
+    for ((i = 0; i < ${#word}; i++)); do
+        "$DRIVER" key "$pid" right shift
+    done
+    sleep 0.2
+    "$DRIVER" key "$pid" c cmd
+    sleep 0.4
+    [[ "$(pbpaste)" == "$word" ]] || {
+        echo "Cmd+C did not put the selected word on the pasteboard: $(pbpaste)" >&2
+        exit 1
+    }
+
+    "$DRIVER" key "$pid" down cmd
+    sleep 0.15
+    "$DRIVER" key "$pid" v cmd
+    sleep 0.4
+    expect_buffer "the paste at end of file" "$pasted"
+
+    "$DRIVER" key "$pid" a cmd
+    sleep 0.2
+    "$DRIVER" key "$pid" v cmd
+    sleep 0.4
+    expect_buffer "the paste over the whole selection" "$replaced"
+    capture_checked 21-clipboard-pasted-over
+
+    "$DRIVER" key "$pid" z cmd
+    sleep 0.4
+    expect_buffer "undoing the paste over the selection" "$pasted"
+    "$DRIVER" key "$pid" z cmd
+    sleep 0.4
+    expect_buffer "undoing the paste at end of file" "$original"
+
+    "$DRIVER" key "$pid" s cmd
+    sleep 0.8
+    diff -q "$target" "$original" >/dev/null || {
+        echo "the saved file does not match the expected document" >&2
+        diff "$original" "$target" | head -n 20 >&2
+        exit 1
+    }
+    capture_checked 22-clipboard-saved
+
+    echo "Clipboard scenario completed; artifacts: $STATE_DIR/artifacts"
+    stop_app
+    clipboard_cleanup
+    trap - EXIT
 }
 
 scenario_smoke() {
