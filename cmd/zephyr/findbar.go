@@ -112,9 +112,14 @@ func (st *appState) drawFindBar(gtx layout.Context, editorH int) {
 	bRect.Pop()
 
 	inputBg := st.theme.FindBarInputBg
-	focusBorder := st.theme.FindBarFocus
 	textColor := st.theme.FindBarText
 	dimColor := st.theme.FindBarDim
+	// An unfocused bar keeps its matches but not the keyboard, so the active
+	// field loses its accent border and its caret.
+	fieldBorder := st.theme.FindBarFocus
+	if !st.findBar.Focused {
+		fieldBorder = st.theme.FindBarBorder
+	}
 
 	// Hover detection: translate window coords to find bar-relative
 	hRelX := st.hoverX - g.barX
@@ -147,7 +152,7 @@ func (st *appState) drawFindBar(gtx layout.Context, editorH int) {
 
 	// Focus border on active field
 	if st.findBar.FocusField == 0 {
-		st.drawInputBorder(gtx, g.inputX, g.rowY, g.inputW, findBarInputH, focusBorder)
+		st.drawInputBorder(gtx, g.inputX, g.rowY, g.inputW, findBarInputH, fieldBorder)
 	}
 
 	// Find query text or placeholder
@@ -159,7 +164,7 @@ func (st *appState) drawFindBar(gtx layout.Context, editorH int) {
 	}
 
 	// Text cursor in find field
-	if st.findBar.FocusField == 0 {
+	if st.findBar.Focused && st.findBar.FocusField == 0 {
 		cx := g.inputX + 4 + st.findBar.CursorPos*tr.CharWidth
 		cursorH := tr.LineHeightPx
 		cRect := clip.Rect{
@@ -241,7 +246,7 @@ func (st *appState) drawFindBar(gtx layout.Context, editorH int) {
 
 		// Focus border on replace field
 		if st.findBar.FocusField == 1 {
-			st.drawInputBorder(gtx, g.inputX, g.rowY2, g.inputW, findBarInputH, focusBorder)
+			st.drawInputBorder(gtx, g.inputX, g.rowY2, g.inputW, findBarInputH, fieldBorder)
 		}
 
 		// Replace field text or placeholder
@@ -252,7 +257,7 @@ func (st *appState) drawFindBar(gtx layout.Context, editorH int) {
 		}
 
 		// Text cursor in replace field
-		if st.findBar.FocusField == 1 {
+		if st.findBar.Focused && st.findBar.FocusField == 1 {
 			cx := g.inputX + 4 + st.findBar.CursorPos*tr.CharWidth
 			cRect := clip.Rect{
 				Min: image.Pt(cx, textY2),
@@ -362,6 +367,9 @@ func (st *appState) handleFindBarClick(px, py int) bool {
 	if tr == nil {
 		return true
 	}
+
+	// Any interaction with the bar takes the keyboard back from the editor.
+	st.findBar.Focus()
 
 	// Chevron button
 	if relX < g.chevronW && relY >= g.rowY && relY < g.rowY+findBarInputH {

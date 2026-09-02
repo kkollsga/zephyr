@@ -33,6 +33,13 @@ All notable changes to Zephyr are documented here.
   to, remembered across launches. A buffer that already has a file still saves
   next to that file.
 
+### Find
+
+- The find bar now gives the keyboard back when you click in the text. The bar
+  stays open with its matches highlighted, its field goes dim, and typing edits
+  the file again. Cmd+F or a click in the bar's field takes focus back; Escape
+  still closes it.
+
 ### Markdown
 
 - Markdown read mode now renders color emoji on macOS, including ZWJ

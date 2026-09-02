@@ -68,19 +68,14 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 					break
 				}
 
-				if st.vimEnabled && st.vimState != nil &&
-					!st.saveMenu.visible && !st.langSel.Visible && !st.findBar.Visible {
-					st.handleVimKeyEvent(ke)
-				} else {
-					st.handleKey(ke)
-				}
+				st.dispatchKey(ke)
 			}
 		case key.EditEvent:
 			if st.langSel.Visible {
 				break
 			}
 			if st.vimEnabled && st.vimState != nil &&
-				!st.saveMenu.visible && !st.findBar.Visible {
+				!st.saveMenu.visible && !st.findBarHasKeys() {
 				st.handleVimEditEvent(ke.Text)
 			} else {
 				st.handleTextInput(ke.Text)
@@ -158,8 +153,9 @@ func (st *appState) handleKey(ke key.Event) {
 		return
 	}
 
-	// Find bar intercept
-	if st.findBar.Visible {
+	// Find bar intercept — only while the bar owns the keyboard. An unfocused
+	// bar stays on screen and its remaining keys are handled in findfocus.go.
+	if st.findBarHasKeys() {
 		switch {
 		case ke.Name == key.NameEscape:
 			st.findBar.Close()
@@ -547,6 +543,7 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		// Markdown read-mode selection consumes editor-area presses without
 		// moving the hidden edit-mode cursor.
 		if ts := st.activeTabState(); ts != nil && ts.mode == viewMarkdownRead {
+			st.blurFindBarForEditorPress()
 			px, py := int(pe.Position.X), int(pe.Position.Y)
 			absY := py - st.tabBarHeight + int(ts.mdScrollY)
 			off := mdCharOffset(ts.mdSelBlocks, px, absY)
@@ -561,6 +558,7 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		if ed == nil {
 			return
 		}
+		st.blurFindBarForEditorPress()
 
 		gutterWidth := st.gutterRend.Width(ed.Buffer.LineCount())
 		if int(pe.Position.X) < gutterWidth {
@@ -803,7 +801,7 @@ func (st *appState) handleTextInput(text string) {
 	if st.saveMenu.visible {
 		return // collapsed mode ignores text input
 	}
-	if st.findBar.Visible {
+	if st.findBarHasKeys() {
 		st.findBar.InsertChar(text)
 		if st.findBar.FocusField == 0 {
 			st.updateSearchResults()

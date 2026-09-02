@@ -28,14 +28,14 @@ func TestHandleTextInputRoutesOverlaysPairsAndPlainText(t *testing.T) {
 		t.Fatalf("plain input text=%q", ed.Buffer.Text())
 	}
 
-	st.findBar.Visible = true
+	st.findBar.Open()
 	st.findBar.Query = ""
 	st.findBar.CursorPos = 0
 	st.handleTextInput("needle")
 	if st.findBar.Query != "needle" || ed.Buffer.Text() != "() plain" {
 		t.Fatalf("find routing query=%q editor=%q", st.findBar.Query, ed.Buffer.Text())
 	}
-	st.findBar.Visible = false
+	st.findBar.Close()
 
 	st.saveMenu.visible = true
 	st.saveMenu.tabIdx = 0
@@ -77,8 +77,7 @@ func TestHandleKeyEditingNavigationAndOverlayBranches(t *testing.T) {
 		t.Fatalf("file-end cursor=%+v lines=%d", ed.Cursor, ed.Buffer.LineCount())
 	}
 
-	st.findBar.Visible = true
-	st.findBar.ShowReplace = true
+	st.findBar.OpenReplace()
 	st.findBar.Query = "abc"
 	st.findBar.CursorPos = 3
 	st.handleKey(key.Event{Name: key.NameDeleteBackward})

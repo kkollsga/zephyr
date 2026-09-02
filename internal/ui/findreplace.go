@@ -19,7 +19,17 @@ type FindReplaceBar struct {
 	Matches       []editor.SearchResult
 	FocusField    int // 0 = find, 1 = replace
 	CursorPos     int // rune-based cursor position in active field
+	// Focused reports whether the bar owns the keyboard. A visible but
+	// unfocused bar keeps its matches highlighted while typing edits the
+	// buffer.
+	Focused bool
 }
+
+// Focus gives the bar the keyboard.
+func (fr *FindReplaceBar) Focus() { fr.Focused = true }
+
+// Blur hands the keyboard back to the editor, leaving the bar on screen.
+func (fr *FindReplaceBar) Blur() { fr.Focused = false }
 
 // NewFindReplaceBar creates a new find/replace bar.
 func NewFindReplaceBar() *FindReplaceBar {
@@ -29,6 +39,7 @@ func NewFindReplaceBar() *FindReplaceBar {
 // Open shows the find bar (without replace).
 func (fr *FindReplaceBar) Open() {
 	fr.Visible = true
+	fr.Focused = true
 	fr.FocusField = 0
 	fr.CursorPos = utf8.RuneCountInString(fr.Query)
 }
@@ -36,6 +47,7 @@ func (fr *FindReplaceBar) Open() {
 // OpenReplace shows the find/replace bar.
 func (fr *FindReplaceBar) OpenReplace() {
 	fr.Visible = true
+	fr.Focused = true
 	fr.ShowReplace = true
 	fr.FocusField = 0
 	fr.CursorPos = utf8.RuneCountInString(fr.Query)
@@ -44,6 +56,7 @@ func (fr *FindReplaceBar) OpenReplace() {
 // Close hides the find/replace bar.
 func (fr *FindReplaceBar) Close() {
 	fr.Visible = false
+	fr.Focused = false
 	fr.Matches = nil
 	fr.MatchCount = 0
 	fr.CurrentMatch = 0
