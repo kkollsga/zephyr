@@ -1,4 +1,4 @@
-.PHONY: build build-windows app run test bench fuzz perf clean vet fmt lint all baseline install-test docs-test gui-test-build gui-test-launch gui-test-stop gui-test-permissions gui-test-smoke gui-test-regression gate check-dev-docs
+.PHONY: build build-windows app run test bench fuzz perf clean vet fmt lint all baseline install-test docs-test gui-test-build gui-test-launch gui-test-stop gui-test-permissions gui-test-smoke gui-test-regression gate check-dev-docs check-buffer-mutations
 
 # Bounds for check-dev-docs. DEV_DOCS_MAX_MB caps the gitignored working
 # folder; MIN_FREE_MB is a floor on free space of the volume the repo sits on,
@@ -95,14 +95,49 @@ gui-test-smoke:
 gui-test-regression:
 	./scripts/gui-test.sh regression
 
+## Every buffer mutation must go through internal/editor, which records it in
+## the undo history. A direct pt.Insert/pt.Delete from elsewhere is invisible
+## to History, so the edit cannot be undone AND every older undo entry is left
+## holding byte offsets computed against a buffer that has since changed
+## length — one unrecorded edit corrupts the whole history behind it.
+##
+## Scope today: the Insert/Delete rule only. Whole-buffer swaps (assigning a
+## new piece table into ed.Buffer) are the same hazard for derived state and
+## are NOT checked yet; the sites that do it are cmd/zephyr/format.go:79 and
+## cmd/zephyr/navigator.go (four), against internal/editor's own two in
+## Undo/Redo and one in Reload.
+##
+## Tests are exempt: a test may plant an unrecorded edit deliberately to prove
+## the recorded path is the one being exercised.
+check-buffer-mutations:
+	@find_go() { find . \
+		-path ./.git -prune -o -path ./.artifacts -prune -o \
+		-path ./build -prune -o -path ./Zephyr.app -prune -o \
+		-path ./internal/editor -prune -o \
+		-type f -name '*.go' ! -name '*_test.go' -print; }; \
+	scanned=$$(find_go | wc -l | tr -d ' '); \
+	if [ "$$scanned" -eq 0 ]; then \
+		echo "FAIL: check-buffer-mutations scanned no .go files"; \
+		echo "  an empty scan is a broken check, not a clean tree"; \
+		exit 1; \
+	fi; \
+	hits=$$(find_go | tr '\n' '\0' | xargs -0 grep -HnE '\.Buffer\.(Insert|Delete)\(' || true); \
+	if [ -n "$$hits" ]; then \
+		echo "FAIL: buffer mutated outside internal/editor (unrecorded, breaks undo):"; \
+		echo "$$hits" | sed 's/^/    /'; \
+		echo "  -> use a recorded Editor method, or add one alongside JoinLines/IndentLine"; \
+		exit 1; \
+	fi; \
+	echo "check-buffer-mutations: $$scanned files scanned, no direct buffer mutation outside internal/editor"
+
 ## Pre-commit / pre-push gate: the cheap checks, in order, stopping at the
 ## first failure. Deliberately excludes the GUI harness (needs a logged-in
 ## macOS session with Accessibility + Screen Recording) — see the note it
 ## prints. Add a step here only when it has a record of catching a real
 ## failure; everything else is CI's job.
-gate: check-dev-docs vet test
+gate: check-dev-docs check-buffer-mutations vet test
 	@echo ""
-	@echo "gate: PASSED — check-dev-docs, vet, test."
+	@echo "gate: PASSED — check-dev-docs, check-buffer-mutations, vet, test."
 	@echo "NOT covered by this gate: the macOS GUI harness. If this change"
 	@echo "touches the UI, run 'make gui-test-build && make gui-test-launch'"
 	@echo "then 'make gui-test-smoke' (or gui-test-regression) and read the"
