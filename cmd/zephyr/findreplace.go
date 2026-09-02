@@ -23,18 +23,23 @@ func (st *appState) openFindBar(withReplace bool) {
 }
 
 func (st *appState) updateSearchResults() {
-	ed := st.activeEd()
-	if ed == nil {
-		st.findBar.Matches = nil
-		st.findBar.MatchCount = 0
-		st.findBar.CurrentMatch = 0
-		return
+	if st.refreshSearchMatches() {
+		st.jumpToCurrentMatch()
 	}
-	if st.findBar.Query == "" {
+}
+
+// refreshSearchMatches recomputes the match list against the current buffer and
+// clamps the current-match index, without moving the cursor. Reports whether
+// there is a current match to jump to. Callers that only need the highlighting
+// to stop describing stale byte offsets — an undo, a buffer swap — use this
+// directly, so re-deriving the matches does not yank the cursor to one of them.
+func (st *appState) refreshSearchMatches() bool {
+	ed := st.activeEd()
+	if ed == nil || st.findBar.Query == "" {
 		st.findBar.Matches = nil
 		st.findBar.MatchCount = 0
 		st.findBar.CurrentMatch = 0
-		return
+		return false
 	}
 	results, _ := editor.Find(ed.Buffer, st.findBar.Query, st.findBar.UseRegex, st.findBar.CaseSensitive)
 	st.findBar.Matches = results
@@ -42,14 +47,12 @@ func (st *appState) updateSearchResults() {
 
 	if len(results) == 0 {
 		st.findBar.CurrentMatch = 0
-		return
+		return false
 	}
-
-	// Clamp current match to valid range, always scroll to show it
 	if st.findBar.CurrentMatch < 1 || st.findBar.CurrentMatch > len(results) {
 		st.findBar.CurrentMatch = 1
 	}
-	st.jumpToCurrentMatch()
+	return true
 }
 
 func (st *appState) findNextMatch() {

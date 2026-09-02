@@ -6,7 +6,6 @@ import (
 	"github.com/kristianweb/zephyr/internal/buffer"
 	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/format"
-	"github.com/kristianweb/zephyr/internal/render"
 )
 
 // isReindentLang reports whether the language supports token-aware
@@ -84,20 +83,7 @@ func (st *appState) applyFormattedBuffer(ed *editor.Editor, ts *tabState, format
 	// calling this); a format edits the buffer, so the tab must be marked dirty.
 	ed.Modified = true
 
-	// Full re-parse: the whole buffer was replaced, so incremental highlighting
-	// cannot be used.
-	if ts.highlighter != nil {
-		source := ed.Buffer.TextBytes(ts.sourceBuf)
-		ts.sourceBuf = source
-		ts.highlighter.Parse(source)
-	}
-	ed.Buffer.DrainEdits() // discard edits from the swap
-	ts.lastCursorLine = -1 // force viewport/cursor re-sync
-	ts.lastCursorCol = -1
-	if ts.foldState != nil {
-		regions := render.ComputeFoldRegions(ed.Buffer.Text())
-		ts.foldState.SetRegions(regions, ed.Buffer.LineCount())
-	}
+	st.afterBufferSwap(ed, ts)
 	st.invalidate()
 }
 

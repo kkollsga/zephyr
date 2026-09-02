@@ -296,15 +296,9 @@ func (st *appState) executeVimAction(action vim.Action) {
 		st.afterEdit()
 
 	case vim.ActionUndo:
-		for i := 0; i < count; i++ {
-			ed.Undo()
-		}
-		st.afterEdit()
+		st.undoSteps(count)
 	case vim.ActionRedo:
-		for i := 0; i < count; i++ {
-			ed.Redo()
-		}
-		st.afterEdit()
+		st.redoSteps(count)
 
 	case vim.ActionRepeatLast:
 		if st.vimState.LastAction.Kind != vim.ActionNone {

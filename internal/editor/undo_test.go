@@ -67,3 +67,46 @@ func TestUndoRedo_ReportSuccess(t *testing.T) {
 		t.Fatalf("redo failed: %q", ed.Buffer.Text())
 	}
 }
+
+// EditAction carries one cursor, so extra cursors are not restorable and the
+// positions they hold may not exist in the document undo restores. Both
+// directions therefore drop them rather than editing at stale positions.
+func TestUndoRedo_ClearExtraCursors(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("aa\nbb\ncc"), "")
+	ed.AddCursorBelow()
+	ed.AddCursorBelow()
+	ed.InsertTextAtAllCursors("x")
+	if len(ed.Cursors) != 2 {
+		t.Fatalf("fixture: %d extra cursors, want 2", len(ed.Cursors))
+	}
+
+	if !ed.Undo() || len(ed.Cursors) != 0 || len(ed.Selections) != 0 {
+		t.Fatalf("undo left %d cursors / %d selections", len(ed.Cursors), len(ed.Selections))
+	}
+	ed.AddCursorBelow()
+	if !ed.Redo() || len(ed.Cursors) != 0 || len(ed.Selections) != 0 {
+		t.Fatalf("redo left %d cursors / %d selections", len(ed.Cursors), len(ed.Selections))
+	}
+}
+
+// A whole-buffer replacement is reported as a swap so the caller can rebuild
+// the state it derives from the buffer object; an in-place edit is not.
+func TestUndoStep_ReportsBufferSwap(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("one"), "")
+	ed.History.RecordExternalChange("one", "two", ed.Cursor, ed.Cursor)
+	ed.Buffer = buffer.NewFromString("two")
+	ed.InsertText("!")
+
+	if r := ed.UndoStep(); !r.Applied || r.Swapped {
+		t.Fatalf("undo of a plain insert = %+v, want applied without a swap", r)
+	}
+	if r := ed.UndoStep(); !r.Applied || !r.Swapped {
+		t.Fatalf("undo of a full replacement = %+v, want a swap", r)
+	}
+	if ed.Buffer.Text() != "one" {
+		t.Fatalf("buffer = %q, want %q", ed.Buffer.Text(), "one")
+	}
+	if r := ed.RedoStep(); !r.Applied || !r.Swapped {
+		t.Fatalf("redo of a full replacement = %+v, want a swap", r)
+	}
+}

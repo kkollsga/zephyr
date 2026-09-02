@@ -216,27 +216,61 @@ func (e *Editor) DeleteSelection() {
 	e.Modified = true
 }
 
+// UndoResult reports the outcome of one undo or redo step. Swapped is set when
+// applying the step replaced the whole buffer object (a full-content
+// replacement: a reload, a format, an external change). Everything a caller
+// derives from the buffer — a syntax tree, fold regions, byte offsets into the
+// old content — describes a document that no longer exists after a swap, and
+// no incremental update can carry it across.
+type UndoResult struct {
+	Applied bool
+	Swapped bool
+}
+
 // Undo reverses the last edit action and reports whether it was applied.
-// The action is only popped once the buffer has accepted the reverse edit: a
-// refused edit that still moved the stacks would leave every later action
-// describing a document the buffer no longer holds.
+// UndoStep is the same operation for callers that also need to know whether
+// the buffer object was replaced.
 func (e *Editor) Undo() bool {
+	return e.UndoStep().Applied
+}
+
+// UndoStep reverses the last edit action. The action is only popped once the
+// buffer has accepted the reverse edit: a refused edit that still moved the
+// stacks would leave every later action describing a document the buffer no
+// longer holds. Extra cursors are dropped, since the positions they hold were
+// never captured in the action and may no longer exist.
+func (e *Editor) UndoStep() UndoResult {
 	peeked := e.History.PeekUndo()
 	if peeked == nil {
-		return false
+		return UndoResult{}
 	}
 	action := *peeked
 	cursor := e.Cursor
 	if !e.applyUndo(&action) {
 		e.Cursor = cursor
-		return false
+		return UndoResult{}
 	}
 	e.History.Undo()
 
 	e.Cursor = action.Cursor
 	e.Selection.Clear()
+	e.ClearExtraCursors()
 	e.Modified = true
-	return true
+	return UndoResult{Applied: true, Swapped: swapsBuffer(&action)}
+}
+
+// swapsBuffer reports whether applying action replaces the buffer object
+// rather than editing it in place.
+func swapsBuffer(action *EditAction) bool {
+	if action.Type == ActionReplace {
+		return true
+	}
+	for i := range action.Group {
+		if swapsBuffer(&action.Group[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Editor) applyUndo(action *EditAction) bool {
@@ -271,23 +305,33 @@ func (e *Editor) applyUndoGroup(group []EditAction) bool {
 }
 
 // Redo reapplies the last undone action and reports whether it was applied.
+// RedoStep is the same operation for callers that also need to know whether
+// the buffer object was replaced.
 func (e *Editor) Redo() bool {
+	return e.RedoStep().Applied
+}
+
+// RedoStep reapplies the last undone action, leaving the stacks untouched if
+// the buffer refuses it. Extra cursors are dropped for the same reason as in
+// UndoStep.
+func (e *Editor) RedoStep() UndoResult {
 	peeked := e.History.PeekRedo()
 	if peeked == nil {
-		return false
+		return UndoResult{}
 	}
 	action := *peeked
 	cursor := e.Cursor
 	modified, ok := e.applyRedo(&action)
 	if !ok {
 		e.Cursor = cursor
-		return false
+		return UndoResult{}
 	}
 	e.History.Redo()
 
 	e.Selection.Clear()
+	e.ClearExtraCursors()
 	e.Modified = modified
-	return true
+	return UndoResult{Applied: true, Swapped: swapsBuffer(&action)}
 }
 
 // applyRedo reapplies action and reports the Modified flag to leave behind

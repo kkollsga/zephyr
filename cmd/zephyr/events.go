@@ -298,11 +298,9 @@ func (st *appState) handleKey(ke key.Event) {
 		ed.InsertText("    ")
 		st.afterEdit()
 	case ke.Name == "Z" && ke.Modifiers == key.ModShortcut:
-		ed.Undo()
-		st.afterEdit()
+		st.undoSteps(1)
 	case ke.Name == "Z" && ke.Modifiers == key.ModShortcut|key.ModShift:
-		ed.Redo()
-		st.afterEdit()
+		st.redoSteps(1)
 	case ke.Name == "S" && ke.Modifiers == key.ModShortcut:
 		tab := st.tabBar.ActiveTab()
 		if tab != nil {

@@ -29,6 +29,12 @@ All notable changes to Zephyr are documented here.
 - Undo and redo no longer desynchronise from the buffer when an edit is
   refused: the action stays on the stack it came from instead of moving
   across, so later undos keep applying at the right offsets.
+- Undoing a format (or any whole-buffer replacement, such as a reload) now
+  re-highlights, recomputes fold regions, and re-derives the find bar's match
+  positions immediately, instead of leaving syntax highlighting, folds, and
+  search matches describing the replaced text.
+- Undo and redo now drop extra cursors, which pointed at positions that need
+  not exist in the restored document.
 - Added syntax/format error detection with red gutter markers: JSON is
   validated with the standard parser and tree-sitter languages are checked
   for parse errors, on every Enter and after five seconds of typing
