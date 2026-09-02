@@ -26,6 +26,9 @@ All notable changes to Zephyr are documented here.
   of a notification that expired after ten seconds and left no trace.
 - Refusing a save during quit now leaves the tab open and the quit
   unfinished, rather than closing a tab whose file was never written.
+- Windows: saving a file that another program has open no longer fails with
+  "Access is denied". The replacement is retried for up to half a second while
+  the other reader holds the file.
 
 ### Markdown
 

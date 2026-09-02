@@ -31,7 +31,7 @@ var defaultSaveFileOps = saveFileOps{
 	},
 	chmod:            os.Chmod,
 	preserveMetadata: preserveFileMetadata,
-	rename:           os.Rename,
+	rename:           renameReplace,
 	remove:           os.Remove,
 	syncDir:          syncParentDir,
 	lstat:            os.Lstat,

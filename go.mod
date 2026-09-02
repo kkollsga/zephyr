@@ -1,6 +1,6 @@
 module github.com/kristianweb/zephyr
 
-go 1.26.1
+go 1.26.6
 
 require (
 	gioui.org v0.9.0
