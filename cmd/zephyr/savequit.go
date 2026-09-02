@@ -57,8 +57,15 @@ func (st *appState) showSaveMenu(idx int, closeAfter, forQuit bool) {
 	}
 }
 
-// showSaveAsMenu opens the save menu with Save As rows already expanded.
+// showSaveAsMenu opens the save menu with Save As rows already expanded. A
+// HEAD view has nothing to save under any name — the buffer is the file's
+// history — so the menu is refused rather than opened onto a write that will
+// be refused at the end.
 func (st *appState) showSaveAsMenu(idx int, closeAfter, forQuit bool) {
+	if idx >= 0 && idx < len(st.tabBar.Tabs) && st.headViewRefusesSave(st.tabBar.Tabs[idx]) {
+		st.notify("HEAD view is read-only — press go to return to the file", 5*time.Second)
+		return
+	}
 	st.showSaveMenu(idx, closeAfter, forQuit)
 	st.saveMenu.saveAsExpanded = true
 }
@@ -469,7 +476,14 @@ func (st *appState) refreshGitDiffForEditor(ed *editor.Editor) {
 	}
 }
 
+// saveTabToPath is the funnel every Save As lands in, so the HEAD-view refusal
+// sits here rather than at each entry point: a write of committed content is
+// data loss whichever menu, key or prompt asked for it.
 func (st *appState) saveTabToPath(tab *ui.Tab, path string) bool {
+	if st.headViewRefusesSave(tab) {
+		st.notify("HEAD view is read-only — press go to return to the file", 5*time.Second)
+		return false
+	}
 	oldPath := tab.Editor.FilePath
 	if err := tab.Editor.SaveAs(path); err != nil {
 		fmt.Fprintf(os.Stderr, "save error: %v\n", err)

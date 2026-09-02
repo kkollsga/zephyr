@@ -61,7 +61,65 @@ func headViewApp(t *testing.T) (*appState, *editor.Editor, *tabState, *ui.Tab, s
 	tab := st.tabBar.ActiveTab()
 	tab.Title = "sample.txt"
 	tab.IsUntitled = false
+	// Without a snapshot every save reads as a clobber, and a save flow that
+	// never reaches the write is no test of what the write does.
+	st.snapshotEditorFile(ed)
 	return st, ed, ts, tab, path
+}
+
+// Cmd+Shift+S in a HEAD view, aimed at the file's own name, walked all the way
+// through the overwrite confirmation: the committed content must never reach
+// the working file.
+func TestHeadViewSaveAsRefusesToWriteHeadContent(t *testing.T) {
+	st, _, _, _, path := headViewApp(t)
+	st.navToggleOriginal()
+
+	st.handleKey(key.Event{Name: "S", Modifiers: key.ModShortcut | key.ModShift})
+	if st.saveMenu.visible {
+		st.saveMenu.filename = []rune("sample.txt")
+		st.saveMenu.cursor = len(st.saveMenu.filename)
+		st.saveMenu.selectAll = false
+		st.handleKey(key.Event{Name: key.NameReturn})
+		st.handleKey(key.Event{Name: key.NameReturn})
+	}
+
+	if data, err := os.ReadFile(path); err != nil || string(data) != workingText {
+		t.Fatalf("file on disk = %q (err %v), want the working copy untouched", data, err)
+	}
+	if st.notification == "" {
+		t.Fatal("the refused Save As said nothing")
+	}
+}
+
+// Save As from a HEAD view defaults to the "(HEAD)" tab title. Accepting it
+// used to repoint the tab at a new file, and the next plain save wrote there
+// instead of the file the user was editing.
+func TestHeadViewSaveAsLeavesTheTabPointedAtItsFile(t *testing.T) {
+	st, ed, _, tab, path := headViewApp(t)
+	st.navToggleOriginal()
+
+	st.showSaveAsMenu(st.tabBar.ActiveIdx, false, false)
+	if st.saveMenu.visible {
+		st.handleKey(key.Event{Name: key.NameReturn})
+		st.handleKey(key.Event{Name: key.NameReturn})
+	}
+
+	st.navToggleOriginal()
+	if ed.FilePath != path {
+		t.Fatalf("after the HEAD round trip FilePath = %q, want %q", ed.FilePath, path)
+	}
+	ed.Cursor.SetPosition(ed.Buffer, 0, 0)
+	ed.InsertText("edited ")
+	if !st.saveTab(tab) {
+		t.Fatal("the save after the round trip was refused")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != ed.Buffer.Text() {
+		t.Fatalf("sample.txt = %q (err %v), want the edited working buffer", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(st.gitRepo.Root, "sample.txt (HEAD)")); !os.IsNotExist(err) {
+		t.Fatalf("Save As created a %q file", "sample.txt (HEAD)")
+	}
 }
 
 func TestHeadViewRoundTripRestoresTheWorkingBuffer(t *testing.T) {

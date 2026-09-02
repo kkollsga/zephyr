@@ -99,6 +99,15 @@ func (st *appState) handleEditEvent(text string) {
 }
 
 func (st *appState) handleKey(ke key.Event) {
+	// The read-only guard runs ahead of every other route, minus the one
+	// exception it needs: while an overlay owns the keyboard its Return and
+	// Backspace belong to the overlay, not to this buffer. Stating the
+	// exception here rather than placing the call after the overlay blocks
+	// keeps a newly inserted block from silently moving the guard.
+	if !st.overlayOwnsKeys() && st.headViewSwallowsKey(ke) {
+		return
+	}
+
 	// Unified save menu intercepts all input. Each confirmation sub-state gets
 	// its own handler so a new one adds a case here rather than another branch
 	// inside the filename editor.
@@ -213,12 +222,6 @@ func (st *appState) handleKey(ke key.Event) {
 		case ke.Name == "H" && ke.Modifiers == key.ModShortcut:
 			st.openFindBar(true)
 		}
-		return
-	}
-
-	// Read-only guards run after the overlays: an overlay that owns the
-	// keyboard is not editing this buffer, so its Return must not be swallowed.
-	if st.headViewSwallowsKey(ke) {
 		return
 	}
 

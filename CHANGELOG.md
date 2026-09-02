@@ -70,8 +70,8 @@ All notable changes to Zephyr are documented here.
   line, ` (HEAD)` on the tab title and on the navigator breadcrumb, and the
   gutter's diff markers and the header's diff stats hidden because they
   describe the working file. The view is read-only — typing,
-  pasting, vim edits, undo, redo and saving are all refused, so committed
-  content can never be written over your working file — and `go` again brings
+  pasting, vim edits, undo, redo, Save and Save As are all refused, so
+  committed content can never be written to disk — and `go` again brings
   the buffer back exactly as it was, unsaved edits, cursor and undo history
   included. A file with nothing at HEAD is reported instead of swapped.
 - Refreshing a directory listing or the git status buffer (toggling hidden

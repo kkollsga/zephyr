@@ -24,6 +24,10 @@ type headStash struct {
 	cursor   editor.Cursor
 	modified bool
 	title    string
+	// filePath is restored with the rest: a save from inside the HEAD view
+	// that reaches editor.SaveAs would otherwise leave the tab pointed at the
+	// file it just created, and the next plain save would write there.
+	filePath string
 }
 
 // headViewActive reports whether the active tab is showing HEAD content.
@@ -74,7 +78,8 @@ func (st *appState) enterHeadView(ed *editor.Editor, ts *tabState, tab *ui.Tab) 
 
 	line, col := ed.Cursor.Line, ed.Cursor.Col
 	ts.headStash = &headStash{
-		buf: ed.Buffer, cursor: ed.Cursor, modified: ed.Modified, title: tab.Title,
+		buf: ed.Buffer, cursor: ed.Cursor, modified: ed.Modified,
+		title: tab.Title, filePath: ed.FilePath,
 	}
 	// Modified is deliberately carried into the HEAD view rather than cleared:
 	// the tab still holds unsaved work, and a cleared flag would let the close
@@ -103,6 +108,7 @@ func (st *appState) leaveHeadView(ed *editor.Editor, ts *tabState, tab *ui.Tab) 
 	ed.ClearExtraCursors()
 	ed.Cursor = stash.cursor
 	ed.Modified = stash.modified
+	ed.FilePath = stash.filePath
 	tab.Title = stash.title
 	st.afterBufferSwap(ed, ts)
 	st.updateWindowTitle()
@@ -155,6 +161,9 @@ func (st *appState) headViewSwallowsKey(ke key.Event) bool {
 // headViewRefusesSave reports whether tab is showing HEAD content, in which
 // case no flow may write it: the bytes on disk are the working file and HEAD
 // content saved over them is the file's own history destroying its present.
+// Every write funnels through forceSaveTab (plain saves) or saveTabToPath
+// (Save As), and both ask here first, so a new entry point cannot route around
+// it.
 func (st *appState) headViewRefusesSave(tab *ui.Tab) bool {
 	if tab == nil {
 		return false

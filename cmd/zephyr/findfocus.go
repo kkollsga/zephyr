@@ -62,3 +62,9 @@ func (st *appState) blurFindBarForEditorPress() {
 func (st *appState) fuzzyFinderHasKeys() bool {
 	return st.fuzzyFinder != nil && st.fuzzyFinder.Visible
 }
+
+// overlayOwnsKeys reports whether any overlay is taking the key stream ahead
+// of the buffer.
+func (st *appState) overlayOwnsKeys() bool {
+	return st.overlayVisible() || st.fuzzyFinderHasKeys()
+}
