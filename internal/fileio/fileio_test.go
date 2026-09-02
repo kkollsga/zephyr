@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kristianweb/zephyr/internal/buffer"
 )
@@ -230,6 +231,11 @@ func TestSaveFile_BrokenSymlinkFailsWithoutReplacingLink(t *testing.T) {
 	assertNoSaveTemps(t, dir)
 }
 
+// The property under test is that no reader ever sees a partial file — on
+// every platform. The tolerated-error half is not a weakened assertion but the
+// true Windows guarantee stated in SaveFile's doc comment: an open inside the
+// MoveFileEx replace window can be refused with ERROR_SHARING_VIOLATION, which
+// the reader retries. Off Windows no read error is tolerated at all.
 func TestSaveFile_OverwriteIsAtomicForReaders(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "atomic.txt")
@@ -245,6 +251,7 @@ func TestSaveFile_OverwriteIsAtomicForReaders(t *testing.T) {
 	readers.Add(1)
 	go func() {
 		defer readers.Done()
+		sharingRetries := 0
 		for {
 			select {
 			case <-done:
@@ -253,6 +260,11 @@ func TestSaveFile_OverwriteIsAtomicForReaders(t *testing.T) {
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
+				if isTransientReadError(err) && sharingRetries < maxSharingRetries {
+					sharingRetries++
+					time.Sleep(time.Millisecond)
+					continue
+				}
 				select {
 				case errCh <- err:
 				default:
@@ -282,6 +294,10 @@ func TestSaveFile_OverwriteIsAtomicForReaders(t *testing.T) {
 	}
 	assertNoSaveTemps(t, dir)
 }
+
+// Roughly a fifth of a second of retries: far longer than a replace window,
+// short enough that a target left genuinely locked still fails the test.
+const maxSharingRetries = 200
 
 type partialReadError struct {
 	size int

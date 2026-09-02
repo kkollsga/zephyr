@@ -56,8 +56,16 @@ func TestFuzzyFinderOpensFiltersAndOpensATab(t *testing.T) {
 	if got := len(st.fuzzyFinder.Results); got == 0 || got == 4 {
 		t.Fatalf("query narrowed to %d results, want fewer than all and more than none", got)
 	}
-	if top := st.fuzzyFinder.Results[0].Text; top != filepath.ToSlash("src/editor.go") {
-		t.Fatalf("top result = %q", top)
+	// The scan builds this path with the host separator; the finder lists and
+	// matches it in slash form on every platform, so the assertion is the same
+	// string everywhere.
+	if top := st.fuzzyFinder.Results[0].Text; top != "src/editor.go" {
+		t.Fatalf("top result = %q, want src/editor.go", top)
+	}
+	// A query typed with a slash reaches the nested file on Windows too.
+	st.fuzzyFinder.UpdateQuery("src/ed")
+	if len(st.fuzzyFinder.Results) == 0 || st.fuzzyFinder.Results[0].Text != "src/editor.go" {
+		t.Fatalf("query \"src/ed\" gave %+v", st.fuzzyFinder.Results)
 	}
 
 	tabsBefore := len(st.tabBar.Tabs)

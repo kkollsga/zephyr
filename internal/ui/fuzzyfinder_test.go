@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -38,7 +39,65 @@ func TestFuzzyFinder_Filter(t *testing.T) {
 		t.Fatal("expected matches for 'editor'")
 	}
 	if ff.Results[0].Text != "src/editor.go" {
-		t.Logf("top result: %s", ff.Results[0].Text)
+		t.Fatalf("top result = %q, want src/editor.go", ff.Results[0].Text)
+	}
+}
+
+// The scan lists slash paths on every platform. filepath.Join builds the
+// nested path with the host separator, so on Windows the walk hands the finder
+// "src\editor.go"; listing that verbatim breaks a query typed with "/",
+// because the matcher is a plain subsequence test over the displayed string.
+func TestFuzzyFinder_ListsSlashPathsAndOpensHostPaths(t *testing.T) {
+	dir := setupFinderDir(t)
+	ff := NewFuzzyFinder()
+	ff.Open(dir)
+	nested := filepath.Join("src", "editor.go")
+	if slices.Contains(ff.Files, nested) && nested != "src/editor.go" {
+		t.Fatalf("scan listed the host-separator path %q", nested)
+	}
+	if !slices.Contains(ff.Files, "src/editor.go") {
+		t.Fatalf("scanned files = %v, want src/editor.go listed", ff.Files)
+	}
+
+	ff.UpdateQuery("src/ed")
+	if len(ff.Results) == 0 || ff.Results[0].Text != "src/editor.go" {
+		t.Fatalf("query \"src/ed\" gave %+v, want src/editor.go on top", ff.Results)
+	}
+	if got, want := ff.SelectedPath(), filepath.Join(dir, "src", "editor.go"); got != want {
+		t.Fatalf("SelectedPath = %q, want the host-separator path %q", got, want)
+	}
+}
+
+// The changed-file list reaches the same matcher, so it is normalised the same
+// way and still opens to a host path.
+func TestFuzzyFinder_ChangedFilesUseSlashPaths(t *testing.T) {
+	dir := setupFinderDir(t)
+	ff := NewFuzzyFinder()
+	ff.OpenChanged(dir, []string{filepath.Join("src", "editor.go")})
+	if len(ff.Results) != 1 || ff.Results[0].Text != "src/editor.go" {
+		t.Fatalf("changed-file results = %+v, want src/editor.go", ff.Results)
+	}
+	if got, want := ff.SelectedPath(), filepath.Join(dir, "src", "editor.go"); got != want {
+		t.Fatalf("SelectedPath = %q, want %q", got, want)
+	}
+}
+
+func TestToFinderPath(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		sep  rune
+		want string
+	}{
+		{"windows separator becomes a slash", `src\editor.go`, '\\', "src/editor.go"},
+		{"slash paths are untouched", "src/editor.go", '/', "src/editor.go"},
+		{"a backslash is a filename byte on posix", `we\ird.go`, '/', `we\ird.go`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := toFinderPath(tc.in, tc.sep); got != tc.want {
+				t.Fatalf("toFinderPath(%q, %q) = %q, want %q", tc.in, tc.sep, got, tc.want)
+			}
+		})
 	}
 }
 

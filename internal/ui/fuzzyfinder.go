@@ -52,8 +52,11 @@ func (ff *FuzzyFinder) OpenChanged(rootDir string, changedFiles []string) {
 	ff.Query = ""
 	ff.Selected = 0
 	ff.RootDir = rootDir
-	ff.ChangedFiles = changedFiles
-	ff.Files = changedFiles
+	// git prints its status paths with forward slashes already; normalising
+	// keeps the invariant one line rather than one per producer, since
+	// SelectedPath converts back on the way out.
+	ff.ChangedFiles = toFinderPaths(changedFiles)
+	ff.Files = ff.ChangedFiles
 	ff.changedOnly = true
 	ff.Results = fuzzy.RankMatches("", ff.Files)
 	if len(ff.Results) > 100 {
@@ -97,7 +100,34 @@ func (ff *FuzzyFinder) SelectedPath() string {
 	if ff.Selected < 0 || ff.Selected >= len(ff.Results) {
 		return ""
 	}
-	return filepath.Join(ff.RootDir, ff.Results[ff.Selected].Text)
+	return filepath.Join(ff.RootDir, filepath.FromSlash(ff.Results[ff.Selected].Text))
+}
+
+// toFinderPath rewrites a relative path built with sep into slash form. The
+// finder both displays and fuzzy-matches these strings, and the matcher is a
+// plain subsequence test: a Windows walk producing "src\editor.go" makes a
+// query of "src/ed" match nothing and shows the user a separator no other
+// pane uses. sep is the separator the path was built with
+// (filepath.Separator in production) — taking it as an argument keeps the
+// rewrite exercisable on a host whose separator is already a slash, where
+// filepath.ToSlash is a no-op. On such a host a backslash is an ordinary
+// filename byte and is left alone.
+func toFinderPath(p string, sep rune) string {
+	if sep == '/' {
+		return p
+	}
+	return strings.ReplaceAll(p, string(sep), "/")
+}
+
+func toFinderPaths(paths []string) []string {
+	if filepath.Separator == '/' {
+		return paths
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = toFinderPath(p, filepath.Separator)
+	}
+	return out
 }
 
 func (ff *FuzzyFinder) scanFiles() {
@@ -122,7 +152,7 @@ func (ff *FuzzyFinder) scanFiles() {
 		}
 
 		rel, _ := filepath.Rel(ff.RootDir, path)
-		ff.Files = append(ff.Files, rel)
+		ff.Files = append(ff.Files, toFinderPath(rel, filepath.Separator))
 		return nil
 	})
 }

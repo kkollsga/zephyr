@@ -163,6 +163,9 @@ All notable changes to Zephyr are documented here.
   inside directories whose names contain `[`, `*` or `?` — Next.js route
   folders such as `[id]` were read as filename patterns and reported the
   existing sibling as missing.
+- The file finder on Windows now lists and matches paths with forward slashes
+  instead of backslashes, so typing `src/ed` finds `src\editor.go` the way it
+  does everywhere else. The file still opens through the platform path.
 
 ### macOS
 

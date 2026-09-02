@@ -48,7 +48,25 @@ func OpenFile(path string) (*buffer.PieceTable, error) {
 }
 
 // SaveFile writes the piece table content to a file using a crash-safe
-// write-to-temp-then-rename strategy.
+// write-to-temp-then-rename strategy: a reader of the target never observes a
+// half-written file, only the whole old content or the whole new content.
+//
+// What a concurrent reader can see differs by platform, because the replace
+// step differs:
+//
+//   - POSIX: rename(2) swaps the directory entry atomically. A reader either
+//     opens the old inode or the new one, and its open never fails.
+//   - Windows: the replace is MoveFileEx(REPLACE_EXISTING), which is not
+//     atomic with respect to concurrent openers. The content a reader gets is
+//     still whole, but an open landing inside the replace window can fail with
+//     ERROR_SHARING_VIOLATION (Errno 32) and must be retried. The writer
+//     cannot close that window: the restrictive sharing mode belongs to the
+//     reader's own CreateFile — Go opens files with FILE_SHARE_READ and
+//     FILE_SHARE_WRITE but not FILE_SHARE_DELETE — so no change on this side
+//     grants the reader access the reader did not ask for.
+//
+// renameReplace carries the mirror-image retry for the writer, whose
+// MoveFileEx is refused while some other process holds the target open.
 func SaveFile(pt *buffer.PieceTable, path string) error {
 	return saveFileWithOps(pt, path, defaultSaveFileOps)
 }
