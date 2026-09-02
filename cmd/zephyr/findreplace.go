@@ -104,7 +104,7 @@ func (st *appState) replaceCurrentMatch() {
 	}
 	match := st.findBar.Matches[st.findBar.CurrentMatch-1]
 
-	// Select the match, then InsertText replaces it with history recording
+	// Select the match; InsertText replaces a selection as one undo step.
 	endLC, _ := ed.Buffer.OffsetToLineCol(match.Offset + match.Length)
 	ed.Cursor.SetPosition(ed.Buffer, match.Line, match.Col)
 	ed.Selection.Start(ed.Cursor)
@@ -126,16 +126,19 @@ func (st *appState) replaceAllMatches() {
 		return
 	}
 
-	// Replace from end to start to preserve earlier offsets
-	for i := len(results) - 1; i >= 0; i-- {
-		match := results[i]
-		endLC, _ := ed.Buffer.OffsetToLineCol(match.Offset + match.Length)
-		ed.Cursor.SetPosition(ed.Buffer, match.Line, match.Col)
-		ed.Selection.Start(ed.Cursor)
-		ed.Cursor.SetPosition(ed.Buffer, endLC.Line, endLC.Col)
-		ed.Selection.Update(ed.Cursor)
-		ed.InsertText(st.findBar.Replacement)
-	}
+	// Replace from end to start to preserve earlier offsets, as one undo step
+	// so a single Cmd+Z restores every match.
+	ed.Transact(func() {
+		for i := len(results) - 1; i >= 0; i-- {
+			match := results[i]
+			endLC, _ := ed.Buffer.OffsetToLineCol(match.Offset + match.Length)
+			ed.Cursor.SetPosition(ed.Buffer, match.Line, match.Col)
+			ed.Selection.Start(ed.Cursor)
+			ed.Cursor.SetPosition(ed.Buffer, endLC.Line, endLC.Col)
+			ed.Selection.Update(ed.Cursor)
+			ed.InsertText(st.findBar.Replacement)
+		}
+	})
 
 	st.reparseHighlight()
 }

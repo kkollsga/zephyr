@@ -103,12 +103,14 @@ func (st *appState) toggleCheckbox(cb mdCheckbox) {
 	ed.Cursor.Line = line
 	ed.Cursor.Col = col
 	ed.Selection.Clear()
-	ed.DeleteForward()
-	if cb.checked {
-		ed.InsertText(" ")
-	} else {
-		ed.InsertText("x")
-	}
+	ed.Transact(func() {
+		ed.DeleteForward()
+		if cb.checked {
+			ed.InsertText(" ")
+		} else {
+			ed.InsertText("x")
+		}
+	})
 
 	// Restore cursor
 	ed.Cursor.Line = savedLine

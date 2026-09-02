@@ -9,6 +9,9 @@ const (
 	ActionInsert ActionType = iota
 	ActionDelete
 	ActionReplace
+	// ActionGroup holds several actions applied as one edit: undone in
+	// reverse order, redone in the order they were recorded.
+	ActionGroup
 )
 
 // EditAction represents a single edit operation for undo/redo.
@@ -17,8 +20,9 @@ type EditAction struct {
 	Offset      int
 	Text        string
 	Replacement string
-	Cursor      Cursor // cursor position before the action
-	AfterCursor Cursor // cursor position after a full-buffer replacement
+	Cursor      Cursor       // cursor position before the action
+	AfterCursor Cursor       // cursor position after a replacement or a group
+	Group       []EditAction // the members of an ActionGroup, in applied order
 	Timestamp   time.Time
 }
 
@@ -28,6 +32,10 @@ type History struct {
 	redoStack []EditAction
 	// Coalescing: group rapid sequential inserts/deletes into one action.
 	coalesceWindow time.Duration
+	// Open transaction: while groupDepth > 0, actions collect in group
+	// instead of reaching the undo stack.
+	groupDepth int
+	group      []EditAction
 }
 
 // NewHistory creates a new History with default coalescing window.
@@ -39,9 +47,16 @@ func NewHistory() *History {
 
 // Record adds an action to the undo stack. Clears the redo stack.
 // Coalesces with the previous action if they are the same type and within
-// the coalescing window.
+// the coalescing window. Inside an open group (see BeginGroup) the action
+// joins the group instead and never coalesces, so a group is neither merged
+// into nor merged across: the next keystroke after one starts a fresh entry.
 func (h *History) Record(action EditAction) {
 	action.Timestamp = time.Now()
+
+	if h.groupDepth > 0 {
+		h.group = append(h.group, action)
+		return
+	}
 
 	if len(h.undoStack) > 0 {
 		last := &h.undoStack[len(h.undoStack)-1]
@@ -163,4 +178,10 @@ func (h *History) RecordExternalChange(oldContent, newContent string, oldCursor,
 		Timestamp:   time.Now(),
 	})
 	h.redoStack = nil
+}
+
+// SetCoalesceWindow overrides the coalescing window. Zero makes recording
+// deterministic for tests that must not depend on wall-clock timing.
+func (h *History) SetCoalesceWindow(d time.Duration) {
+	h.coalesceWindow = d
 }

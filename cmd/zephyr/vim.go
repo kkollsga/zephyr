@@ -740,12 +740,14 @@ func (st *appState) vimPut(ed *editor.Editor, action vim.Action, before bool) {
 		return
 	}
 
-	// Visual mode put: replace selection
+	// Visual mode put: replace selection, as one undo step
 	if action.Text == "visual" {
-		if ed.Selection.Active && !ed.Selection.IsEmpty() {
-			ed.DeleteSelection()
-		}
-		ed.InsertText(text)
+		ed.Transact(func() {
+			if ed.Selection.Active && !ed.Selection.IsEmpty() {
+				ed.DeleteSelection()
+			}
+			ed.InsertText(text)
+		})
 		st.afterEdit()
 		return
 	}

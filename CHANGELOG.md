@@ -12,6 +12,15 @@ All notable changes to Zephyr are documented here.
 
 ### Editing
 
+- Replacing a selection — typing over it, pasting over it, Replace and
+  Replace All in the find bar, or a visual-mode put — is now a single
+  undoable step that restores the original text, instead of an undo that
+  deleted the new text and left the old text lost. Replace All is one undo
+  for the whole run.
+- Replacing a selection with an empty replacement now deletes the selection
+  instead of doing nothing.
+- A multi-cursor insert or backspace, a bracket-pair delete, an indent
+  change, and a markdown checkbox toggle are each one undo step.
 - Undo and redo no longer desynchronise from the buffer when an edit is
   refused: the action stays on the stack it came from instead of moving
   across, so later undos keep applying at the right offsets.

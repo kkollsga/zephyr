@@ -33,8 +33,10 @@ func (st *appState) deleteAutoPair() bool {
 	before := string(runes[col-1])
 	after := string(runes[col])
 	if closer, ok := autoPairs[before]; ok && closer == after {
-		ed.DeleteForward()
-		ed.DeleteBackward()
+		ed.Transact(func() {
+			ed.DeleteForward()
+			ed.DeleteBackward()
+		})
 		return true
 	}
 	return false

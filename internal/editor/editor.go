@@ -43,18 +43,29 @@ func NewEmptyEditor() *Editor {
 	return NewEditor(buffer.NewFromString(""), "")
 }
 
-// InsertText inserts text at the current cursor position.
-// If there is an active selection, it replaces the selected text as a single undoable action.
+// InsertText inserts text at the current cursor position. With an active
+// selection the selected text is replaced, and the delete and the insert are
+// recorded as one undoable step. Inserting an empty string over a selection
+// deletes the selection; with no selection it does nothing.
 func (e *Editor) InsertText(text string) {
+	hasSelection := e.Selection.Active && !e.Selection.IsEmpty()
 	if len(text) == 0 {
+		if hasSelection {
+			e.DeleteSelection()
+		}
 		return
 	}
-
-	// Delete selection first if active (without recording separate history)
-	if e.Selection.Active && !e.Selection.IsEmpty() {
-		e.deleteSelectionInternal()
+	if hasSelection {
+		e.Transact(func() {
+			e.DeleteSelection()
+			e.insertAtCursor(text)
+		})
+		return
 	}
+	e.insertAtCursor(text)
+}
 
+func (e *Editor) insertAtCursor(text string) {
 	offset := e.cursorOffset()
 	e.History.Record(EditAction{
 		Type:   ActionInsert,
@@ -178,25 +189,6 @@ func (e *Editor) DeleteForward() {
 	e.Cursor.PreferredCol = -1
 }
 
-// deleteSelectionInternal removes the selected text without recording history.
-// Used by InsertText to make replace-selection atomic with the insert.
-func (e *Editor) deleteSelectionInternal() {
-	if !e.Selection.Active || e.Selection.IsEmpty() {
-		return
-	}
-	start, _ := e.Selection.Ordered()
-	text := e.Selection.Text(e.Buffer)
-	startOff, err := e.Buffer.LineColToOffset(buffer.LineCol{Line: start.Line, Col: start.Col})
-	if err != nil {
-		return
-	}
-	e.Buffer.Delete(startOff, len(text))
-	e.Cursor = start
-	e.Cursor.PreferredCol = -1
-	e.Selection.Clear()
-	e.Modified = true
-}
-
 // DeleteSelection deletes the currently selected text.
 func (e *Editor) DeleteSelection() {
 	if !e.Selection.Active || e.Selection.IsEmpty() {
@@ -234,7 +226,9 @@ func (e *Editor) Undo() bool {
 		return false
 	}
 	action := *peeked
+	cursor := e.Cursor
 	if !e.applyUndo(&action) {
+		e.Cursor = cursor
 		return false
 	}
 	e.History.Undo()
@@ -254,8 +248,26 @@ func (e *Editor) applyUndo(action *EditAction) bool {
 	case ActionReplace:
 		e.Buffer = buffer.NewFromString(action.Text)
 		return true
+	case ActionGroup:
+		return e.applyUndoGroup(action.Group)
 	}
 	return false
+}
+
+// applyUndoGroup undoes the members in reverse. A member the buffer refuses
+// rolls the already-undone members forward again, so a group is applied whole
+// or not at all.
+func (e *Editor) applyUndoGroup(group []EditAction) bool {
+	for i := len(group) - 1; i >= 0; i-- {
+		if e.applyUndo(&group[i]) {
+			continue
+		}
+		for j := i + 1; j < len(group); j++ {
+			e.applyRedo(&group[j])
+		}
+		return false
+	}
+	return true
 }
 
 // Redo reapplies the last undone action and reports whether it was applied.
@@ -265,8 +277,10 @@ func (e *Editor) Redo() bool {
 		return false
 	}
 	action := *peeked
+	cursor := e.Cursor
 	modified, ok := e.applyRedo(&action)
 	if !ok {
+		e.Cursor = cursor
 		return false
 	}
 	e.History.Redo()
@@ -297,6 +311,17 @@ func (e *Editor) applyRedo(action *EditAction) (modified, ok bool) {
 		e.Buffer = buffer.NewFromString(action.Replacement)
 		e.Cursor = action.AfterCursor
 		return false, true
+	case ActionGroup:
+		for i := range action.Group {
+			if _, ok := e.applyRedo(&action.Group[i]); !ok {
+				for j := i - 1; j >= 0; j-- {
+					e.applyUndo(&action.Group[j])
+				}
+				return false, false
+			}
+		}
+		e.Cursor = action.AfterCursor
+		return true, true
 	}
 	return false, false
 }
@@ -338,8 +363,8 @@ func (e *Editor) Reload() error {
 // SetLineLeadingWhitespace replaces the leading spaces/tabs of the line at
 // lineIdx with newWS, recording the change in history so it is undoable.
 // It rewrites only the minimal differing region (the common prefix/suffix of
-// the old and new whitespace is left in place), so a pure indent or dedent is a
-// single history action. The active cursor's line/col is preserved unless the
+// the old and new whitespace is left in place) and records the rewrite as one
+// grouped history step. The active cursor's line/col is preserved unless the
 // cursor sits on lineIdx, in which case its column is shifted by the change.
 // Returns true if the buffer changed.
 func (e *Editor) SetLineLeadingWhitespace(lineIdx int, newWS string) bool {
@@ -370,22 +395,24 @@ func (e *Editor) SetLineLeadingWhitespace(lineIdx int, newWS string) bool {
 	insSpan := newWS[p : len(newWS)-s]
 	off := lineStart + p
 
-	if delSpan != "" {
-		e.History.Record(EditAction{Type: ActionDelete, Offset: off, Text: delSpan, Cursor: e.Cursor})
-		e.Buffer.Delete(off, len(delSpan))
-	}
-	if insSpan != "" {
-		e.History.Record(EditAction{Type: ActionInsert, Offset: off, Text: insSpan, Cursor: e.Cursor})
-		e.Buffer.Insert(off, insSpan)
-	}
-	e.Modified = true
-
-	if e.Cursor.Line == lineIdx {
-		e.Cursor.Col += len(newWS) - oldLen
-		if e.Cursor.Col < 0 {
-			e.Cursor.Col = 0
+	e.Transact(func() {
+		if delSpan != "" {
+			e.History.Record(EditAction{Type: ActionDelete, Offset: off, Text: delSpan, Cursor: e.Cursor})
+			e.Buffer.Delete(off, len(delSpan))
 		}
-	}
+		if insSpan != "" {
+			e.History.Record(EditAction{Type: ActionInsert, Offset: off, Text: insSpan, Cursor: e.Cursor})
+			e.Buffer.Insert(off, insSpan)
+		}
+		e.Modified = true
+
+		if e.Cursor.Line == lineIdx {
+			e.Cursor.Col += len(newWS) - oldLen
+			if e.Cursor.Col < 0 {
+				e.Cursor.Col = 0
+			}
+		}
+	})
 	return true
 }
 
@@ -484,13 +511,16 @@ func (e *Editor) AllCursors() []Cursor {
 	return result
 }
 
-// InsertTextAtAllCursors inserts text at all cursor positions.
+// InsertTextAtAllCursors inserts text at all cursor positions as one undo step.
 func (e *Editor) InsertTextAtAllCursors(text string) {
 	if len(e.Cursors) == 0 {
 		e.InsertText(text)
 		return
 	}
+	e.Transact(func() { e.insertAtAllCursors(text) })
+}
 
+func (e *Editor) insertAtAllCursors(text string) {
 	// Collect all cursors and sort by offset (descending) to preserve positions
 	type cursorInfo struct {
 		cursor    *Cursor
@@ -534,13 +564,16 @@ func (e *Editor) InsertTextAtAllCursors(text string) {
 	e.Modified = true
 }
 
-// DeleteBackwardAtAllCursors performs backspace at all cursor positions.
+// DeleteBackwardAtAllCursors backspaces at all cursor positions as one undo step.
 func (e *Editor) DeleteBackwardAtAllCursors() {
 	if len(e.Cursors) == 0 {
 		e.DeleteBackward()
 		return
 	}
+	e.Transact(func() { e.deleteBackwardAtAllCursors() })
+}
 
+func (e *Editor) deleteBackwardAtAllCursors() {
 	type cursorInfo struct {
 		cursor *Cursor
 		offset int

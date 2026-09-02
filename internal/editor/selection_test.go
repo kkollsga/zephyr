@@ -82,6 +82,9 @@ func TestSelection_ReplaceSelected_WithTyping(t *testing.T) {
 	if ed.Buffer.Text() != "hello Go" {
 		t.Fatalf("got %q, want %q", ed.Buffer.Text(), "hello Go")
 	}
+	if !ed.Undo() || ed.Buffer.Text() != "hello world" {
+		t.Fatalf("undo after replace = %q, want %q", ed.Buffer.Text(), "hello world")
+	}
 }
 
 func TestSelection_DoubleClick_SelectsWord(t *testing.T) {
