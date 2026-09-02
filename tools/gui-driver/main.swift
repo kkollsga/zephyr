@@ -195,20 +195,52 @@ let keyCodes: [String: CGKeyCode] = [
     "down": 125, "up": 126
 ]
 
+// The virtual key codes of the left-hand modifier keys, which flagsChanged
+// events have to name for the session's modifier state to follow along.
+let modifierKeyCodes: [String: (flag: CGEventFlags, keyCode: CGKeyCode)] = [
+    "cmd": (.maskCommand, 55), "command": (.maskCommand, 55),
+    "shift": (.maskShift, 56),
+    "alt": (.maskAlternate, 58), "option": (.maskAlternate, 58),
+    "ctrl": (.maskControl, 59), "control": (.maskControl, 59),
+]
+
+func postFlagsChanged(keyCode: CGKeyCode, flags: CGEventFlags) throws {
+    guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else {
+        throw DriverFailure.runtime("failed to create modifier event")
+    }
+    event.type = .flagsChanged
+    event.flags = flags
+    event.post(tap: .cghidEventTap)
+    usleep(5_000)
+}
+
+// pressKey presses and releases one key with the named modifiers held.
+//
+// The modifiers are pressed and released as real flagsChanged events rather
+// than only stamped onto the key event's flags. Setting the flags alone leaves
+// the session's modifier state holding them after the key is released, so every
+// later synthetic event — a click, a typed character — silently carries the
+// modifier until an unmodified key press clears it.
 func pressKey(name: String, modifierNames: ArraySlice<String>) throws {
     guard let keyCode = keyCodes[name.lowercased()] else {
         throw DriverFailure.usage("unknown key: \(name)")
     }
-    var flags: CGEventFlags = []
+    var held: [(flag: CGEventFlags, keyCode: CGKeyCode)] = []
     for modifier in modifierNames {
-        switch modifier.lowercased() {
-        case "cmd", "command": flags.insert(.maskCommand)
-        case "shift": flags.insert(.maskShift)
-        case "alt", "option": flags.insert(.maskAlternate)
-        case "ctrl", "control": flags.insert(.maskControl)
-        default: throw DriverFailure.usage("unknown modifier: \(modifier)")
+        guard let entry = modifierKeyCodes[modifier.lowercased()] else {
+            throw DriverFailure.usage("unknown modifier: \(modifier)")
+        }
+        if !held.contains(where: { $0.keyCode == entry.keyCode }) {
+            held.append(entry)
         }
     }
+
+    var flags: CGEventFlags = []
+    for modifier in held {
+        flags.insert(modifier.flag)
+        try postFlagsChanged(keyCode: modifier.keyCode, flags: flags)
+    }
+
     guard
         let down = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
         let up = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false)
@@ -220,6 +252,11 @@ func pressKey(name: String, modifierNames: ArraySlice<String>) throws {
     down.post(tap: .cghidEventTap)
     usleep(20_000)
     up.post(tap: .cghidEventTap)
+
+    for modifier in held.reversed() {
+        flags.remove(modifier.flag)
+        try postFlagsChanged(keyCode: modifier.keyCode, flags: flags)
+    }
 }
 
 func capture(window: WindowInfo, path: String) throws {
