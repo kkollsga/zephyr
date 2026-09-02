@@ -1,5 +1,5 @@
 // Package ipc provides inter-process communication for transferring tabs
-// between Zephyr instances using file-based signaling in the OS temp directory.
+// between Zephyr instances using file-based signaling in a shared directory.
 package ipc
 
 import (
@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-const offerFileName = "zephyr-drag-offer.json"
+const (
+	offerFileName   = "zephyr-drag-offer.json"
+	claimFilePrefix = "zephyr-drag-claimed-"
+)
 
 // TabTransfer holds the metadata for a tab being transferred between instances.
 type TabTransfer struct {
@@ -23,8 +26,24 @@ type TabTransfer struct {
 	Timestamp   int64  `json:"timestamp"` // unix millis, for staleness detection
 }
 
+// stateDir is the directory the offer and claim files live in. The GUI harness
+// sets ZEPHYR_GUI_STATE_DIR, which keeps a test instance and a developer's real
+// Zephyr from claiming each other's tabs; unset, every instance shares the OS
+// temp directory, which is what makes a transfer between two windows work.
+func stateDir() string {
+	if dir := os.Getenv("ZEPHYR_GUI_STATE_DIR"); dir != "" {
+		return dir
+	}
+	return os.TempDir()
+}
+
 func offerPath() string {
-	return filepath.Join(os.TempDir(), offerFileName)
+	return filepath.Join(stateDir(), offerFileName)
+}
+
+// claimPath is where the claimer leaves the receipt the offering process polls.
+func claimPath(pid int) string {
+	return filepath.Join(stateDir(), claimFilePrefix+strconv.Itoa(pid))
 }
 
 // WriteOffer creates a drag offer file that other instances can detect.
@@ -71,17 +90,16 @@ func ClaimOffer() *TabTransfer {
 	// Remove the offer file to signal that we claimed it
 	os.Remove(offerPath())
 	// Write a claim file so the source knows it was consumed
-	claimPath := filepath.Join(os.TempDir(), "zephyr-drag-claimed-"+strconv.Itoa(offer.SourcePID))
-	os.WriteFile(claimPath, []byte("claimed"), 0644)
+	os.WriteFile(claimPath(offer.SourcePID), []byte("claimed"), 0644)
 	return offer
 }
 
 // WasClaimed checks if our offer was claimed by another instance.
 // Removes the claim file if found.
 func WasClaimed() bool {
-	claimPath := filepath.Join(os.TempDir(), "zephyr-drag-claimed-"+strconv.Itoa(os.Getpid()))
-	if _, err := os.Stat(claimPath); err == nil {
-		os.Remove(claimPath)
+	path := claimPath(os.Getpid())
+	if _, err := os.Stat(path); err == nil {
+		os.Remove(path)
 		return true
 	}
 	return false

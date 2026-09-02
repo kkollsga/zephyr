@@ -69,25 +69,33 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 				}
 
 				st.dispatchKey(ke)
+				st.traceKeyEvent(ke)
 			}
 		case key.EditEvent:
-			if st.langSel.Visible {
-				break
-			}
-			if st.fuzzyFinder != nil && st.fuzzyFinder.Visible {
-				st.fuzzyFinderInsert(ke.Text)
-				break
-			}
-			if st.vimEnabled && st.vimState != nil &&
-				!st.saveMenu.visible && !st.findBarHasKeys() {
-				st.handleVimEditEvent(ke.Text)
-			} else {
-				st.handleTextInput(ke.Text)
-			}
+			st.handleEditEvent(ke.Text)
+			st.traceEditEvent(ke.Text)
 		case pointer.Event:
 			st.handlePointer(ke)
 		}
 	}
+}
+
+// handleEditEvent routes committed text input to whichever surface owns the
+// keyboard: an open overlay first, then vim insert mode, then the buffer.
+func (st *appState) handleEditEvent(text string) {
+	if st.langSel.Visible {
+		return
+	}
+	if st.fuzzyFinder != nil && st.fuzzyFinder.Visible {
+		st.fuzzyFinderInsert(text)
+		return
+	}
+	if st.vimEnabled && st.vimState != nil &&
+		!st.saveMenu.visible && !st.findBarHasKeys() {
+		st.handleVimEditEvent(text)
+		return
+	}
+	st.handleTextInput(text)
 }
 
 func (st *appState) handleKey(ke key.Event) {

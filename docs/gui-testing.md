@@ -5,6 +5,11 @@ rendering, and window-management bugs. Generated applications, isolated user
 configuration, logs, and screenshots are stored under `.artifacts/gui-test/`.
 The harness never uses the normal `~/.config/zephyr` directory.
 
+`ZEPHYR_GUI_STATE_DIR` overrides that directory. The harness also passes it to
+the Zephyr it launches, where it namespaces the tab-transfer offer files that
+otherwise live in the OS temp directory — so a test instance and a Zephyr you
+are running yourself can never claim each other's dragged tabs.
+
 ## One-time permissions
 
 Real input injection and window capture require macOS Accessibility and Screen
@@ -69,6 +74,22 @@ window moves on screen.
 ./scripts/gui-test.sh key escape
 ```
 
+## Scenarios
+
+The canned suites are named scenarios. List them, and run one or several by
+name, with:
+
+```sh
+./scripts/gui-test.sh scenarios
+./scripts/gui-test.sh scenario smoke
+./scripts/gui-test.sh scenario regression smoke
+```
+
+Each scenario launches its own app, stops it on the way out, and states a pass
+condition read off the app or the filesystem — the trace, a captured file's
+bytes — never off a screenshot. `smoke` and `regression` remain as aliases for
+`scenario smoke` and `scenario regression`.
+
 Run the end-to-end input and screenshot smoke test with:
 
 ```sh
@@ -97,8 +118,14 @@ available.
 
 Debug launches set `ZEPHYR_GUI_TRACE=1`. After every pointer event, Zephyr logs
 a JSON record containing the event kind, button, local position, cursor and
-selection state, viewport line/pixel offset, and text/tab drag state. Normal
-application launches do not emit this telemetry.
+selection state, viewport line/pixel offset, and text/tab drag state. Key
+presses and committed text input log a second kind of record — `"kind":"Key"`
+or `"kind":"Edit"` — carrying the active tab's path, the cursor position, the
+line count, the modified flag, and `bufferHash`, a truncated SHA-256 of the
+buffer's bytes. A scenario asserts what the document holds from that checksum
+rather than from pixels; `trace_cursor` and `trace_buffer_hash` in
+`scripts/gui-test.sh` read the latest of each. Normal application launches do
+not emit this telemetry.
 
 ## Performance program
 

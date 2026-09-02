@@ -36,8 +36,10 @@ usage: ./scripts/gui-test.sh COMMAND [ARGS]
   key KEY [MODIFIERS...]             Press a key with optional modifiers
   logs                               Tail the application log
   trace                              Show structured pointer-event telemetry
-  smoke                              Run a basic real-input/capture smoke test
-  regression                         Run pointer and mode-transition regressions
+  scenarios                          List the named scenarios
+  scenario NAME [NAME...]            Run named scenarios in order
+  smoke                              Alias for: scenario smoke
+  regression                         Alias for: scenario regression
 EOF
 }
 
@@ -116,6 +118,7 @@ launch_app() {
     # app launch while leaving a Gio window inactive in non-interactive agent
     # sessions; a detached direct launch reliably creates the native window.
     env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
+        ZEPHYR_GUI_STATE_DIR="$STATE_DIR" \
         GOTRACEBACK=all ZEPHYR_GUI_TRACE=1 \
         nohup "$BIN" "$fixture" >"$STDOUT_LOG" 2>"$LOG_FILE" </dev/null &
     local launcher_pid=$!
@@ -158,7 +161,8 @@ run_app() {
     stop_app
     : >"$LOG_FILE"
     printf '%s\n' "$$" >"$PID_FILE"
-    exec env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" GOTRACEBACK=all ZEPHYR_GUI_TRACE=1 \
+    exec env HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" \
+        ZEPHYR_GUI_STATE_DIR="$STATE_DIR" GOTRACEBACK=all ZEPHYR_GUI_TRACE=1 \
         "$BIN" "$fixture" >>"$LOG_FILE" 2>&1
 }
 
@@ -181,6 +185,152 @@ require_permissions() {
         echo "$permissions" >&2
         return 1
     fi
+}
+
+# --- scenario helpers -------------------------------------------------------
+
+# trace_cursor prints LINE:COL from the most recent trace record that carries a
+# cursor position.
+trace_cursor() {
+    grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | tail -n 1 | \
+        sed -E -n 's/.*"cursorLine":([0-9]+),"cursorCol":([0-9]+).*/\1:\2/p'
+}
+
+# trace_buffer_hash prints the buffer checksum from the most recent key or edit
+# trace record, so a scenario can assert what the buffer holds without reading
+# pixels. Empty when no such record has been emitted yet.
+trace_buffer_hash() {
+    grep -o '"bufferHash":"[0-9a-f]*"' "$LOG_FILE" | tail -n 1 | \
+        sed -E 's/.*:"([0-9a-f]*)"/\1/'
+}
+
+# capture_checked captures the window of $pid to a named PNG, refuses an empty
+# or unreadable one, and writes the flattened JPEG preview beside it.
+capture_checked() {
+    local name=$1
+    local png="$STATE_DIR/artifacts/$name.png"
+    "$DRIVER" capture "$pid" "$png"
+    [[ -s "$png" ]] || { echo "empty capture: $png" >&2; exit 1; }
+    sips -g pixelWidth -g pixelHeight "$png" >/dev/null
+    "$DRIVER" preview "$png" "$STATE_DIR/artifacts/$name.jpg"
+}
+
+# --- scenarios --------------------------------------------------------------
+#
+# Every scenario is a function named scenario_<name with dashes as underscores>
+# and listed in SCENARIOS. It launches its own app, traps stop_app, and states a
+# pass condition read off the app or the filesystem — never off a screenshot.
+
+SCENARIOS=(smoke regression)
+
+list_scenarios() {
+    printf '%s\n' "${SCENARIOS[@]}"
+}
+
+run_scenario() {
+    local name=$1
+    local known
+    for known in "${SCENARIOS[@]}"; do
+        if [[ "$known" == "$name" ]]; then
+            "scenario_${name//-/_}"
+            return
+        fi
+    done
+    echo "unknown scenario: $name" >&2
+    echo "known scenarios: ${SCENARIOS[*]}" >&2
+    return 2
+}
+
+scenario_smoke() {
+    launch_app "$DEFAULT_FIXTURE"
+    trap stop_app EXIT
+    pid=$(require_pid)
+    sleep 0.7
+    "$DRIVER" capture "$pid" "$STATE_DIR/artifacts/00-launch.png"
+    "$DRIVER" click "$pid" 360 165 left
+    sleep 0.2
+    "$DRIVER" click "$pid" 360 165 left
+    "$DRIVER" type "$pid" '/* gui-smoke */'
+    "$DRIVER" drag "$pid" 260 165 520 245 0.4
+    sleep 0.2
+    "$DRIVER" scroll-lines "$pid" 601 301 -4
+    sleep 0.4
+    grep -q '"kind":"Press"' "$LOG_FILE" || { echo "no pointer press was recorded" >&2; exit 1; }
+    grep -q '"selection":true' "$LOG_FILE" || { echo "no drag selection was recorded" >&2; exit 1; }
+    grep -q '"kind":"Scroll"' "$LOG_FILE" || { echo "no scroll event was recorded" >&2; exit 1; }
+    "$DRIVER" capture "$pid" "$STATE_DIR/artifacts/01-interacted.png"
+    "$DRIVER" preview "$STATE_DIR/artifacts/00-launch.png" \
+        "$STATE_DIR/artifacts/00-launch.jpg"
+    "$DRIVER" preview "$STATE_DIR/artifacts/01-interacted.png" \
+        "$STATE_DIR/artifacts/01-interacted.jpg"
+    echo "Smoke test completed; artifacts: $STATE_DIR/artifacts"
+    stop_app
+    trap - EXIT
+}
+
+scenario_regression() {
+    stop_app
+    rm -rf "$HOME_DIR"
+    mkdir -p "$HOME_DIR"
+    launch_app "$DEFAULT_FIXTURE"
+    trap stop_app EXIT
+    pid=$(require_pid)
+    sleep 0.7
+
+    capture_checked 10-pointer-launch
+    "$DRIVER" click "$pid" 260 165 left
+    sleep 0.15
+    primary_cursor=$(trace_cursor)
+    [[ -n "$primary_cursor" ]] || { echo "primary click did not set a traceable cursor" >&2; exit 1; }
+    "$DRIVER" click "$pid" 620 300 right
+    sleep 0.15
+    [[ "$(trace_cursor)" == "$primary_cursor" ]] || { echo "secondary click moved the cursor" >&2; exit 1; }
+    "$DRIVER" click "$pid" 620 340 middle
+    sleep 0.15
+    [[ "$(trace_cursor)" == "$primary_cursor" ]] || { echo "middle click moved the cursor" >&2; exit 1; }
+
+    "$DRIVER" drag "$pid" 260 165 520 245 0.4
+    sleep 0.15
+    grep -q '"kind":"Drag".*"selection":true' "$LOG_FILE" || { echo "drag selection failed" >&2; exit 1; }
+    "$DRIVER" scroll "$pid" 600 300 -7
+    sleep 0.3
+    grep -Eq '"kind":"Scroll".*"viewportOffset":[1-9][0-9]*' "$LOG_FILE" || { echo "fractional pixel scroll was not retained" >&2; exit 1; }
+    capture_checked 11-pointer-actions
+
+    "$DRIVER" key "$pid" v cmd shift
+    sleep 0.3
+    capture_checked 12-vim-on
+    "$DRIVER" key "$pid" v cmd shift
+    "$DRIVER" key "$pid" n cmd shift
+    sleep 0.4
+    capture_checked 13-navigator-on
+    "$DRIVER" key "$pid" n cmd shift
+    "$DRIVER" key "$pid" v cmd shift
+    sleep 0.2
+
+    stop_app
+    launch_app "$MARKDOWN_FIXTURE"
+    pid=$(require_pid)
+    sleep 0.7
+    capture_checked 14-markdown-read
+    "$DRIVER" drag "$pid" 180 150 560 300 0.4
+    sleep 0.2
+    md_drag=$(grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | grep '"kind":"Drag"' | tail -n 1)
+    grep -q '"markdownSelect":true' <<<"$md_drag" || { echo "markdown drag selection was not active" >&2; exit 1; }
+    if grep -q '"cursorLine"\|"cursorCol"' <<<"$md_drag"; then
+        echo "markdown read-mode selection fell through to the hidden editor" >&2
+        exit 1
+    fi
+    "$DRIVER" key "$pid" e cmd
+    sleep 0.35
+    capture_checked 15-markdown-edit
+    "$DRIVER" key "$pid" e cmd
+    sleep 0.35
+    capture_checked 16-markdown-read-restored
+
+    echo "GUI regression test completed; artifacts: $STATE_DIR/artifacts"
+    stop_app
+    trap - EXIT
 }
 
 command=${1:-}
@@ -264,112 +414,26 @@ logs)
 trace)
     grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | tail -n 100
     ;;
+scenarios)
+    list_scenarios
+    ;;
+scenario)
+    [[ $# -ge 1 ]] || { echo "usage: $0 scenario NAME [NAME...]" >&2; exit 2; }
+    build_app
+    require_permissions
+    for name in "$@"; do
+        run_scenario "$name"
+    done
+    ;;
 smoke)
     build_app
     require_permissions
-    launch_app "$DEFAULT_FIXTURE"
-    trap stop_app EXIT
-    pid=$(require_pid)
-    sleep 0.7
-    "$DRIVER" capture "$pid" "$STATE_DIR/artifacts/00-launch.png"
-    "$DRIVER" click "$pid" 360 165 left
-    sleep 0.2
-    "$DRIVER" click "$pid" 360 165 left
-    "$DRIVER" type "$pid" '/* gui-smoke */'
-    "$DRIVER" drag "$pid" 260 165 520 245 0.4
-    sleep 0.2
-    "$DRIVER" scroll-lines "$pid" 601 301 -4
-    sleep 0.4
-    grep -q '"kind":"Press"' "$LOG_FILE" || { echo "no pointer press was recorded" >&2; exit 1; }
-    grep -q '"selection":true' "$LOG_FILE" || { echo "no drag selection was recorded" >&2; exit 1; }
-    grep -q '"kind":"Scroll"' "$LOG_FILE" || { echo "no scroll event was recorded" >&2; exit 1; }
-    "$DRIVER" capture "$pid" "$STATE_DIR/artifacts/01-interacted.png"
-    "$DRIVER" preview "$STATE_DIR/artifacts/00-launch.png" \
-        "$STATE_DIR/artifacts/00-launch.jpg"
-    "$DRIVER" preview "$STATE_DIR/artifacts/01-interacted.png" \
-        "$STATE_DIR/artifacts/01-interacted.jpg"
-    echo "Smoke test completed; artifacts: $STATE_DIR/artifacts"
-    stop_app
-    trap - EXIT
+    scenario_smoke
     ;;
 regression)
     build_app
     require_permissions
-    stop_app
-    rm -rf "$HOME_DIR"
-    mkdir -p "$HOME_DIR"
-    launch_app "$DEFAULT_FIXTURE"
-    trap stop_app EXIT
-    pid=$(require_pid)
-    sleep 0.7
-
-    trace_cursor() {
-        grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | tail -n 1 | \
-            sed -E -n 's/.*"cursorLine":([0-9]+),"cursorCol":([0-9]+).*/\1:\2/p'
-    }
-    capture_checked() {
-        local name=$1
-        local png="$STATE_DIR/artifacts/$name.png"
-        "$DRIVER" capture "$pid" "$png"
-        [[ -s "$png" ]] || { echo "empty capture: $png" >&2; exit 1; }
-        sips -g pixelWidth -g pixelHeight "$png" >/dev/null
-        "$DRIVER" preview "$png" "$STATE_DIR/artifacts/$name.jpg"
-    }
-
-    capture_checked 10-pointer-launch
-    "$DRIVER" click "$pid" 260 165 left
-    sleep 0.15
-    primary_cursor=$(trace_cursor)
-    [[ -n "$primary_cursor" ]] || { echo "primary click did not set a traceable cursor" >&2; exit 1; }
-    "$DRIVER" click "$pid" 620 300 right
-    sleep 0.15
-    [[ "$(trace_cursor)" == "$primary_cursor" ]] || { echo "secondary click moved the cursor" >&2; exit 1; }
-    "$DRIVER" click "$pid" 620 340 middle
-    sleep 0.15
-    [[ "$(trace_cursor)" == "$primary_cursor" ]] || { echo "middle click moved the cursor" >&2; exit 1; }
-
-    "$DRIVER" drag "$pid" 260 165 520 245 0.4
-    sleep 0.15
-    grep -q '"kind":"Drag".*"selection":true' "$LOG_FILE" || { echo "drag selection failed" >&2; exit 1; }
-    "$DRIVER" scroll "$pid" 600 300 -7
-    sleep 0.3
-    grep -Eq '"kind":"Scroll".*"viewportOffset":[1-9][0-9]*' "$LOG_FILE" || { echo "fractional pixel scroll was not retained" >&2; exit 1; }
-    capture_checked 11-pointer-actions
-
-    "$DRIVER" key "$pid" v cmd shift
-    sleep 0.3
-    capture_checked 12-vim-on
-    "$DRIVER" key "$pid" v cmd shift
-    "$DRIVER" key "$pid" n cmd shift
-    sleep 0.4
-    capture_checked 13-navigator-on
-    "$DRIVER" key "$pid" n cmd shift
-    "$DRIVER" key "$pid" v cmd shift
-    sleep 0.2
-
-    stop_app
-    launch_app "$MARKDOWN_FIXTURE"
-    pid=$(require_pid)
-    sleep 0.7
-    capture_checked 14-markdown-read
-    "$DRIVER" drag "$pid" 180 150 560 300 0.4
-    sleep 0.2
-    md_drag=$(grep 'ZEPHYR_GUI_TRACE' "$LOG_FILE" | grep '"kind":"Drag"' | tail -n 1)
-    grep -q '"markdownSelect":true' <<<"$md_drag" || { echo "markdown drag selection was not active" >&2; exit 1; }
-    if grep -q '"cursorLine"\|"cursorCol"' <<<"$md_drag"; then
-        echo "markdown read-mode selection fell through to the hidden editor" >&2
-        exit 1
-    fi
-    "$DRIVER" key "$pid" e cmd
-    sleep 0.35
-    capture_checked 15-markdown-edit
-    "$DRIVER" key "$pid" e cmd
-    sleep 0.35
-    capture_checked 16-markdown-read-restored
-
-    echo "GUI regression test completed; artifacts: $STATE_DIR/artifacts"
-    stop_app
-    trap - EXIT
+    scenario_regression
     ;;
 *)
     usage

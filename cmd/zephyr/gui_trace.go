@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 
+	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 )
 
@@ -54,6 +57,62 @@ func (st *appState) tracePointer(pe pointer.Event) {
 		record.ViewportLine = ts.viewport.FirstLine
 		record.ViewportOffset = ts.viewport.PixelOffset
 		record.MarkdownSelect = ts.mdSelActive
+	}
+	if data, err := json.Marshal(record); err == nil {
+		fmt.Fprintf(os.Stderr, "ZEPHYR_GUI_TRACE %s\n", data)
+	}
+}
+
+// guiEventTrace is the record emitted after a key or text-edit event. It
+// carries a buffer checksum so a harness scenario can assert what the document
+// holds without reading pixels or the file on disk.
+type guiEventTrace struct {
+	Kind       string `json:"kind"`
+	Key        string `json:"key,omitempty"`
+	Modifiers  string `json:"modifiers,omitempty"`
+	Text       string `json:"text,omitempty"`
+	Path       string `json:"path"`
+	CursorLine int    `json:"cursorLine"`
+	CursorCol  int    `json:"cursorCol"`
+	LineCount  int    `json:"lineCount"`
+	Selection  bool   `json:"selection"`
+	Modified   bool   `json:"modified"`
+	BufferHash string `json:"bufferHash"`
+}
+
+// traceKeyEvent records the state a key press left behind.
+func (st *appState) traceKeyEvent(ke key.Event) {
+	if !guiTraceEnabled {
+		return
+	}
+	st.emitEventTrace(guiEventTrace{
+		Kind:      "Key",
+		Key:       string(ke.Name),
+		Modifiers: ke.Modifiers.String(),
+	})
+}
+
+// traceEditEvent records the state a committed text input left behind.
+func (st *appState) traceEditEvent(text string) {
+	if !guiTraceEnabled {
+		return
+	}
+	st.emitEventTrace(guiEventTrace{Kind: "Edit", Text: text})
+}
+
+// emitEventTrace fills in the document half of a key/edit record and writes it.
+// The checksum is taken over a fresh slice rather than ts.sourceBuf, which the
+// highlighter owns.
+func (st *appState) emitEventTrace(record guiEventTrace) {
+	if ed := st.activeEd(); ed != nil {
+		record.Path = ed.FilePath
+		record.CursorLine = ed.Cursor.Line
+		record.CursorCol = ed.Cursor.Col
+		record.LineCount = ed.Buffer.LineCount()
+		record.Selection = ed.Selection.Active && !ed.Selection.IsEmpty()
+		record.Modified = ed.Modified
+		sum := sha256.Sum256(ed.Buffer.TextBytes(nil))
+		record.BufferHash = hex.EncodeToString(sum[:8])
 	}
 	if data, err := json.Marshal(record); err == nil {
 		fmt.Fprintf(os.Stderr, "ZEPHYR_GUI_TRACE %s\n", data)
