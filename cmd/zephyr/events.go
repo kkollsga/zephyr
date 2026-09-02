@@ -417,6 +417,13 @@ func (st *appState) handlePointer(pe pointer.Event) {
 	st.hoverX = int(pe.Position.X)
 	st.hoverY = int(pe.Position.Y)
 
+	// pe.Buttons is the set of buttons held *after* the event, so which button
+	// this event pressed or released is only visible against the previous set.
+	heldButtons := st.pointerButtons
+	if pe.Source == pointer.Mouse {
+		st.pointerButtons = pe.Buttons
+	}
+
 	switch pe.Kind {
 	case pointer.Move, pointer.Enter:
 		// Check for incoming tab transfers when pointer is in the tab bar
@@ -429,8 +436,9 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		}
 
 	case pointer.Press:
-		// Secondary and tertiary mouse buttons must not trigger primary actions.
-		if !isPrimaryPointerPress(pe) {
+		// Secondary and tertiary mouse buttons must not trigger primary actions,
+		// including when one goes down on top of a primary drag already running.
+		if !isPrimaryPointerPress(pe, heldButtons) {
 			return
 		}
 		st.activePointer = pe.PointerID
@@ -641,6 +649,11 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		if st.pointerActive && pe.PointerID != st.activePointer {
 			return
 		}
+		// A secondary or tertiary button going up mid-gesture must not end the
+		// primary drag it was layered on top of.
+		if !isPrimaryPointerRelease(pe, heldButtons) {
+			return
+		}
 		st.pointerActive = false
 		if st.tabDrag.active {
 			st.handleTabBarRelease(int(pe.Position.X), int(pe.Position.Y))
@@ -698,8 +711,28 @@ func (st *appState) handlePointer(pe pointer.Event) {
 	}
 }
 
-func isPrimaryPointerPress(pe pointer.Event) bool {
-	return pe.Source != pointer.Mouse || pe.Buttons.Contain(pointer.ButtonPrimary)
+// isPrimaryPointerPress reports whether pe pressed the primary mouse button,
+// given the buttons held before it. Gio reports Buttons as the set held after
+// the event (gioui.org/io/pointer Event.Buttons: "the set of pressed mouse
+// buttons for this event"; the macOS backend ORs the button in on MOUSE_DOWN
+// before dispatching), so the button this event pressed is what it adds to
+// held. Non-mouse sources report no buttons and always count as primary.
+func isPrimaryPointerPress(pe pointer.Event, held pointer.Buttons) bool {
+	if pe.Source != pointer.Mouse {
+		return true
+	}
+	return (pe.Buttons &^ held).Contain(pointer.ButtonPrimary)
+}
+
+// isPrimaryPointerRelease reports whether pe released the primary mouse button:
+// the backend clears the released button from the set before dispatching, so a
+// secondary release during a primary drag arrives with Buttons still holding
+// ButtonPrimary and must leave the gesture running.
+func isPrimaryPointerRelease(pe pointer.Event, held pointer.Buttons) bool {
+	if pe.Source != pointer.Mouse {
+		return true
+	}
+	return (held &^ pe.Buttons).Contain(pointer.ButtonPrimary)
 }
 
 func (st *appState) cancelPointerGesture() {

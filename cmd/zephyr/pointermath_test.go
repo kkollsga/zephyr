@@ -31,6 +31,7 @@ func TestVisualLineAtYIncludesPixelOffset(t *testing.T) {
 func TestIsPrimaryPointerPress(t *testing.T) {
 	tests := []struct {
 		name string
+		held pointer.Buttons
 		ev   pointer.Event
 		want bool
 	}{
@@ -38,10 +39,64 @@ func TestIsPrimaryPointerPress(t *testing.T) {
 		{name: "secondary mouse", ev: pointer.Event{Source: pointer.Mouse, Buttons: pointer.ButtonSecondary}, want: false},
 		{name: "middle mouse", ev: pointer.Event{Source: pointer.Mouse, Buttons: pointer.ButtonTertiary}, want: false},
 		{name: "touch", ev: pointer.Event{Source: pointer.Touch}, want: true},
+		{
+			name: "secondary added during a primary drag",
+			held: pointer.ButtonPrimary,
+			ev:   pointer.Event{Source: pointer.Mouse, Buttons: pointer.ButtonPrimary | pointer.ButtonSecondary},
+			want: false,
+		},
+		{
+			name: "primary added while secondary is held",
+			held: pointer.ButtonSecondary,
+			ev:   pointer.Event{Source: pointer.Mouse, Buttons: pointer.ButtonPrimary | pointer.ButtonSecondary},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isPrimaryPointerPress(tt.ev); got != tt.want {
+			if got := isPrimaryPointerPress(tt.ev, tt.held); got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsPrimaryPointerRelease(t *testing.T) {
+	tests := []struct {
+		name string
+		held pointer.Buttons
+		ev   pointer.Event
+		want bool
+	}{
+		{
+			name: "primary released",
+			held: pointer.ButtonPrimary,
+			ev:   pointer.Event{Source: pointer.Mouse},
+			want: true,
+		},
+		{
+			name: "secondary released while primary held",
+			held: pointer.ButtonPrimary | pointer.ButtonSecondary,
+			ev:   pointer.Event{Source: pointer.Mouse, Buttons: pointer.ButtonPrimary},
+			want: false,
+		},
+		{
+			name: "tertiary released while primary held",
+			held: pointer.ButtonPrimary | pointer.ButtonTertiary,
+			ev:   pointer.Event{Source: pointer.Mouse, Buttons: pointer.ButtonPrimary},
+			want: false,
+		},
+		{
+			name: "primary released while secondary stays down",
+			held: pointer.ButtonPrimary | pointer.ButtonSecondary,
+			ev:   pointer.Event{Source: pointer.Mouse, Buttons: pointer.ButtonSecondary},
+			want: true,
+		},
+		{name: "touch", ev: pointer.Event{Source: pointer.Touch}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPrimaryPointerRelease(tt.ev, tt.held); got != tt.want {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})

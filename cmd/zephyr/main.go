@@ -129,6 +129,7 @@ type appState struct {
 	dragging         bool
 	activePointer    pointer.ID
 	pointerActive    bool
+	pointerButtons   pointer.Buttons // mouse buttons held as of the last event
 	quitInProgress   bool
 	scrollAccum      float32 // accumulated fractional scroll delta
 	window           *app.Window

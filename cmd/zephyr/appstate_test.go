@@ -364,7 +364,7 @@ func TestPureLayoutHelpers(t *testing.T) {
 }
 
 func TestIsPrimaryTouchPress(t *testing.T) {
-	if !isPrimaryPointerPress(pointer.Event{Source: pointer.Touch}) {
+	if !isPrimaryPointerPress(pointer.Event{Source: pointer.Touch}, 0) {
 		t.Fatal("touch press should act as primary")
 	}
 }

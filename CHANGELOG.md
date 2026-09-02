@@ -101,6 +101,11 @@ All notable changes to Zephyr are documented here.
 
 ### Editing
 
+- Clicking the right or middle mouse button during a drag no longer
+  interrupts it. A secondary button pressed mid-drag collapsed a text
+  selection to the pointer and restarted it there, or grabbed a different
+  tab; releasing that button ended the drag outright, committing a tab move
+  wherever the pointer happened to be rather than where the tab was dropped.
 - Vim `r`, `>>`, `<<`, and `J` are now undoable. They edited the buffer
   behind the undo history's back, which also corrupted every older undo
   step, so an undo after one of them could damage unrelated text.
