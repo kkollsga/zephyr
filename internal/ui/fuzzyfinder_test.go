@@ -73,3 +73,20 @@ func TestFuzzyFinder_Close(t *testing.T) {
 		t.Fatal("expected not visible")
 	}
 }
+
+// TestFuzzyFinder_ChangedThenAllFilesRescans pins the cache interaction: a
+// changed-files open replaces Files with the changed list, and the next
+// all-files open on the same root must not reuse it.
+func TestFuzzyFinder_ChangedThenAllFilesRescans(t *testing.T) {
+	dir := setupFinderDir(t)
+	ff := NewFuzzyFinder()
+	ff.OpenChanged(dir, []string{"main.go"})
+	if len(ff.Results) != 1 {
+		t.Fatalf("changed-files open listed %d results, want 1", len(ff.Results))
+	}
+	ff.Close()
+	ff.Open(dir)
+	if len(ff.Files) < 4 {
+		t.Fatalf("all-files open listed %d files, want the whole scan", len(ff.Files))
+	}
+}

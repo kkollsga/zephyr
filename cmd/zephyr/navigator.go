@@ -1042,6 +1042,12 @@ func (st *appState) executeNavAction(action vim.Action) bool {
 	case vim.ActionNavCommit:
 		st.navCommit(action.Text)
 		return true
+	case vim.ActionNavFindFiles:
+		st.openFuzzyFinder(false)
+		return true
+	case vim.ActionNavFindChanged:
+		st.openFuzzyFinder(true)
+		return true
 	}
 
 	ed := st.activeEd()

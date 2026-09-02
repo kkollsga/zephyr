@@ -174,6 +174,11 @@ func (st *appState) draw(gtx layout.Context, w *app.Window) {
 		st.drawLangSelector(gtx)
 	}
 
+	// Fuzzy file finder overlay
+	if st.fuzzyFinder != nil && st.fuzzyFinder.Visible {
+		st.drawFuzzyFinder(gtx)
+	}
+
 	// Schedule next redraw only when an animation needs it.
 	// Cursor blink: schedule at next toggle time (530ms intervals).
 	// Scrollbar fade: continuous until fully faded.
@@ -672,6 +677,11 @@ func (st *appState) drawBreadcrumb(gtx layout.Context, ed *editor.Editor, ts *ta
 	} else {
 		pathKey = "r:" + st.navRoot
 	}
+	if ts != nil && ts.bufType == bufOriginal {
+		// The breadcrumb replaces the tab bar in navigator mode, so it carries
+		// the HEAD marker the tab title would otherwise show.
+		pathKey = "h:" + pathKey
+	}
 
 	displayPath := st.navCachedPath
 	if pathKey != st.navCachedPathKey {
@@ -706,12 +716,15 @@ func (st *appState) drawBreadcrumb(gtx layout.Context, ed *editor.Editor, ts *ta
 		} else {
 			displayPath = "No Root"
 		}
+		if ts != nil && ts.bufType == bufOriginal {
+			displayPath += headTitleSuffix
+		}
 		st.navCachedPath = displayPath
 	}
 
 	// Compute per-file diff stats
 	var addedStr, deletedStr string
-	if ts != nil && ts.gitDiff != nil {
+	if ts != nil && ts.gitDiff != nil && ts.bufType != bufOriginal {
 		added, deleted := ts.gitDiff.Stats()
 		if added > 0 {
 			addedStr = fmt.Sprintf(" +%d", added)

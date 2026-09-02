@@ -121,6 +121,7 @@ type appState struct {
 	tag              *bool
 	langSel          *ui.LanguageSelector
 	findBar          *ui.FindReplaceBar
+	fuzzyFinder      *ui.FuzzyFinder
 	scrollbarRend    *render.ScrollbarRenderer
 	langLabelX       int
 	lastMaxY         int
@@ -384,6 +385,7 @@ func run() {
 		tag:           new(bool),
 		langSel:       ui.NewLanguageSelector(),
 		findBar:       ui.NewFindReplaceBar(),
+		fuzzyFinder:   ui.NewFuzzyFinder(),
 		window:        w,
 		darkMode:      cfg.DarkMode,
 		themeName:     cfg.Theme,

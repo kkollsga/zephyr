@@ -74,6 +74,10 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 			if st.langSel.Visible {
 				break
 			}
+			if st.fuzzyFinder != nil && st.fuzzyFinder.Visible {
+				st.fuzzyFinderInsert(ke.Text)
+				break
+			}
 			if st.vimEnabled && st.vimState != nil &&
 				!st.saveMenu.visible && !st.findBarHasKeys() {
 				st.handleVimEditEvent(ke.Text)
@@ -87,9 +91,6 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 }
 
 func (st *appState) handleKey(ke key.Event) {
-	if st.headViewSwallowsKey(ke) {
-		return
-	}
 	// Unified save menu intercepts all input. Each confirmation sub-state gets
 	// its own handler so a new one adds a case here rather than another branch
 	// inside the filename editor.
@@ -137,6 +138,10 @@ func (st *appState) handleKey(ke key.Event) {
 				st.quitInProgress = false
 			}
 		}
+		return
+	}
+
+	if st.handleFuzzyFinderKey(ke) {
 		return
 	}
 
@@ -196,6 +201,12 @@ func (st *appState) handleKey(ke key.Event) {
 		case ke.Name == "H" && ke.Modifiers == key.ModShortcut:
 			st.openFindBar(true)
 		}
+		return
+	}
+
+	// Read-only guards run after the overlays: an overlay that owns the
+	// keyboard is not editing this buffer, so its Return must not be swallowed.
+	if st.headViewSwallowsKey(ke) {
 		return
 	}
 
@@ -413,6 +424,11 @@ func (st *appState) handlePointer(pe pointer.Event) {
 		// Save menu takes priority over everything
 		if st.saveMenu.visible {
 			st.handleSaveMenuClick(int(pe.Position.X), int(pe.Position.Y))
+			return
+		}
+
+		// Fuzzy finder overlay takes priority while it is open
+		if st.handleFuzzyFinderClick(int(pe.Position.X), int(pe.Position.Y)) {
 			return
 		}
 
@@ -809,6 +825,10 @@ func (st *appState) handleTextInput(text string) {
 		if st.findBar.FocusField == 0 {
 			st.updateSearchResults()
 		}
+		return
+	}
+	if st.fuzzyFinder != nil && st.fuzzyFinder.Visible {
+		st.fuzzyFinderInsert(text)
 		return
 	}
 	if st.headViewActive() {

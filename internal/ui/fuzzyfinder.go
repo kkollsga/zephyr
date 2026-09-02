@@ -17,6 +17,12 @@ type FuzzyFinder struct {
 	Files        []string
 	RootDir      string
 	ChangedFiles []string // git-changed files for boosted ranking
+
+	// True when Files holds the changed-file list rather than a directory
+	// scan. Without it a changed-file open would poison the cache the
+	// all-files open reuses, and the file finder would list only the changed
+	// files for as long as the root stayed the same.
+	changedOnly bool
 }
 
 // NewFuzzyFinder creates a new fuzzy file finder.
@@ -29,8 +35,9 @@ func (ff *FuzzyFinder) Open(rootDir string) {
 	ff.Visible = true
 	ff.Query = ""
 	ff.Selected = 0
-	if ff.RootDir != rootDir || len(ff.Files) == 0 {
+	if ff.RootDir != rootDir || len(ff.Files) == 0 || ff.changedOnly {
 		ff.RootDir = rootDir
+		ff.changedOnly = false
 		ff.scanFiles()
 	}
 	ff.Results = fuzzy.RankMatches("", ff.Files)
@@ -47,6 +54,7 @@ func (ff *FuzzyFinder) OpenChanged(rootDir string, changedFiles []string) {
 	ff.RootDir = rootDir
 	ff.ChangedFiles = changedFiles
 	ff.Files = changedFiles
+	ff.changedOnly = true
 	ff.Results = fuzzy.RankMatches("", ff.Files)
 	if len(ff.Results) > 100 {
 		ff.Results = ff.Results[:100]

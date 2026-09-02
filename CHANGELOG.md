@@ -58,9 +58,15 @@ All notable changes to Zephyr are documented here.
 - Documentation: `<Space>e` (open the project root) was marked planned but has
   always worked; the keys that genuinely do not exist are now listed as
   unavailable rather than planned.
+- `<Space>f` and `<Space>b` now open a fuzzy file finder: all files under the
+  project root, or only the files git reports as changed. Type to filter,
+  Up/Down or Ctrl-p/Ctrl-n to move, Enter or a click to open, Escape or a click
+  outside to close. It never opens over the save menu, the language selector or
+  a focused find bar.
 - `go` now shows the file's committed content in place: same tab, same cursor
-  line, the tab title marked ` (HEAD)`, and the gutter's diff markers hidden
-  because they describe the working file. The view is read-only — typing,
+  line, ` (HEAD)` on the tab title and on the navigator breadcrumb, and the
+  gutter's diff markers and the header's diff stats hidden because they
+  describe the working file. The view is read-only — typing,
   pasting, vim edits, undo, redo and saving are all refused, so committed
   content can never be written over your working file — and `go` again brings
   the buffer back exactly as it was, unsaved edits, cursor and undo history

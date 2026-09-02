@@ -160,6 +160,31 @@ Cursor positions are remembered per directory — navigate away and back, and yo
 
 ---
 
+## File Finder
+
+`<Space>f` opens a fuzzy finder over the files under the project root;
+`<Space>b` lists only the files git reports as changed.
+
+| Key | Action |
+|-----|--------|
+| any character | Filter |
+| `Up` / `Down` | Move the selection |
+| `Ctrl-p` / `Ctrl-n` | Move the selection |
+| `Backspace` | Delete the last character of the query |
+| `Enter` | Open the selected file in a tab |
+| `Escape` | Close |
+
+Clicking a row opens it; clicking outside closes the finder. Only one overlay
+is up at a time — the finder does not open over the save menu, the language
+selector or a focused find bar.
+
+The file list skips hidden files and directories, `node_modules`, `vendor` and
+`__pycache__`. It does not read `.gitignore`; use `<Space>b` when you want the
+list git itself considers interesting. The scan is cached per root, so files
+created after the first `<Space>f` appear once the root changes.
+
+---
+
 ## Header & Root Folder
 
 When Navigator Mode is active, the tab bar is replaced by a header showing the project root folder name centered:
@@ -211,6 +236,8 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 | `<Space>N` | Previous changed file |
 | `<Space>g` | Open git status buffer |
 | `<Space>e` | Open project root directory |
+| `<Space>f` | Find files under the project root |
+| `<Space>b` | Find changed files only |
 
 ### Hunk Navigation (alternate keys)
 | Key | Action |

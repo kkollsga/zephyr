@@ -14,7 +14,7 @@ func (st *appState) dispatchKey(ke key.Event) {
 	if st.handleUnfocusedFindBarKey(ke) {
 		return
 	}
-	if st.vimEnabled && st.vimState != nil &&
+	if st.vimEnabled && st.vimState != nil && !st.fuzzyFinderHasKeys() &&
 		!st.saveMenu.visible && !st.langSel.Visible && !st.findBarHasKeys() {
 		st.handleVimKeyEvent(ke)
 		return
@@ -29,7 +29,7 @@ func (st *appState) dispatchKey(ke key.Event) {
 // already take precedence over vim.
 func (st *appState) handleUnfocusedFindBarKey(ke key.Event) bool {
 	if !st.findBar.Visible || st.findBar.Focused ||
-		st.saveMenu.visible || st.langSel.Visible {
+		st.saveMenu.visible || st.langSel.Visible || st.fuzzyFinderHasKeys() {
 		return false
 	}
 	switch {
@@ -55,4 +55,10 @@ func (st *appState) blurFindBarForEditorPress() {
 	}
 	st.findBar.Blur()
 	st.invalidate()
+}
+
+// fuzzyFinderHasKeys reports whether the fuzzy finder overlay owns the
+// keyboard.
+func (st *appState) fuzzyFinderHasKeys() bool {
+	return st.fuzzyFinder != nil && st.fuzzyFinder.Visible
 }
