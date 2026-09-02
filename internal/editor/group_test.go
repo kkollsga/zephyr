@@ -176,3 +176,25 @@ func TestTransact_CursorBeforeFirstAndAfterLast(t *testing.T) {
 		t.Fatalf("redo cursor = %+v, want after the last action %+v", ed.Cursor, after)
 	}
 }
+
+// Typing or pasting exactly what is already selected changes nothing, so it
+// records no undo step. Surfaced by the history replay fuzzer.
+func TestInsertText_OverIdenticalSelectionRecordsNothing(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("one\ntwo"), "")
+	selectRange(ed, 0, 1, 0, 3)
+
+	ed.InsertText("ne")
+
+	if got := ed.Buffer.Text(); got != "one\ntwo" {
+		t.Fatalf("buffer changed: %q", got)
+	}
+	if ed.History.CanUndo() {
+		t.Fatal("an identical replacement recorded an undo step")
+	}
+	if ed.Cursor.Line != 0 || ed.Cursor.Col != 3 {
+		t.Fatalf("cursor = %d:%d, want 0:3 (end of the replacement)", ed.Cursor.Line, ed.Cursor.Col)
+	}
+	if ed.Selection.Active {
+		t.Fatal("selection left active")
+	}
+}

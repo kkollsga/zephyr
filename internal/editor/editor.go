@@ -46,7 +46,9 @@ func NewEmptyEditor() *Editor {
 // InsertText inserts text at the current cursor position. With an active
 // selection the selected text is replaced, and the delete and the insert are
 // recorded as one undoable step. Inserting an empty string over a selection
-// deletes the selection; with no selection it does nothing.
+// deletes the selection; with no selection it does nothing. Replacing a
+// selection with exactly its own text records nothing, since it changes
+// nothing.
 func (e *Editor) InsertText(text string) {
 	hasSelection := e.Selection.Active && !e.Selection.IsEmpty()
 	if len(text) == 0 {
@@ -56,6 +58,17 @@ func (e *Editor) InsertText(text string) {
 		return
 	}
 	if hasSelection {
+		if e.SelectedText() == text {
+			// Replacing a selection with exactly its own text leaves the
+			// document identical; recording it would put an undo step on the
+			// stack that restores nothing. Land the cursor where the insert
+			// would have left it.
+			_, end := e.Selection.Ordered()
+			e.Cursor = end
+			e.Cursor.PreferredCol = -1
+			e.Selection.Clear()
+			return
+		}
 		e.Transact(func() {
 			e.DeleteSelection()
 			e.insertAtCursor(text)
@@ -565,9 +578,15 @@ func (e *Editor) AllCursors() []Cursor {
 }
 
 // InsertTextAtAllCursors inserts text at all cursor positions as one undo step.
+// An empty insert is a no-op, as it is for a single cursor: recording one would
+// put an undo step on the stack that restores nothing when the user presses
+// Cmd+Z.
 func (e *Editor) InsertTextAtAllCursors(text string) {
 	if len(e.Cursors) == 0 {
 		e.InsertText(text)
+		return
+	}
+	if len(text) == 0 {
 		return
 	}
 	e.Transact(func() { e.insertAtAllCursors(text) })

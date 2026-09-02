@@ -102,3 +102,19 @@ func TestIndentDedentLine(t *testing.T) {
 		t.Fatal("dedent claimed to change a tab-indented line")
 	}
 }
+
+// Overwriting a rune with itself changes nothing, so it must not leave an undo
+// step behind. Surfaced by the history replay fuzzer.
+func TestReplaceRuneAtCursor_SameRuneRecordsNothing(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("🙂 hello"), "")
+	ed.Cursor.SetPosition(ed.Buffer, 0, 0)
+
+	ed.ReplaceRuneAtCursor('🙂')
+
+	if got := ed.Buffer.Text(); got != "🙂 hello" {
+		t.Fatalf("buffer changed: %q", got)
+	}
+	if ed.History.CanUndo() {
+		t.Fatal("replacing a rune with itself recorded an undo step")
+	}
+}

@@ -7,9 +7,11 @@ import "strings"
 const indentUnit = "    "
 
 // replaceSpan swaps the byte span [off, off+len(old)) for repl, recording the
-// delete and the insert as one undo step.
+// delete and the insert as one undo step. Replacing a span with itself is a
+// no-op: recording it would leave an undo step that restores nothing, so Cmd+Z
+// would appear to do nothing at all.
 func (e *Editor) replaceSpan(off int, old, repl string) {
-	if old == "" && repl == "" {
+	if old == repl {
 		return
 	}
 	e.Transact(func() {

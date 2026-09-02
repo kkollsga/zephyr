@@ -113,3 +113,21 @@ func TestMultiCursor_PasteMultipleLines(t *testing.T) {
 		t.Fatalf("got %q", ed.Buffer.Text())
 	}
 }
+
+// An empty multi-cursor insert changes nothing, so it must not leave an undo
+// step behind: pressing Cmd+Z would then appear to do nothing at all.
+// Surfaced by the history replay net.
+func TestInsertTextAtAllCursors_EmptyTextRecordsNothing(t *testing.T) {
+	ed := NewEditor(buffer.NewFromString("aa\nbb\ncc"), "")
+	ed.AddCursorBelow()
+	ed.AddCursorBelow()
+
+	ed.InsertTextAtAllCursors("")
+
+	if got := ed.Buffer.Text(); got != "aa\nbb\ncc" {
+		t.Fatalf("buffer changed: %q", got)
+	}
+	if ed.History.CanUndo() {
+		t.Fatal("an empty insert recorded an undo step")
+	}
+}

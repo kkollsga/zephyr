@@ -42,6 +42,10 @@ All notable changes to Zephyr are documented here.
 - Soft-tab backspace measures the indentation before the cursor by character
   rather than by byte, and leaves the cursor in the right column afterwards on
   a line with non-ASCII text.
+- An edit that changes nothing no longer leaves an undo step behind: typing or
+  pasting exactly what is already selected, overwriting a character with
+  itself, and an empty multi-cursor insert each used to add a Cmd+Z that
+  restored nothing.
 - Added syntax/format error detection with red gutter markers: JSON is
   validated with the standard parser and tree-sitter languages are checked
   for parse errors, on every Enter and after five seconds of typing
