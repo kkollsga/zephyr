@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"gioui.org/io/key"
 
@@ -38,10 +40,21 @@ func finderApp(t *testing.T) (*appState, string) {
 	return st, dir
 }
 
+// openFinder runs <Space>f and waits for the scan it starts. The app does not
+// wait — it repaints when the list lands — so a test that reads the list has to
+// join the scan itself.
+func openFinder(t *testing.T, st *appState) {
+	t.Helper()
+	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	if st.fuzzyFinder.Visible && !st.fuzzyFinder.WaitForScan(10*time.Second) {
+		t.Fatal("the finder's scan did not land")
+	}
+}
+
 func TestFuzzyFinderOpensFiltersAndOpensATab(t *testing.T) {
 	st, dir := finderApp(t)
 
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 	if !st.fuzzyFinder.Visible {
 		t.Fatal("<Space>f did not open the finder")
 	}
@@ -84,7 +97,7 @@ func TestFuzzyFinderOpensFiltersAndOpensATab(t *testing.T) {
 
 func TestFuzzyFinderKeyAndClickRouting(t *testing.T) {
 	st, _ := finderApp(t)
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 
 	st.handleKey(key.Event{Name: key.NameDownArrow})
 	if st.fuzzyFinder.Selected != 1 {
@@ -115,7 +128,7 @@ func TestFuzzyFinderKeyAndClickRouting(t *testing.T) {
 		t.Fatal("a click outside the finder did not close it")
 	}
 
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 	lay = st.fuzzyLayoutNow()
 	st.handleFuzzyFinderClick(lay.x+10, lay.listY+lay.itemH+1)
 	if st.fuzzyFinder.Visible {
@@ -125,7 +138,7 @@ func TestFuzzyFinderKeyAndClickRouting(t *testing.T) {
 		t.Fatal("a click on a row opened no file")
 	}
 
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 	st.handleKey(key.Event{Name: key.NameEscape})
 	if st.fuzzyFinder.Visible {
 		t.Fatal("Escape left the finder open")
@@ -135,20 +148,20 @@ func TestFuzzyFinderKeyAndClickRouting(t *testing.T) {
 func TestFuzzyFinderYieldsToOtherOverlays(t *testing.T) {
 	st, _ := finderApp(t)
 	st.openFindBar(false)
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 	if st.fuzzyFinder.Visible {
 		t.Fatal("the finder opened over a focused find bar")
 	}
 	st.findBar.Close()
 
 	st.saveMenu.visible = true
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 	if st.fuzzyFinder.Visible {
 		t.Fatal("the finder opened over the save menu")
 	}
 	st.saveMenu.visible = false
 
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 	if !st.fuzzyFinder.Visible {
 		t.Fatal("the finder did not open with no other overlay up")
 	}
@@ -187,8 +200,58 @@ func TestFuzzyFinderChangedFilesListsOnlyChangedFiles(t *testing.T) {
 
 	// The all-files finder over the same root still lists everything.
 	st.fuzzyFinder.Close()
-	st.executeVimAction(vim.Action{Kind: vim.ActionNavFindFiles})
+	openFinder(t, st)
 	if len(st.fuzzyFinder.Results) < 2 {
 		t.Fatalf("<Space>f after <Space>b listed %d files", len(st.fuzzyFinder.Results))
+	}
+}
+
+// The nav-root dropdown owns the keyboard and draws over the same area; two
+// overlays at once left the finder taking keys the dropdown was showing rows
+// for.
+func TestFuzzyFinderYieldsToTheNavRootDropdown(t *testing.T) {
+	st, _ := finderApp(t)
+	st.navRootDropdown.open = true
+	openFinder(t, st)
+	if st.fuzzyFinder.Visible {
+		t.Fatal("the finder opened over the nav-root dropdown")
+	}
+	st.navRootDropdown.open = false
+	openFinder(t, st)
+	if !st.fuzzyFinder.Visible {
+		t.Fatal("the finder did not open with the dropdown closed")
+	}
+}
+
+// Backspace cuts one rune off the query, not one byte.
+func TestFuzzyFinderBackspaceCutsARune(t *testing.T) {
+	st, _ := finderApp(t)
+	openFinder(t, st)
+	st.handleTextInput("é")
+	st.handleKey(key.Event{Name: key.NameDeleteBackward})
+	if q := st.fuzzyFinder.Query; q != "" {
+		t.Fatalf("backspace over a multi-byte rune left query %q (% x)", q, q)
+	}
+}
+
+// A path too wide for the panel is trimmed from the left by runes: cutting
+// bytes leaves a fragment that draws as a replacement glyph.
+func TestTruncateTailRunes(t *testing.T) {
+	for _, tc := range []struct {
+		in       string
+		maxChars int
+		want     string
+	}{
+		{"src/editor.go", 20, "src/editor.go"},
+		{"src/editor.go", 6, "tor.go"},
+		{"café/menu.go", 8, "/menu.go"},
+		{"ééé.go", 4, "é.go"},
+	} {
+		if got := truncateTailRunes(tc.in, tc.maxChars); got != tc.want {
+			t.Errorf("truncateTailRunes(%q, %d) = %q, want %q", tc.in, tc.maxChars, got, tc.want)
+		}
+		if got := truncateTailRunes(tc.in, tc.maxChars); !utf8.ValidString(got) {
+			t.Errorf("truncateTailRunes(%q, %d) = % x, which is not valid UTF-8", tc.in, tc.maxChars, got)
+		}
 	}
 }

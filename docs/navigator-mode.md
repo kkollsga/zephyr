@@ -176,12 +176,19 @@ Cursor positions are remembered per directory — navigate away and back, and yo
 
 Clicking a row opens it; clicking outside closes the finder. Only one overlay
 is up at a time — the finder does not open over the save menu, the language
-selector or a focused find bar.
+selector, a focused find bar or the root-folder dropdown.
 
 The file list skips hidden files and directories, `node_modules`, `vendor` and
-`__pycache__`. It does not read `.gitignore`; use `<Space>b` when you want the
-list git itself considers interesting. The scan is cached per root, so files
-created after the first `<Space>f` appear once the root changes.
+`__pycache__` inside the project; the rules never apply to the project root
+itself, so a project in `~/.dotfiles` or in a directory called `vendor` lists
+normally. It does not read `.gitignore`; use `<Space>b` when you want the list
+git itself considers interesting.
+
+Every `<Space>f` rescans the root, so a file created, renamed or deleted since
+the last one is listed correctly. The scan runs in the background: the overlay
+opens immediately on the previous list for that root (or on `scanning…` the
+first time), and the new list replaces it when the walk finishes. Closing the
+finder abandons the scan.
 
 ---
 

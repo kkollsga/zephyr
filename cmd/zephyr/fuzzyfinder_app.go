@@ -62,7 +62,8 @@ func fuzzyFinderLayout(maxX, maxY, tabBarHeight, itemH, nResults, selected int) 
 // overlayVisible reports whether another overlay owns the keyboard, in which
 // case the fuzzy finder neither opens nor draws — one overlay at a time.
 func (st *appState) overlayVisible() bool {
-	return st.saveMenu.visible || st.langSel.Visible || st.findBarHasKeys()
+	return st.saveMenu.visible || st.langSel.Visible || st.findBarHasKeys() ||
+		st.navRootDropdown.open
 }
 
 // openFuzzyFinder opens the file finder over the navigator root, or over the
@@ -116,9 +117,7 @@ func (st *appState) handleFuzzyFinderKey(ke key.Event) bool {
 	case ke.Name == key.NameReturn:
 		st.openFuzzySelection()
 	case ke.Name == key.NameDeleteBackward:
-		if q := st.fuzzyFinder.Query; q != "" {
-			st.fuzzyFinder.UpdateQuery(q[:len(q)-1])
-		}
+		st.fuzzyFinder.BackspaceQuery()
 	}
 	st.invalidate()
 	return true
@@ -184,6 +183,10 @@ func (st *appState) drawFuzzyFinder(gtx layout.Context) {
 		return
 	}
 	ff := st.fuzzyFinder
+	// One drain per frame: a scan that landed since the last frame becomes
+	// visible here, and the geometry a click is tested against is the geometry
+	// this frame drew.
+	ff.Sync()
 	itemH := sr.LineHeightPx + 4
 	lay := fuzzyFinderLayout(gtx.Constraints.Max.X, gtx.Constraints.Max.Y, st.tabBarHeight, itemH, len(ff.Results), ff.Selected)
 
@@ -215,17 +218,32 @@ func (st *appState) drawFuzzyFinder(gtx layout.Context) {
 			paint.PaintOp{}.Add(gtx.Ops)
 			selRect.Pop()
 		}
-		text := ff.Results[lay.first+i].Text
-		if maxChars := lay.w/sr.CharWidth - 2; maxChars > 0 && len(text) > maxChars {
-			text = text[len(text)-maxChars:]
-		}
+		text := truncateTailRunes(ff.Results[lay.first+i].Text, lay.w/sr.CharWidth-2)
 		sr.RenderGlyphs(gtx.Ops, gtx, text, sr.CharWidth, iy+2, st.theme.Foreground)
 	}
 
 	count := strconv.Itoa(len(ff.Results)) + " of " + strconv.Itoa(len(ff.Files))
-	if len(ff.Results) == 0 {
+	switch {
+	case ff.Scanning() && len(ff.Files) == 0:
+		count = "scanning…"
+	case ff.Scanning():
+		count = count + " — scanning…"
+	case len(ff.Results) == 0:
 		count = "no matches"
 	}
 	sr.RenderGlyphs(gtx.Ops, gtx, count, sr.CharWidth, lay.h-itemH, st.theme.SubtitleFg)
 	off.Pop()
+}
+
+// truncateTailRunes keeps the last maxChars characters of text. Characters,
+// not bytes: a path trimmed mid-rune draws as a replacement glyph.
+func truncateTailRunes(text string, maxChars int) string {
+	if maxChars <= 0 || len(text) <= maxChars {
+		return text
+	}
+	r := []rune(text)
+	if len(r) <= maxChars {
+		return text
+	}
+	return string(r[len(r)-maxChars:])
 }

@@ -64,8 +64,11 @@ All notable changes to Zephyr are documented here.
 - `<Space>f` and `<Space>b` now open a fuzzy file finder: all files under the
   project root, or only the files git reports as changed. Type to filter,
   Up/Down or Ctrl-p/Ctrl-n to move, Enter or a click to open, Escape or a click
-  outside to close. It never opens over the save menu, the language selector or
-  a focused find bar.
+  outside to close. It never opens over the save menu, the language selector, a
+  focused find bar or the root-folder dropdown. The overlay opens immediately
+  and scans the project in the background, so a large tree no longer freezes
+  the window, and every open rescans, so a deleted or renamed file is listed
+  correctly.
 - `go` now shows the file's committed content in place: same tab, same cursor
   line, ` (HEAD)` on the tab title and on the navigator breadcrumb, and the
   gutter's diff markers and the header's diff stats hidden because they

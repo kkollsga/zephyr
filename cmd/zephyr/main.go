@@ -404,6 +404,11 @@ func run() {
 		st.vimState = vim.NewState()
 	}
 
+	// The finder's directory scan runs off the UI goroutine and repaints when
+	// it lands. The window is captured rather than reached through st, which
+	// the scan goroutine must not touch.
+	st.fuzzyFinder.OnResults = w.Invalidate
+
 	// Start file watcher
 	if fw, err := fileio.NewWatcher(); err == nil {
 		st.watcher = fw

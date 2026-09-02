@@ -1,53 +1,91 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
 
 	"github.com/kristianweb/zephyr/internal/fuzzy"
 )
 
-// FuzzyFinder manages the file finder overlay state.
-type FuzzyFinder struct {
-	Visible      bool
-	Query        string
-	Results      []fuzzy.Match
-	Selected     int
-	Files        []string
-	RootDir      string
-	ChangedFiles []string // git-changed files for boosted ranking
+// finderMaxResults caps the ranked list handed to the overlay.
+const finderMaxResults = 100
 
-	// True when Files holds the changed-file list rather than a directory
-	// scan. Without it a changed-file open would poison the cache the
-	// all-files open reuses, and the file finder would list only the changed
-	// files for as long as the root stayed the same.
+// FuzzyFinder manages the file finder overlay state.
+//
+// Every exported field belongs to the UI goroutine. The directory scan runs off
+// it — a walk of a large tree takes seconds, and doing it inside the key
+// handler froze the window — and hands its result back through the
+// mutex-protected pending slot that Sync drains. The scan goroutine touches
+// nothing else.
+type FuzzyFinder struct {
+	Visible  bool
+	Query    string
+	Results  []fuzzy.Match
+	Selected int
+	Files    []string
+	RootDir  string
+
+	// Scan lists the files under root, relative to it and in slash form. It
+	// runs on its own goroutine and must return promptly once stop is closed.
+	// Replaceable so a test can drive the handoff without a real tree.
+	Scan func(root string, stop <-chan struct{}) []string
+
+	// OnResults is called from the scan goroutine once a result is waiting, so
+	// the app can repaint; the next frame's Sync folds the result in. It must
+	// be safe to call from another goroutine.
+	OnResults func()
+
 	changedOnly bool
+	scanning    bool
+	// gen rises on every Open and Close. A scan carries the generation it
+	// started under, so the result of a superseded or closed scan is dropped
+	// instead of replacing a newer list.
+	gen  int
+	stop chan struct{}
+
+	mu      sync.Mutex
+	pending *scanResult
+	landed  chan struct{}
+}
+
+type scanResult struct {
+	gen   int
+	root  string
+	files []string
 }
 
 // NewFuzzyFinder creates a new fuzzy file finder.
 func NewFuzzyFinder() *FuzzyFinder {
-	return &FuzzyFinder{}
+	return &FuzzyFinder{Scan: scanFiles}
 }
 
-// Open shows the fuzzy finder. Scans the directory for files if not already loaded.
+// Open shows the fuzzy finder over rootDir and starts a fresh scan of it. It
+// returns at once: the previous list for the same root stays on screen until
+// the new one lands, so a delete or a rename is picked up without the overlay
+// ever waiting on the walk.
 func (ff *FuzzyFinder) Open(rootDir string) {
 	ff.Visible = true
 	ff.Query = ""
 	ff.Selected = 0
-	if ff.RootDir != rootDir || len(ff.Files) == 0 || ff.changedOnly {
-		ff.RootDir = rootDir
-		ff.changedOnly = false
-		ff.scanFiles()
+	if ff.RootDir != rootDir || ff.changedOnly {
+		// Another root's files, or the changed-file list, describe something
+		// else; showing them under this root would be a lie, not a stale cache.
+		ff.Files = nil
 	}
-	ff.Results = fuzzy.RankMatches("", ff.Files)
-	if len(ff.Results) > 100 {
-		ff.Results = ff.Results[:100]
-	}
+	ff.RootDir = rootDir
+	ff.changedOnly = false
+	ff.rank()
+	ff.startScan(rootDir)
 }
 
 // OpenChanged shows the fuzzy finder with only changed files.
 func (ff *FuzzyFinder) OpenChanged(rootDir string, changedFiles []string) {
+	ff.cancelScan()
 	ff.Visible = true
 	ff.Query = ""
 	ff.Selected = 0
@@ -55,30 +93,132 @@ func (ff *FuzzyFinder) OpenChanged(rootDir string, changedFiles []string) {
 	// git prints its status paths with forward slashes already; normalising
 	// keeps the invariant one line rather than one per producer, since
 	// SelectedPath converts back on the way out.
-	ff.ChangedFiles = toFinderPaths(changedFiles)
-	ff.Files = ff.ChangedFiles
+	ff.Files = toFinderPaths(changedFiles)
 	ff.changedOnly = true
-	ff.Results = fuzzy.RankMatches("", ff.Files)
-	if len(ff.Results) > 100 {
-		ff.Results = ff.Results[:100]
-	}
+	ff.rank()
 }
 
-// Close hides the fuzzy finder.
+// Close hides the fuzzy finder and drops whatever the in-flight scan produces.
 func (ff *FuzzyFinder) Close() {
+	ff.cancelScan()
 	ff.Visible = false
 	ff.Query = ""
 	ff.Results = nil
 }
 
+// Scanning reports whether a scan is still running with nothing to show yet.
+func (ff *FuzzyFinder) Scanning() bool {
+	return ff.scanning
+}
+
+// startScan launches the walk of root and supersedes any scan already running.
+func (ff *FuzzyFinder) startScan(root string) {
+	ff.cancelScan()
+	gen := ff.gen
+	stop := make(chan struct{})
+	ff.stop = stop
+	ff.scanning = true
+	landed := make(chan struct{})
+	ff.mu.Lock()
+	ff.landed = landed
+	ff.mu.Unlock()
+
+	scan, notify := ff.Scan, ff.OnResults
+	if scan == nil {
+		scan = scanFiles
+	}
+	go func() {
+		files := scan(root, stop)
+		ff.mu.Lock()
+		ff.pending = &scanResult{gen: gen, root: root, files: files}
+		ff.mu.Unlock()
+		close(landed)
+		if notify != nil {
+			notify()
+		}
+	}()
+}
+
+// cancelScan asks the running scan to stop and moves past its generation, so
+// a result already on its way is discarded rather than applied late.
+func (ff *FuzzyFinder) cancelScan() {
+	if ff.stop != nil {
+		close(ff.stop)
+		ff.stop = nil
+	}
+	ff.gen++
+	ff.scanning = false
+	ff.mu.Lock()
+	ff.pending = nil
+	ff.mu.Unlock()
+}
+
+// Sync folds a completed scan into the visible list and reports whether it
+// changed anything. Only the UI goroutine calls it.
+func (ff *FuzzyFinder) Sync() bool {
+	ff.mu.Lock()
+	p := ff.pending
+	ff.pending = nil
+	ff.mu.Unlock()
+	if p == nil || p.gen != ff.gen || p.root != ff.RootDir {
+		return false
+	}
+	ff.scanning = false
+	ff.Files = p.files
+	ff.rank()
+	return true
+}
+
+// WaitForScan blocks until the in-flight scan has been folded in, and reports
+// whether one was. The app never calls it — it repaints from OnResults — but a
+// caller that needs the list synchronously has no other join point.
+func (ff *FuzzyFinder) WaitForScan(d time.Duration) bool {
+	ff.mu.Lock()
+	landed := ff.landed
+	ff.mu.Unlock()
+	if landed == nil {
+		return false
+	}
+	select {
+	case <-landed:
+	case <-time.After(d):
+		return false
+	}
+	return ff.Sync()
+}
+
 // UpdateQuery filters files based on the query.
 func (ff *FuzzyFinder) UpdateQuery(query string) {
+	ff.Sync()
 	ff.Query = query
-	ff.Results = fuzzy.RankMatches(query, ff.Files)
-	if len(ff.Results) > 100 {
-		ff.Results = ff.Results[:100]
-	}
 	ff.Selected = 0
+	ff.rank()
+}
+
+// BackspaceQuery drops the last character of the query. It is a rune, not a
+// byte: cutting one byte off "é" leaves an invalid fragment that matches
+// nothing and draws as a replacement glyph.
+func (ff *FuzzyFinder) BackspaceQuery() {
+	if ff.Query == "" {
+		return
+	}
+	_, size := utf8.DecodeLastRuneInString(ff.Query)
+	ff.UpdateQuery(ff.Query[:len(ff.Query)-size])
+}
+
+// rank re-ranks Files against the current query, keeping the selection inside
+// the result list.
+func (ff *FuzzyFinder) rank() {
+	ff.Results = fuzzy.RankMatches(ff.Query, ff.Files)
+	if len(ff.Results) > finderMaxResults {
+		ff.Results = ff.Results[:finderMaxResults]
+	}
+	if ff.Selected >= len(ff.Results) {
+		ff.Selected = len(ff.Results) - 1
+	}
+	if ff.Selected < 0 {
+		ff.Selected = 0
+	}
 }
 
 // MoveUp moves selection up.
@@ -130,29 +270,41 @@ func toFinderPaths(paths []string) []string {
 	return out
 }
 
-func (ff *FuzzyFinder) scanFiles() {
-	ff.Files = nil
-	filepath.Walk(ff.RootDir, func(path string, info os.FileInfo, err error) error {
+// errScanStopped ends the walk early; filepath.Walk has no other way out.
+var errScanStopped = errors.New("scan stopped")
+
+// scanFiles walks root off the UI goroutine, listing every file the finder
+// offers.
+func scanFiles(root string, stop <-chan struct{}) []string {
+	var files []string
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
+		select {
+		case <-stop:
+			return errScanStopped
+		default:
+		}
 		name := info.Name()
-
-		// Skip hidden dirs, node_modules, .git, etc.
 		if info.IsDir() {
+			// The skip rules describe what lies inside the tree, not the tree
+			// itself: a project that lives in ~/.dotfiles or in a directory
+			// called vendor still lists its own files.
+			if path == root {
+				return nil
+			}
 			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "__pycache__" || name == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-
-		// Skip hidden files and binary-looking files
 		if strings.HasPrefix(name, ".") {
 			return nil
 		}
-
-		rel, _ := filepath.Rel(ff.RootDir, path)
-		ff.Files = append(ff.Files, toFinderPath(rel, filepath.Separator))
+		rel, _ := filepath.Rel(root, path)
+		files = append(files, toFinderPath(rel, filepath.Separator))
 		return nil
 	})
+	return files
 }
