@@ -61,6 +61,23 @@ All notable changes to Zephyr are documented here.
   saving stores the selected form; the conversion preserves key order and is
   a single undo step.
 
+### Cross-platform
+
+- Vim mode on Windows and Linux now honours its Ctrl bindings. Gio reports the
+  platform shortcut modifier as Ctrl off macOS, and every Ctrl key was being
+  discarded as a host accelerator, so Ctrl+d, Ctrl+u, Ctrl+f, Ctrl+b, Ctrl+r
+  and Ctrl+v did nothing.
+- Application shortcuts (new tab, close tab, save, find, …) now work while vim
+  mode is active on every platform. Vim swallowed them instead of passing them
+  to the host as intended, so on macOS Cmd+T and friends were dead in vim mode.
+- The navigator no longer mistakes the repository root for a different
+  directory on Windows: git reports the root with forward slashes, which never
+  compared equal to the paths Windows hands the editor.
+- Alternate-file navigation now finds the sibling test or implementation file
+  inside directories whose names contain `[`, `*` or `?` — Next.js route
+  folders such as `[id]` were read as filename patterns and reported the
+  existing sibling as missing.
+
 ### macOS
 
 - The Zephyr application menu now shows the current version as its first row.

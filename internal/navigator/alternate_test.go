@@ -87,12 +87,37 @@ func TestAlternateFile_NoMatch(t *testing.T) {
 }
 
 func TestAlternateFile_NonExistent(t *testing.T) {
-	// Should still return a path (the first candidate) even if file doesn't exist
-	got := AlternateFile("/nonexistent/handler.go")
+	// Should still return a path (the first candidate) even if file doesn't exist.
+	// The input is derived from a real temp dir because a "/x" path carries no
+	// volume name and so is not absolute on Windows.
+	got := AlternateFile(filepath.Join(t.TempDir(), "nonexistent", "handler.go"))
 	if got == "" {
 		t.Error("expected a candidate path even for non-existent files")
 	}
 	if !filepath.IsAbs(got) {
 		t.Error("expected absolute path")
+	}
+}
+
+// TestAlternateFile_GlobMetacharacters pins that candidate paths are matched
+// literally: a directory like Next.js's "[id]" was previously fed to
+// filepath.Glob, which read the brackets as a character class, found no match
+// and so reported the existing sibling as missing.
+func TestAlternateFile_GlobMetacharacters(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "[id]")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	impl := filepath.Join(dir, "page.tsx")
+	spec := filepath.Join(dir, "page.spec.tsx")
+	for _, p := range []string{impl, spec} {
+		if err := os.WriteFile(p, []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// page.test.tsx is the first candidate but does not exist, so only a
+	// working existence check reaches the spec file.
+	if got := AlternateFile(impl); got != spec {
+		t.Errorf("AlternateFile(%q) = %q, want %q", impl, got, spec)
 	}
 }

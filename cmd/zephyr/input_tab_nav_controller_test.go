@@ -258,7 +258,35 @@ func TestGioKeyToVimInputMappings(t *testing.T) {
 		}
 	}
 	got := gioKeyToVimInput(key.Event{Name: "X", Modifiers: key.ModAlt | key.ModShortcut})
-	if !reflect.DeepEqual(got, vim.KeyInput{Char: 'x', Alt: true, Shortcut: true}) {
-		t.Fatalf("printable key mapping=%+v", got)
+	want := vim.KeyInput{Char: 'x', Alt: true, Shortcut: true}
+	// key.ModShortcut is Cmd on macOS and Ctrl on every other platform, so off
+	// macOS this same event also carries Ctrl.
+	want.Ctrl = key.ModShortcut&key.ModCtrl != 0
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("printable key mapping=%+v want %+v", got, want)
+	}
+}
+
+// TestVimModeHandsDeclinedShortcutsToHost covers the routing half of the same
+// platform rule: off macOS every Ctrl combination reaches vim carrying the
+// shortcut modifier, so host accelerators only work if a declined key falls
+// back to the normal key handler.
+func TestVimModeHandsDeclinedShortcutsToHost(t *testing.T) {
+	st, _, _ := testAppWithText("hello\n", "Go")
+	st.vimEnabled = true
+	st.vimState = vim.NewState()
+
+	before := len(st.tabBar.Tabs)
+	st.handleVimKeyEvent(key.Event{Name: "T", Modifiers: key.ModShortcut, State: key.Press})
+	if len(st.tabBar.Tabs) != before+1 {
+		t.Fatalf("shortcut+T did not reach the host handler: tabs %d, want %d", len(st.tabBar.Tabs), before+1)
+	}
+
+	// A key vim does claim must not leak to the host: Ctrl+F is vim's page-down,
+	// not the host's find bar, even where Ctrl is the shortcut modifier.
+	st.vimState.Mode = vim.ModeNormal
+	st.handleVimKeyEvent(key.Event{Name: "F", Modifiers: key.ModCtrl | key.ModShortcut, State: key.Press})
+	if st.findBar.Visible {
+		t.Fatal("Ctrl+F opened the find bar; vim claims it as page-down")
 	}
 }

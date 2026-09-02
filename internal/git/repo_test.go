@@ -49,6 +49,14 @@ func TestDiscover(t *testing.T) {
 	if repo.Root != dir {
 		t.Errorf("Root = %q, want %q", repo.Root, dir)
 	}
+	// git prints POSIX separators on every platform, so an unnormalised Root
+	// would not equal the OS-derived paths callers compare it against.
+	if repo.Root != filepath.Clean(repo.Root) {
+		t.Errorf("Root = %q is not in platform-separator form", repo.Root)
+	}
+	if !filepath.IsAbs(repo.GitDir) {
+		t.Errorf("GitDir = %q, want an absolute path", repo.GitDir)
+	}
 }
 
 func TestDiscover_Subdirectory(t *testing.T) {

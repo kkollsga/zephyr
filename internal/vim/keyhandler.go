@@ -31,8 +31,11 @@ const (
 // HandleKey processes a key input and returns an action.
 // The caller is responsible for executing the action on the editor.
 func (s *State) HandleKey(ev KeyInput) Action {
-	// Shortcut keys (Cmd+S, Cmd+C, etc.) always pass through to the host
-	if ev.Shortcut {
+	// Host accelerators (Cmd+S, Cmd+C, …) are not vim keys. Off macOS the
+	// shortcut modifier *is* Ctrl, so a bare Shortcut test would also discard
+	// every Ctrl binding (Ctrl+d, Ctrl+r, Ctrl+v); Ctrl keeps them here and the
+	// host still gets the ones vim declines with ActionNone.
+	if ev.Shortcut && !ev.Ctrl {
 		return Action{Kind: ActionNone}
 	}
 

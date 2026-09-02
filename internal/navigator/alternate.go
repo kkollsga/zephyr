@@ -1,6 +1,7 @@
 package navigator
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -89,12 +90,10 @@ func AlternateFile(filePath string) string {
 	return ""
 }
 
+// fileExists reports whether path names an existing entry. Lstat, not Glob:
+// the candidate is a literal path, and directory names such as Next.js's
+// "[id]" would otherwise be read as glob metacharacters.
 func fileExists(path string) bool {
-	_, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	// Use Lstat to avoid following symlinks
-	info, err := filepath.Glob(path)
-	return err == nil && len(info) > 0
+	_, err := os.Lstat(path)
+	return err == nil
 }

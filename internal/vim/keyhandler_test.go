@@ -404,3 +404,25 @@ func TestScrollCommands(t *testing.T) {
 		t.Errorf("zt: got action %d, want ActionScrollTop", a.Kind)
 	}
 }
+
+// TestHandleKeyCtrlBindingsSurviveShortcutModifier pins the platform rule:
+// Gio reports the shortcut modifier as Cmd on macOS but as Ctrl everywhere
+// else, so a Ctrl binding off macOS arrives with both flags set. It must still
+// reach the Ctrl handler instead of being discarded as a host accelerator.
+func TestHandleKeyCtrlBindingsSurviveShortcutModifier(t *testing.T) {
+	s := NewState()
+	if got := s.HandleKey(KeyInput{Char: 'd', Ctrl: true, Shortcut: true}); got.Kind != ActionMoveHalfPageDown {
+		t.Errorf("Ctrl+d with the shortcut modifier = %v, want ActionMoveHalfPageDown", got.Kind)
+	}
+	if got := s.HandleKey(KeyInput{Char: 'r', Ctrl: true, Shortcut: true}); got.Kind != ActionRedo {
+		t.Errorf("Ctrl+r with the shortcut modifier = %v, want ActionRedo", got.Kind)
+	}
+	// A Cmd-style accelerator carries no Ctrl and belongs to the host.
+	if got := s.HandleKey(KeyInput{Char: 's', Shortcut: true}); got.Kind != ActionNone {
+		t.Errorf("Cmd+s = %v, want ActionNone", got.Kind)
+	}
+	// So does a Ctrl combination vim has no binding for.
+	if got := s.HandleKey(KeyInput{Char: 's', Ctrl: true, Shortcut: true}); got.Kind != ActionNone {
+		t.Errorf("Ctrl+s = %v, want ActionNone", got.Kind)
+	}
+}

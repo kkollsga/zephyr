@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -20,13 +21,16 @@ func Discover(path string) (*Repo, error) {
 		// Not a git repo — not an error
 		return nil, nil
 	}
-	gitDir, err := Run(path, "rev-parse", "--git-dir")
+	gitDir, err := Run(path, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return nil, err
 	}
+	// git prints POSIX separators even on Windows; Clean converts them to the
+	// platform separator so these paths compare equal to the OS-derived paths
+	// callers hold (navigator root equality, filepath.Rel/Join).
 	return &Repo{
-		Root:   strings.TrimSpace(string(root)),
-		GitDir: strings.TrimSpace(string(gitDir)),
+		Root:   filepath.Clean(strings.TrimSpace(string(root))),
+		GitDir: filepath.Clean(strings.TrimSpace(string(gitDir))),
 	}, nil
 }
 

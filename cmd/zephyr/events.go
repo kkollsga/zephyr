@@ -864,9 +864,10 @@ func (st *appState) handleVimKeyEvent(ke key.Event) {
 		ev := gioKeyToVimInput(ke)
 		// Allow Ctrl keys through vim (Ctrl+d, Ctrl+u, Ctrl+f, Ctrl+b)
 		if ev.Ctrl {
-			action := st.vimState.HandleKey(ev)
-			st.executeMdReadAction(action, ts)
-			return
+			if action := st.vimState.HandleKey(ev); action.Kind != vim.ActionNone {
+				st.executeMdReadAction(action, ts)
+				return
+			}
 		}
 		// Allow system shortcuts (Cmd+C, Cmd+F, etc.) through normal handler
 		if ke.Modifiers&key.ModShortcut != 0 {
@@ -893,6 +894,13 @@ func (st *appState) handleVimKeyEvent(ke key.Event) {
 	}
 
 	action := st.vimState.HandleKey(ev)
+	// A key carrying the platform shortcut modifier that vim declines is a host
+	// accelerator (Cmd+S, and off macOS every Ctrl combination vim has no
+	// binding for), so hand it to the normal key handler.
+	if action.Kind == vim.ActionNone && ev.Shortcut {
+		st.handleKey(ke)
+		return
+	}
 	st.executeVimAction(action)
 
 	// Update visual selection if in visual mode

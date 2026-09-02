@@ -330,28 +330,6 @@ bool isPointerOutsideWindow() {
 	return true;
 }
 
-// Returns the global mouse position as (x, y) in screen coordinates.
-void getGlobalMousePosition(double *outX, double *outY) {
-	NSPoint mouseLocation = [NSEvent mouseLocation];
-	*outX = mouseLocation.x;
-	*outY = mouseLocation.y;
-}
-
-// Returns the window frame as (x, y, w, h) in screen coordinates.
-void getWindowFrame(double *outX, double *outY, double *outW, double *outH) {
-	for (NSWindow *window in [NSApp windows]) {
-		if ([window isVisible] && window.contentView) {
-			NSRect frame = [window frame];
-			*outX = frame.origin.x;
-			*outY = frame.origin.y;
-			*outW = frame.size.width;
-			*outH = frame.size.height;
-			return;
-		}
-	}
-	*outX = 0; *outY = 0; *outW = 0; *outH = 0;
-}
-
 // --- Word Wrap menu support ---
 
 static volatile bool _wordWrapToggled = false;
@@ -802,20 +780,6 @@ func closeRequested() bool {
 // visible application windows. Used for tab drag-out detection.
 func pointerOutsideWindow() bool {
 	return bool(C.isPointerOutsideWindow())
-}
-
-// globalMousePosition returns the global mouse position in screen coordinates.
-func globalMousePosition() (x, y float64) {
-	var cx, cy C.double
-	C.getGlobalMousePosition(&cx, &cy)
-	return float64(cx), float64(cy)
-}
-
-// windowFrame returns the current window frame in screen coordinates.
-func windowFrame() (x, y, w, h float64) {
-	var cx, cy, cw, ch C.double
-	C.getWindowFrame(&cx, &cy, &cw, &ch)
-	return float64(cx), float64(cy), float64(cw), float64(ch)
 }
 
 // startWindowDrag initiates a native macOS window drag from the current event.
