@@ -90,10 +90,24 @@ condition read off the app or the filesystem — the trace, a captured file's
 bytes — never off a screenshot. `smoke` and `regression` remain as aliases for
 `scenario smoke` and `scenario regression`.
 
+Each scenario runs in a subshell of its own, so its cleanup runs at its own end.
+Scenarios install different EXIT traps and a shell holds only one at a time;
+sharing a shell let the next scenario's trap replace the previous one, and a
+`scenario tear-out smoke` run ended with an orphan Zephyr holding the global
+input stream.
+
 `clipboard` drives copy, paste, paste over a full selection, two undos and a
 save through real keystrokes. It runs against a copy of the fixture inside the
-state dir, never the tracked one, and it saves and restores the pasteboard
-around the run — including when the run fails part-way.
+state dir, never the tracked one. It empties the pasteboard before the Cmd+C it
+asserts on, so that assertion fails when the copy does not happen instead of
+passing on a leftover.
+
+**The pasteboard save and restore is text only.** The scenario reads your
+pasteboard with `pbpaste` and puts that text back afterwards, including when
+the run fails part-way — but an image, a file promise or rich text is not text,
+and what goes back is at best the plain-text rendering of it. Non-text
+pasteboard content does not survive the run. The scenario prints that warning
+on stderr before it takes the pasteboard.
 
 `save-as` drives Save As onto a file that already exists and both answers to
 the overwrite prompt: Escape goes back with the target's bytes untouched,
@@ -103,7 +117,7 @@ Return overwrites it with the buffer. Both are asserted from the target file.
 process exists, holds the torn-out file, and has a window of its own. It is the
 one scenario that ends with more than one process, so it does not use
 `stop_app`, whose single-PID model would leave the detached instance running:
-its trap kills every process running the GUI-test binary — a path inside the
+its cleanup kills every process running the GUI-test binary — a path inside the
 state dir, so a Zephyr you are running yourself can never match it — and fails
 the run if one survives. It also refuses to start when a GUI-test Zephyr is
 already running, since a straggler would satisfy "a second process appeared"

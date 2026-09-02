@@ -247,12 +247,19 @@ list_scenarios() {
     printf '%s\n' "${SCENARIOS[@]}"
 }
 
+# run_scenario runs one scenario in a subshell of its own. Scenarios install
+# different EXIT traps — stop_app for most, tear_out_cleanup for tear-out — and
+# a shell holds only one EXIT trap at a time: run in one shell, the next
+# scenario's trap silently replaces the previous one and its cleanup never
+# fires. That left an orphan Zephyr holding the global input stream after
+# `scenario tear-out smoke`. A subshell per scenario ends where the scenario
+# ends, so every trap runs exactly once, at its own scenario's end.
 run_scenario() {
     local name=$1
     local known
     for known in "${SCENARIOS[@]}"; do
         if [[ "$known" == "$name" ]]; then
-            "scenario_${name//-/_}"
+            ( "scenario_${name//-/_}" )
             return
         fi
     done
@@ -487,6 +494,11 @@ scenario_clipboard() {
     local target="$work/clipboard_fixture.go"
     cp "$DEFAULT_FIXTURE" "$target"
 
+    # The save and restore is text only: pbpaste flattens an image, a file
+    # promise or rich text to whatever plain text it can produce, and the
+    # restore puts that back. Anything else on the pasteboard is lost, so say
+    # so before taking it rather than after.
+    echo "clipboard scenario: your pasteboard is saved and restored as plain text; non-text content on it will be lost" >&2
     CLIPBOARD_BACKUP="$work/pasteboard.bak"
     pbpaste >"$CLIPBOARD_BACKUP" 2>/dev/null || : >"$CLIPBOARD_BACKUP"
 
@@ -517,6 +529,10 @@ scenario_clipboard() {
         "$DRIVER" key "$pid" right shift
     done
     sleep 0.2
+    # Empty the pasteboard first. With the copied word left on it from an
+    # earlier run, the assertion below passes whether or not Cmd+C did
+    # anything, which is a gate that cannot fail.
+    pbcopy </dev/null
     "$DRIVER" key "$pid" c cmd
     sleep 0.4
     [[ "$(pbpaste)" == "$word" ]] || {
