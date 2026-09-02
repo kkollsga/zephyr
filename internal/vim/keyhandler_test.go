@@ -442,9 +442,18 @@ func TestUnimplementedTextObjectIsInert(t *testing.T) {
 			t.Errorf("d%ct = %d, want ActionNone", objType, a.Kind)
 		}
 	}
-	// The hunk object stays accepted — C2 implements it.
+	// The hunk object is inner-only; `dah` has no reading that excludes context
+	// lines, so it must not parse into a delete either.
 	s := NewState()
 	var a Action
+	for _, inp := range []KeyInput{charInput('d'), charInput('a'), charInput('h')} {
+		a = s.HandleKey(inp)
+	}
+	if a.Kind != ActionNone {
+		t.Errorf("dah = %d, want ActionNone", a.Kind)
+	}
+
+	s = NewState()
 	for _, inp := range []KeyInput{charInput('d'), charInput('i'), charInput('h')} {
 		a = s.HandleKey(inp)
 	}

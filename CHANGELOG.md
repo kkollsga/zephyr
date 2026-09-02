@@ -58,6 +58,11 @@ All notable changes to Zephyr are documented here.
 - Documentation: `<Space>e` (open the project root) was marked planned but has
   always worked; the keys that genuinely do not exist are now listed as
   unavailable rather than planned.
+- The `ih` hunk text object now works: `dih`, `yih` and `cih` operate on the
+  run of changed lines under the cursor, linewise and as one undo step. It
+  covers the changed lines only — a context line inside a hunk is not part of
+  the object, and with the cursor on an unchanged line the keys do nothing
+  rather than reaching for the whole file.
 
 ### Markdown
 

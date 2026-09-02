@@ -624,6 +624,12 @@ func (st *appState) executeMotion(ed *editor.Editor, motion vim.ActionKind, ch r
 // vimExecuteTextObject handles operations with text objects (e.g., ciw, di").
 func (st *appState) vimExecuteTextObject(ed *editor.Editor, action vim.Action, op vim.Operator) {
 	inner := action.TextObjType == 'i'
+	// The hunk object is linewise and keyed to the tab's diff rather than to the
+	// buffer text, so it takes its own path.
+	if action.TextObj == 'h' {
+		st.vimHunkObject(ed, op)
+		return
+	}
 	startLine, startCol, endLine, endCol, ok := vimFindTextObject(ed, action.TextObj, inner)
 	if !ok {
 		return

@@ -149,6 +149,13 @@ func (s *State) handleTextObjDelimiter(ev KeyInput) Action {
 	objType := s.WaitingForTextObjType
 	s.reset()
 
+	// The hunk object is inner-only: `ih` is the run of changed lines, and there
+	// is no "a hunk" reading of it that does not include context lines nobody
+	// changed.
+	if ch == 'h' && objType != 'i' {
+		return Action{Kind: ActionNone}
+	}
+
 	// Delimiters with an executor behind them. A delimiter accepted here without
 	// one parses into a complete action that does nothing, which reads to the
 	// user as a successful edit; the tag object 't' was exactly that.

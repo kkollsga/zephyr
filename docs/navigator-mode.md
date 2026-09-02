@@ -43,6 +43,22 @@ The `<Space>` leader keys are the recommended bindings — they work on all keyb
 
 Counts work: `3<Space>c` jumps forward 3 hunks.
 
+### Hunk Text Object
+
+`ih` is the run of changed lines under the cursor — the added and modified
+lines only, never the unchanged context lines git prints around them. It is
+linewise, so it takes whole lines with their newlines:
+
+| Key | Action |
+|-----|--------|
+| `dih` | Delete the changed lines under the cursor |
+| `yih` | Yank them (pastes back on its own line with `p`) |
+| `cih` | Delete them and start typing on the empty line left behind |
+
+Each is a single undo step. With the cursor on an unchanged line — including a
+context line in the middle of a hunk — there is no hunk object and the keys do
+nothing. Operator use only: `vih` in visual mode is not supported.
+
 ---
 
 ## Status Buffer
@@ -187,6 +203,11 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 | `[c` | Previous hunk (same as `<Space>C`) |
 | `]C` | Next changed file (same as `<Space>n`) |
 | `[C` | Previous changed file (same as `<Space>N`) |
+
+### Text Objects
+| Key | Action |
+|-----|--------|
+| `ih` | The changed lines under the cursor — works with `d`, `y` and `c` |
 
 ### g-prefix
 | Key | Action |
