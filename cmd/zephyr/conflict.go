@@ -162,10 +162,12 @@ func (st *appState) applyExternalChange(tab *ui.Tab, ts *tabState, path string) 
 	}
 	st.clearDeletedConflict(tab, ts)
 
-	if tab.Editor.Modified {
+	if tab.Editor.Modified || (ts != nil && ts.bufType == bufOriginal) {
 		// The buffer holds edits the file no longer contains. Record it as a
 		// standing conflict rather than only announcing it: the badge and the
-		// save-time guard both outlive the notification.
+		// save-time guard both outlive the notification. A HEAD view is in the
+		// same position for a different reason — reloading would overwrite the
+		// displayed HEAD content and strand the stashed working buffer.
 		if ts != nil {
 			ts.conflict = conflictModified
 		}

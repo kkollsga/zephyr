@@ -403,6 +403,10 @@ func (st *appState) saveTab(tab *ui.Tab) bool {
 // saveTabWithPrompt is saveTab carrying the close-tab and quit flags of the
 // flow that requested the save, so a refusal can hand them to the prompt.
 func (st *appState) saveTabWithPrompt(tab *ui.Tab, closeAfter, forQuit bool) bool {
+	if st.headViewRefusesSave(tab) {
+		st.notify("HEAD view is read-only — press go to return to the file", 5*time.Second)
+		return false
+	}
 	if tab.Editor.FilePath == "" {
 		return st.saveTabAs(tab)
 	}
@@ -416,6 +420,9 @@ func (st *appState) saveTabWithPrompt(tab *ui.Tab, closeAfter, forQuit bool) boo
 // forceSaveTab writes the buffer to its file without the conflict check. Only
 // the guard above and the prompt's explicit Overwrite may call it.
 func (st *appState) forceSaveTab(tab *ui.Tab) bool {
+	if st.headViewRefusesSave(tab) {
+		return false
+	}
 	if tab.Editor.FilePath == "" {
 		return st.saveTabAs(tab)
 	}

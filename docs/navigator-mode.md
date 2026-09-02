@@ -43,6 +43,22 @@ The `<Space>` leader keys are the recommended bindings — they work on all keyb
 
 Counts work: `3<Space>c` jumps forward 3 hunks.
 
+### HEAD View
+
+`go` swaps the buffer for the file's content at HEAD, in place — same tab, same
+scroll position, same cursor line. The tab title gains ` (HEAD)` and the diff
+markers in the gutter go away, because the diff describes the working file and
+says nothing about the lines you are now looking at.
+
+The HEAD view is read-only. Typing, pasting, cutting, vim edits, undo and redo
+are all ignored, and a save is refused with a message rather than writing
+committed content over your working file. Press `go` again to bring your buffer
+back exactly as it was, including unsaved edits, the cursor position and the
+undo history.
+
+A file git cannot show at HEAD — untracked, newly added, or outside the
+repository — is reported in the footer and the buffer is left alone.
+
 ### Hunk Text Object
 
 `ih` is the run of changed lines under the cursor — the added and modified
@@ -214,6 +230,7 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 |-----|--------|
 | `ga` | Alternate file (test <-> implementation) |
 | `gf` | Go to file under cursor |
+| `go` | Toggle the HEAD view (read-only committed content) |
 
 ### File Tree
 | Key | Action |

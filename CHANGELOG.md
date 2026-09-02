@@ -58,6 +58,13 @@ All notable changes to Zephyr are documented here.
 - Documentation: `<Space>e` (open the project root) was marked planned but has
   always worked; the keys that genuinely do not exist are now listed as
   unavailable rather than planned.
+- `go` now shows the file's committed content in place: same tab, same cursor
+  line, the tab title marked ` (HEAD)`, and the gutter's diff markers hidden
+  because they describe the working file. The view is read-only — typing,
+  pasting, vim edits, undo, redo and saving are all refused, so committed
+  content can never be written over your working file — and `go` again brings
+  the buffer back exactly as it was, unsaved edits, cursor and undo history
+  included. A file with nothing at HEAD is reported instead of swapped.
 - The `ih` hunk text object now works: `dih`, `yih` and `cih` operate on the
   run of changed lines under the cursor, linewise and as one undo step. It
   covers the changed lines only — a context line inside a hunk is not part of

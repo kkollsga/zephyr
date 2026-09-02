@@ -1061,6 +1061,11 @@ func (st *appState) executeNavAction(action vim.Action) bool {
 			return true
 		}
 	}
+	if ts != nil && ts.bufType == bufOriginal {
+		if st.handleOriginalBufferAction(action) {
+			return true
+		}
+	}
 
 	count := action.EffectiveCount()
 
@@ -1094,6 +1099,9 @@ func (st *appState) executeNavAction(action vim.Action) bool {
 		return true
 	case vim.ActionNavToggleReadMode:
 		st.toggleMarkdownPreview()
+		return true
+	case vim.ActionNavToggleOriginal:
+		st.navToggleOriginal()
 		return true
 	}
 	// Anything else — gi, g? and the status-buffer actions outside a status

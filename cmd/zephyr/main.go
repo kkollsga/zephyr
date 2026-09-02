@@ -51,6 +51,7 @@ const (
 	bufFile      bufferType = iota // normal file editing
 	bufDirectory                   // oil-style directory listing
 	bufStatus                      // git status buffer
+	bufOriginal                    // the file's HEAD content, read-only
 )
 
 // tabState holds per-tab state that isn't part of the editor itself.
@@ -95,10 +96,14 @@ type tabState struct {
 	deleteForcedModified bool
 
 	// Navigator mode
-	bufType   bufferType              // file, directory, or status
+	bufType   bufferType              // file, directory, status, or HEAD view
 	gitDiff   *git.FileDiff           // diff data for this file (nil if unchanged or not in repo)
 	dirBuf    *navigator.DirBuffer    // directory buffer data (non-nil when bufType == bufDirectory)
 	statusBuf *navigator.StatusBuffer // status buffer data (non-nil when bufType == bufStatus)
+	// The working buffer a HEAD view displaced (non-nil when bufType ==
+	// bufOriginal). It holds the piece table itself, not its text, so the undo
+	// history's offsets still describe it when it comes back.
+	headStash *headStash
 }
 
 type appState struct {

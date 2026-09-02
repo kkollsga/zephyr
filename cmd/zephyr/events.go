@@ -87,6 +87,9 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 }
 
 func (st *appState) handleKey(ke key.Event) {
+	if st.headViewSwallowsKey(ke) {
+		return
+	}
 	// Unified save menu intercepts all input. Each confirmation sub-state gets
 	// its own handler so a new one adds a case here rather than another branch
 	// inside the filename editor.
@@ -807,6 +810,9 @@ func (st *appState) handleTextInput(text string) {
 			st.updateSearchResults()
 		}
 		return
+	}
+	if st.headViewActive() {
+		return // HEAD content is read-only
 	}
 
 	ed := st.activeEd()

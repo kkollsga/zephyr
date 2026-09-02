@@ -213,8 +213,10 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 		st.gutterRend.RenderGutter(gtx, gtx.Ops, firstLine, lastLine, ed.Buffer.LineCount(), editorTopPad, ts.viewport.PixelOffset)
 	}
 
-	// Git diff gutter signs + line background highlights (single pass)
-	if ts.gitDiff != nil {
+	// Git diff gutter signs + line background highlights (single pass). The
+	// diff describes the working file, so it says nothing about the lines of a
+	// HEAD view and is not drawn over one.
+	if ts.gitDiff != nil && ts.bufType != bufOriginal {
 		for i := 0; i <= lastLine-firstLine; i++ {
 			dispLine := firstLine + i
 			var bufLine int
