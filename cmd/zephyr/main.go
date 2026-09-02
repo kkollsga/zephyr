@@ -86,6 +86,14 @@ type tabState struct {
 	// tabs shows that tab's markers.
 	errorLines map[int]bool
 
+	// External-change tracking: the disk state this tab's content was last
+	// loaded from or written to, plus any unresolved disagreement with it.
+	diskSnap fileio.Snapshot
+	conflict conflictState
+	// True when a delete forced Modified on so the buffer would not be treated
+	// as disposable; cleared if the file comes back (an atomic replace).
+	deleteForcedModified bool
+
 	// Navigator mode
 	bufType   bufferType              // file, directory, or status
 	gitDiff   *git.FileDiff           // diff data for this file (nil if unchanged or not in repo)
@@ -214,7 +222,8 @@ type appState struct {
 	navPrevTabIdx    int    // tab index before opening directory buffer (for toggle)
 
 	// File watcher for external changes
-	watcher *fileio.Watcher
+	watcher        *fileio.Watcher
+	watcherPending pendingWatchEvents // filled by the watcher goroutine, drained per frame
 
 	// Test-build performance telemetry.
 	perfFrameCount       uint64
@@ -274,6 +283,11 @@ func (st *appState) activeTabState() *tabState {
 				ts.sourceBuf = ed.Buffer.TextBytes(ts.sourceBuf)
 				ts.highlighter.Parse(ts.sourceBuf)
 				ts.langLabel = ts.highlighter.Language()
+			}
+		}
+		if ed.FilePath != "" {
+			if snap, err := fileio.TakeSnapshot(ed.FilePath); err == nil {
+				ts.diskSnap = snap
 			}
 		}
 		// Load git diff data for gutter signs
@@ -380,6 +394,7 @@ func run() {
 		if tab := tabBar.ActiveTab(); tab != nil && tab.Editor.FilePath != "" {
 			fw.Watch(tab.Editor.FilePath)
 		}
+		startWatcherPump(fw.Events, &st.watcherPending, st.invalidate)
 	}
 
 	// Init tab state for first tab

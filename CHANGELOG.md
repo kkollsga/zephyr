@@ -4,6 +4,19 @@ All notable changes to Zephyr are documented here.
 
 ## Unreleased
 
+### Files
+
+- An external change to an open file is now noticed while the window sits
+  idle. Previously the watcher's events were only read on the next frame, so
+  a file changed while Zephyr was in the background went unreported until
+  something else redrew the window.
+- A file deleted or moved out from under an open tab is reported as deleted
+  and the buffer is kept as unsaved work, instead of being announced as
+  "Reloaded:" while the tab silently held the only remaining copy.
+- A reload that fails now says so instead of reporting a successful reload.
+- Saving no longer produces a spurious "File changed externally" warning for
+  Zephyr's own write.
+
 ### Markdown
 
 - Markdown read mode now renders color emoji on macOS, including ZWJ

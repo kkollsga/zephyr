@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/highlight"
-	"github.com/kristianweb/zephyr/internal/render"
 	"github.com/kristianweb/zephyr/internal/ui"
 )
 
@@ -377,7 +375,7 @@ func (st *appState) saveTab(tab *ui.Tab) bool {
 	if tab.Editor.FilePath == "" {
 		return st.saveTabAs(tab)
 	}
-	// Mark own write so the watcher ignores this save
+	// Suppress the watcher events our own atomic save is about to generate.
 	if st.watcher != nil && tab.Editor.FilePath != "" {
 		st.watcher.MarkOwnWrite(tab.Editor.FilePath)
 	}
@@ -388,13 +386,17 @@ func (st *appState) saveTab(tab *ui.Tab) bool {
 		fmt.Fprintf(os.Stderr, "save error: %v\n", err)
 		return false
 	}
-	// Wait for the old inode watch to be invalidated before attaching to the
-	// replacement created by the atomic save.
+	// Ends the suppression window opened above once the queued self-events have
+	// settled. Directory watching survives the rename, so nothing reattaches.
 	if st.watcher != nil {
 		if err := st.watcher.Rewatch(tab.Editor.FilePath); err != nil {
 			fmt.Fprintf(os.Stderr, "rewatch error: %v\n", err)
 		}
 	}
+	// The snapshot must be taken after the write, not the suppression window:
+	// an external write that lands inside that window is invisible to the
+	// watcher and only the next snapshot comparison will surface it.
+	st.snapshotEditorFile(tab.Editor)
 	st.refreshGitDiffForEditor(tab.Editor)
 	return true
 }
@@ -446,101 +448,12 @@ func (st *appState) saveTabToPath(tab *ui.Tab, path string) bool {
 		} else {
 			ts.sourceBuf = nil
 		}
+		ts.conflict = conflictNone
+		ts.deleteForcedModified = false
 	}
+	st.snapshotEditorFile(tab.Editor)
 	st.refreshGitDiffForEditor(tab.Editor)
 	return true
-}
-
-// --- File watcher ---
-
-// watchEditorFile adds a file to the watcher.
-func (st *appState) watchEditorFile(ed *editor.Editor) {
-	if st.watcher != nil && ed != nil && ed.FilePath != "" {
-		st.watcher.Watch(ed.FilePath)
-	}
-}
-
-// unwatchEditorFile removes a file from the watcher.
-func (st *appState) unwatchEditorFile(ed *editor.Editor) {
-	if st.watcher != nil && ed != nil && ed.FilePath != "" {
-		st.watcher.Unwatch(ed.FilePath)
-	}
-}
-
-// pollFileWatcher drains pending file watcher events (non-blocking).
-func (st *appState) pollFileWatcher() {
-	if st.watcher == nil {
-		return
-	}
-	handled := false
-	for {
-		select {
-		case evt, ok := <-st.watcher.Events:
-			if !ok {
-				return
-			}
-			st.handleExternalFileChange(evt.Path)
-			handled = true
-		default:
-			if handled && st.window != nil {
-				st.window.Invalidate()
-			}
-			return
-		}
-	}
-}
-
-// handleExternalFileChange processes a file change detected by the watcher.
-func (st *appState) handleExternalFileChange(path string) {
-	for _, tab := range st.tabBar.Tabs {
-		if tab.Editor.FilePath != path {
-			continue
-		}
-		if tab.Editor.Modified {
-			// Has unsaved edits — warn but don't reload
-			st.notification = "File changed externally: " + filepath.Base(path)
-			st.notificationUntil = time.Now().Add(10 * time.Second)
-		} else {
-			// Directory-backed watches can observe a late event from our own
-			// atomic save. If disk and buffer already agree, no reload or undo
-			// history entry is necessary.
-			if disk, err := os.ReadFile(path); err == nil &&
-				bytes.Equal(disk, tab.Editor.Buffer.TextBytes(nil)) {
-				break
-			}
-			// No unsaved edits — reload silently
-			st.reloadEditorFromDisk(tab.Editor)
-			st.notification = "Reloaded: " + filepath.Base(path)
-			st.notificationUntil = time.Now().Add(5 * time.Second)
-		}
-		st.refreshGitDiffForEditor(tab.Editor)
-		break
-	}
-}
-
-// reloadEditorFromDisk reloads a file from disk, re-parses syntax, and refreshes state.
-func (st *appState) reloadEditorFromDisk(ed *editor.Editor) {
-	if err := ed.Reload(); err != nil {
-		return
-	}
-	if ts, ok := st.tabStates[ed]; ok {
-		// Re-parse highlighting
-		if ts.highlighter != nil {
-			ts.sourceBuf = ed.Buffer.TextBytes(ts.sourceBuf)
-			ts.highlighter.Parse(ts.sourceBuf)
-		}
-		// Recompute fold regions
-		source := ed.Buffer.TextBytes(nil)
-		regions := render.ComputeFoldRegions(string(source))
-		ts.foldState.SetRegions(regions, ed.Buffer.LineCount())
-		// Reset viewport
-		ts.lastCursorLine = -1
-		ts.lastCursorCol = -1
-	}
-	// Re-watch the file (inode may have changed from atomic rename)
-	if st.watcher != nil {
-		st.watcher.Watch(ed.FilePath)
-	}
 }
 
 func (st *appState) hasUnsavedChanges() bool {
