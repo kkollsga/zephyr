@@ -51,7 +51,7 @@ type fontsYAML struct {
 // themeYAML is the top-level YAML structure for a unified theme file.
 // DefaultThemeVersion is bumped when the built-in default theme changes.
 // EnsureDefaultThemes regenerates default.yaml when the on-disk version is older.
-const DefaultThemeVersion = 4
+const DefaultThemeVersion = 5
 
 type themeYAML struct {
 	Version    int          `yaml:"version"`

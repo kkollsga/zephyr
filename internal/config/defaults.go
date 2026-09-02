@@ -43,7 +43,9 @@ func DarkTheme() Theme {
 		StatusBg:      nrgba(25, 25, 25, 255),
 		StatusFg:      nrgba(150, 150, 150, 255),
 
-		FindMatch:   nrgba(100, 90, 30, 255),   // muted yellow, fully opaque
+		// Deep amber: warm enough that a match never reads as the blue
+		// selection, dark enough to keep the foreground above 4.5:1.
+		FindMatch:   nrgba(122, 76, 14, 255),
 		FindCurrent: nrgba(255, 220, 50, 255), // sun yellow, fully opaque
 
 		Keyword:  nrgba(197, 134, 192, 255), // purple
@@ -58,9 +60,9 @@ func DarkTheme() Theme {
 		MdHeading: nrgba(220, 100, 100, 255), // soft red
 		MdAccent:  nrgba(130, 170, 220, 255), // light navy blue
 
-		TabAccent:      nrgba(78, 201, 176, 255),   // teal #4ec9b0
-		TabBarGradTop:  nrgba(58, 58, 58, 255),    // #3a3a3a
-		TabBarGradBot:  nrgba(46, 46, 46, 255),    // #2e2e2e
+		TabAccent:      nrgba(78, 201, 176, 255), // teal #4ec9b0
+		TabBarGradTop:  nrgba(58, 58, 58, 255),   // #3a3a3a
+		TabBarGradBot:  nrgba(46, 46, 46, 255),   // #2e2e2e
 		TabBarBg:       nrgba(46, 46, 46, 255),
 		TabActiveBg:    nrgba(30, 30, 30, 255),
 		TabBorder:      nrgba(68, 68, 68, 255),
@@ -111,12 +113,12 @@ func LightTheme() Theme {
 		Operator: nrgba(30, 30, 30, 255),   // foreground
 		Variable: nrgba(0, 16, 128, 255),   // blue
 
-		MdHeading: nrgba(160, 40, 40, 255),   // dark red
-		MdAccent:  nrgba(30, 70, 130, 255),   // navy blue
+		MdHeading: nrgba(160, 40, 40, 255), // dark red
+		MdAccent:  nrgba(30, 70, 130, 255), // navy blue
 
-		TabAccent:      nrgba(38, 127, 153, 255),    // teal #267f99
-		TabBarGradTop:  nrgba(246, 246, 246, 255),  // #f6f6f6
-		TabBarGradBot:  nrgba(236, 236, 236, 255),  // #ececec
+		TabAccent:      nrgba(38, 127, 153, 255),  // teal #267f99
+		TabBarGradTop:  nrgba(246, 246, 246, 255), // #f6f6f6
+		TabBarGradBot:  nrgba(236, 236, 236, 255), // #ececec
 		TabBarBg:       nrgba(236, 236, 236, 255),
 		TabActiveBg:    nrgba(250, 250, 247, 255),
 		TabBorder:      nrgba(200, 200, 200, 255),

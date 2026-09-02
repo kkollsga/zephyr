@@ -39,6 +39,12 @@ All notable changes to Zephyr are documented here.
   stays open with its matches highlighted, its field goes dim, and typing edits
   the file again. Cmd+F or a click in the bar's field takes focus back; Escape
   still closes it.
+- Your text selection is drawn again while the find bar is open but not
+  focused. It used to disappear the moment the bar appeared, so selecting text
+  with matches on screen showed nothing.
+- The current search match now carries an outline, and the dark theme's other
+  matches are a deeper amber. Match, current match and selection are three
+  different things and now look like it.
 
 ### Markdown
 

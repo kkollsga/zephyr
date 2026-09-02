@@ -2,6 +2,7 @@ package config
 
 import (
 	"image/color"
+	"math"
 	"testing"
 )
 
@@ -101,5 +102,77 @@ func TestColorToHex(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("ColorToHex(%+v) = %q, want %q", tt.color, got, tt.want)
 		}
+	}
+}
+
+// compositeOver flattens a possibly translucent highlight onto the editor
+// background, which is what the eye actually compares.
+func compositeOver(fg, bg color.NRGBA) [3]float64 {
+	a := float64(fg.A) / 255
+	mix := func(f, b uint8) float64 { return float64(f)*a + float64(b)*(1-a) }
+	return [3]float64{mix(fg.R, bg.R), mix(fg.G, bg.G), mix(fg.B, bg.B)}
+}
+
+func colorDistance(a, b [3]float64) float64 {
+	var sum float64
+	for i := range a {
+		d := a[i] - b[i]
+		sum += d * d
+	}
+	return math.Sqrt(sum)
+}
+
+func relativeLuminance(c [3]float64) float64 {
+	channel := func(v float64) float64 {
+		v /= 255
+		if v <= 0.03928 {
+			return v / 12.92
+		}
+		return math.Pow((v+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(c[0]) + 0.7152*channel(c[1]) + 0.0722*channel(c[2])
+}
+
+func contrastRatio(a, b [3]float64) float64 {
+	la, lb := relativeLuminance(a), relativeLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// A search match, the current match, and a text selection are three different
+// states drawn the same way, so a theme that renders any two of them alike
+// leaves the user unable to read the screen. Thresholds are floors, not
+// targets: raise the colours, never the numbers.
+func TestDefaultThemes_HighlightStatesStayDistinguishable(t *testing.T) {
+	bundle := DefaultBundle()
+	for _, tc := range []struct {
+		name  string
+		theme Theme
+	}{
+		{"dark", bundle.Dark},
+		{"light", bundle.Light},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bg := compositeOver(tc.theme.Background, tc.theme.Background)
+			match := compositeOver(tc.theme.FindMatch, tc.theme.Background)
+			current := compositeOver(tc.theme.FindCurrent, tc.theme.Background)
+			selection := compositeOver(tc.theme.Selection, tc.theme.Background)
+			fg := compositeOver(tc.theme.Foreground, tc.theme.Background)
+
+			if d := colorDistance(match, selection); d < 100 {
+				t.Errorf("match/selection distance = %.0f, want >= 100", d)
+			}
+			if d := colorDistance(match, current); d < 60 {
+				t.Errorf("match/current distance = %.0f, want >= 60", d)
+			}
+			if d := colorDistance(match, bg); d < 40 {
+				t.Errorf("match/background distance = %.0f, want >= 40", d)
+			}
+			if r := contrastRatio(fg, match); r < 4.5 {
+				t.Errorf("foreground on match contrast = %.2f:1, want >= 4.5", r)
+			}
+		})
 	}
 }

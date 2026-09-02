@@ -333,8 +333,9 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 			dispCol := runeColToDisplayCol(lineText, match.Col, 4)
 			matchRuneLen := matchDisplayLen(lineText, match.Col, match.Length, 4)
 
+			current := i == st.findBar.CurrentMatch-1
 			bgColor := st.theme.FindMatch
-			if i == st.findBar.CurrentMatch-1 {
+			if current {
 				bgColor = st.theme.FindCurrent
 			}
 
@@ -348,6 +349,13 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 			paint.ColorOp{Color: bgColor}.Add(gtx.Ops)
 			paint.PaintOp{}.Add(gtx.Ops)
 			rect.Pop()
+
+			// The current match also gets an outline, so which of several
+			// same-coloured highlights is current does not rest on fill alone.
+			if current {
+				st.drawInputBorder(gtx, x1, visY, x2-x1, st.textRend.LineHeightPx,
+					shadeColor(st.theme.FindCurrent, 0.45))
+			}
 		}
 	}
 
@@ -446,8 +454,10 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 		cursorLine = fs.BufToDisplay(ed.Cursor.Line)
 	}
 
-	// Selection (skip when find bar is active — FindCurrent highlight replaces it)
-	if ed.Selection.Active && !ed.Selection.IsEmpty() && !st.findBar.Visible {
+	// Selection. Skipped only while the find bar holds the keyboard, where the
+	// selection is the search's own current match and would paint over the
+	// FindCurrent highlight; an unfocused bar leaves the selection the user's.
+	if ed.Selection.Active && !ed.Selection.IsEmpty() && !st.findBarHasKeys() {
 		start, end := ed.Selection.Ordered()
 		startCol := runeColToDisplayCol2(ed, start.Line, start.Col, 4)
 		endCol := runeColToDisplayCol2(ed, end.Line, end.Col, 4)
@@ -596,8 +606,9 @@ func (st *appState) drawEditorWrapped(gtx layout.Context, w *app.Window, ed *edi
 	// Cursor and selection with visual line coordinates
 	padOff := op.Offset(image.Pt(0, editorTopPad-ts.viewport.PixelOffset)).Push(gtx.Ops)
 
-	// Selection
-	if ed.Selection.Active && !ed.Selection.IsEmpty() && !st.findBar.Visible {
+	// Selection — see the unwrapped path for why the find bar's keyboard focus
+	// is what hides it.
+	if ed.Selection.Active && !ed.Selection.IsEmpty() && !st.findBarHasKeys() {
 		start, end := ed.Selection.Ordered()
 		startDisp := runeColToDisplayCol2(ed, start.Line, start.Col, 4)
 		endDisp := runeColToDisplayCol2(ed, end.Line, end.Col, 4)

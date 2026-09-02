@@ -447,3 +447,11 @@ func (st *appState) handleFindBarClick(px, py int) bool {
 	}
 	return true
 }
+
+// shadeColor scales a colour's channels towards black, keeping its alpha. It
+// derives the current match's outline from the theme's own find.current so a
+// user theme keeps control of both with one key.
+func shadeColor(c color.NRGBA, factor float64) color.NRGBA {
+	scale := func(v uint8) uint8 { return uint8(float64(v) * factor) }
+	return color.NRGBA{R: scale(c.R), G: scale(c.G), B: scale(c.B), A: c.A}
+}

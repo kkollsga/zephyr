@@ -1,4 +1,4 @@
-version: 4
+version: 5
 name: Default
 subtitle: The caffeinated editor
 fonts:
@@ -26,7 +26,7 @@ dark:
     operator: "#d4d4d4"
     variable: "#9cdcfe"
   find:
-    match: "#645a1e"
+    match: "#7a4c0e"
     current: "#ffdc32"
   ui:
     tab-accent: "#4ec9b0"
