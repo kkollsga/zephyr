@@ -224,53 +224,81 @@ func (e *Editor) DeleteSelection() {
 	e.Modified = true
 }
 
-// Undo reverses the last edit action.
-func (e *Editor) Undo() {
-	action := e.History.Undo()
-	if action == nil {
-		return
+// Undo reverses the last edit action and reports whether it was applied.
+// The action is only popped once the buffer has accepted the reverse edit: a
+// refused edit that still moved the stacks would leave every later action
+// describing a document the buffer no longer holds.
+func (e *Editor) Undo() bool {
+	peeked := e.History.PeekUndo()
+	if peeked == nil {
+		return false
 	}
-
-	switch action.Type {
-	case ActionInsert:
-		// Undo insert = delete
-		e.Buffer.Delete(action.Offset, len(action.Text))
-	case ActionDelete:
-		// Undo delete = insert
-		e.Buffer.Insert(action.Offset, action.Text)
-	case ActionReplace:
-		e.Buffer = buffer.NewFromString(action.Text)
+	action := *peeked
+	if !e.applyUndo(&action) {
+		return false
 	}
+	e.History.Undo()
 
 	e.Cursor = action.Cursor
 	e.Selection.Clear()
 	e.Modified = true
+	return true
 }
 
-// Redo reapplies the last undone action.
-func (e *Editor) Redo() {
-	action := e.History.Redo()
-	if action == nil {
-		return
-	}
-
-	modified := true
+func (e *Editor) applyUndo(action *EditAction) bool {
 	switch action.Type {
 	case ActionInsert:
-		e.Buffer.Insert(action.Offset, action.Text)
-		// Move cursor to end of inserted text
-		e.setCursorFromOffset(action.Offset + len(action.Text))
+		return e.Buffer.Delete(action.Offset, len(action.Text)) == nil
 	case ActionDelete:
-		e.Buffer.Delete(action.Offset, len(action.Text))
-		e.setCursorFromOffset(action.Offset)
+		return e.Buffer.Insert(action.Offset, action.Text) == nil
 	case ActionReplace:
-		e.Buffer = buffer.NewFromString(action.Replacement)
-		e.Cursor = action.AfterCursor
-		modified = false
+		e.Buffer = buffer.NewFromString(action.Text)
+		return true
 	}
+	return false
+}
+
+// Redo reapplies the last undone action and reports whether it was applied.
+func (e *Editor) Redo() bool {
+	peeked := e.History.PeekRedo()
+	if peeked == nil {
+		return false
+	}
+	action := *peeked
+	modified, ok := e.applyRedo(&action)
+	if !ok {
+		return false
+	}
+	e.History.Redo()
 
 	e.Selection.Clear()
 	e.Modified = modified
+	return true
+}
+
+// applyRedo reapplies action and reports the Modified flag to leave behind
+// alongside success. A full-buffer replacement redone is the on-disk content,
+// so it lands the buffer unmodified.
+func (e *Editor) applyRedo(action *EditAction) (modified, ok bool) {
+	switch action.Type {
+	case ActionInsert:
+		if e.Buffer.Insert(action.Offset, action.Text) != nil {
+			return false, false
+		}
+		e.setCursorFromOffset(action.Offset + len(action.Text))
+		return true, true
+	case ActionDelete:
+		if e.Buffer.Delete(action.Offset, len(action.Text)) != nil {
+			return false, false
+		}
+		e.setCursorFromOffset(action.Offset)
+		return true, true
+	case ActionReplace:
+		e.Buffer = buffer.NewFromString(action.Replacement)
+		e.Cursor = action.AfterCursor
+		return false, true
+	}
+	return false, false
 }
 
 // Save writes the buffer content to the file.

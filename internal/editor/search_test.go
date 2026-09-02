@@ -78,15 +78,28 @@ func TestReplace_Regex_WithGroups(t *testing.T) {
 	}
 }
 
-func TestReplace_UndoRestoresOriginal(t *testing.T) {
-	// This tests at the editor level
+func TestReplaceAll_MutatesBufferOutsideHistory(t *testing.T) {
+	// ReplaceAll edits the piece table directly, so the change is invisible to
+	// the editor's history and cannot be undone. The undoable replace path is
+	// Editor.InsertText over a selection (selection_test.go); this test pins
+	// the raw helper's contract so a caller cannot mistake it for that one.
 	ed := NewEditor(buffer.NewFromString("hello hello hello"), "")
-	original := ed.Buffer.Text()
 
-	// Manual replace (not through editor's undo system for now)
-	ReplaceAll(ed.Buffer, "hello", "world", false, true)
-	if ed.Buffer.Text() == original {
-		t.Fatal("replace should have changed text")
+	count, err := ReplaceAll(ed.Buffer, "hello", "world", false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 replacements, got %d", count)
+	}
+	if got := ed.Buffer.Text(); got != "world world world" {
+		t.Fatalf("got %q, want %q", got, "world world world")
+	}
+	if ed.History.CanUndo() {
+		t.Fatal("ReplaceAll recorded history; the editor-level path is InsertText")
+	}
+	if ed.Undo() {
+		t.Fatal("Undo reported work done after an unrecorded ReplaceAll")
 	}
 }
 

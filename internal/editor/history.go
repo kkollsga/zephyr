@@ -92,6 +92,25 @@ func (h *History) coalesce(last, next *EditAction) {
 	}
 }
 
+// PeekUndo returns the action Undo would pop, without moving it. Callers that
+// can fail to apply the action use this to leave the stacks untouched.
+// The pointer is invalidated by the next stack mutation.
+func (h *History) PeekUndo() *EditAction {
+	if len(h.undoStack) == 0 {
+		return nil
+	}
+	return &h.undoStack[len(h.undoStack)-1]
+}
+
+// PeekRedo returns the action Redo would pop, without moving it.
+// The pointer is invalidated by the next stack mutation.
+func (h *History) PeekRedo() *EditAction {
+	if len(h.redoStack) == 0 {
+		return nil
+	}
+	return &h.redoStack[len(h.redoStack)-1]
+}
+
 // Undo pops the top action from the undo stack and returns it.
 // Returns nil if the stack is empty.
 func (h *History) Undo() *EditAction {

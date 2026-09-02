@@ -12,6 +12,9 @@ All notable changes to Zephyr are documented here.
 
 ### Editing
 
+- Undo and redo no longer desynchronise from the buffer when an edit is
+  refused: the action stays on the stack it came from instead of moving
+  across, so later undos keep applying at the right offsets.
 - Added syntax/format error detection with red gutter markers: JSON is
   validated with the standard parser and tree-sitter languages are checked
   for parse errors, on every Enter and after five seconds of typing
