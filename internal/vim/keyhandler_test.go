@@ -461,3 +461,77 @@ func TestUnimplementedTextObjectIsInert(t *testing.T) {
 		t.Errorf("dih = kind %d obj %c, want ActionDelete obj h", a.Kind, a.TextObj)
 	}
 }
+
+// A host accelerator is not the character a pending key is waiting for. Off
+// macOS the shortcut modifier is Ctrl, so Ctrl+S arrives as a printable 's'
+// with Ctrl and Shortcut set: r then Ctrl+S must save, not replace the
+// character under the cursor with an "s".
+func TestPendingCharStatesReleaseHostAccelerators(t *testing.T) {
+	// Ctrl+S as the host sends it on Windows and Linux, and Cmd+S on macOS.
+	accels := map[string]KeyInput{
+		"ctrl+s":     {Char: 's', Ctrl: true, Shortcut: true},
+		"shortcut+s": {Char: 's', Shortcut: true},
+	}
+	pending := map[string][]KeyInput{
+		"r":  {charInput('r')},
+		"f":  {charInput('f')},
+		"t":  {charInput('t')},
+		"F":  {charInput('F')},
+		"T":  {charInput('T')},
+		"df": {charInput('d'), charInput('f')},
+		"ct": {charInput('c'), charInput('t')},
+	}
+	for keys, prefix := range pending {
+		for name, accel := range accels {
+			s := NewState()
+			for _, k := range prefix {
+				s.HandleKey(k)
+			}
+			if a := s.HandleKey(accel); a.Kind != ActionNone {
+				t.Errorf("%s then %s produced action %d (char %q), want ActionNone so the host can act on it",
+					keys, name, a.Kind, a.Char)
+			}
+			if s.WaitingForChar {
+				t.Errorf("%s then %s left the pending key waiting; the next typed character would be eaten", keys, name)
+			}
+			// The state is usable again: a plain x replaces, it is not swallowed.
+			s.HandleKey(charInput('r'))
+			if a := s.HandleKey(charInput('x')); a.Kind != ActionReplace || a.Char != 'x' {
+				t.Errorf("after %s then %s, rx gave action %d char %q, want ActionReplace x", keys, name, a.Kind, a.Char)
+			}
+		}
+	}
+}
+
+// The same rule covers the states that wait on something other than a
+// character: an operator waiting for a motion, i/a waiting for a delimiter,
+// and the two-key sequences. A bare count is not cancelled — it consumes
+// nothing on its own.
+func TestPendingOperatorsReleaseHostAccelerators(t *testing.T) {
+	for _, keys := range []string{"d", "y", "di", "g", "z", "2d"} {
+		for _, accel := range []KeyInput{
+			{Char: 's', Ctrl: true, Shortcut: true},
+			{Char: 's', Shortcut: true},
+		} {
+			s := NewState()
+			for _, c := range keys {
+				s.HandleKey(charInput(c))
+			}
+			if a := s.HandleKey(accel); a.Kind != ActionNone {
+				t.Errorf("%s then a host accelerator produced action %d, want ActionNone", keys, a.Kind)
+			}
+			a := s.HandleKey(charInput('x'))
+			if a.Kind != ActionDelete || a.MotionType == MotionLineWise {
+				t.Errorf("after %s then a host accelerator, x gave action %d motion %d, want a plain character delete", keys, a.Kind, a.MotionType)
+			}
+		}
+	}
+
+	// A half-typed count survives: nothing is waiting on the next key.
+	s := NewState()
+	s.HandleKey(charInput('2'))
+	s.HandleKey(KeyInput{Char: 's', Shortcut: true})
+	if a := s.HandleKey(charInput('x')); a.Count != 2 {
+		t.Errorf("a count typed before the accelerator was lost: count %d, want 2", a.Count)
+	}
+}

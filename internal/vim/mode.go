@@ -113,3 +113,20 @@ func (s *State) reset() {
 	s.WaitingForChar = false
 	s.WaitingForTextObj = false
 }
+
+// pendingInput reports whether a key already pressed is waiting for the next
+// keystroke to complete it: r/f/t/F/T waiting for their character, an operator
+// waiting for a motion, i/a waiting for a text-object delimiter, or a two-key
+// sequence (g, z, [, ], <Space>) waiting for its second key. A bare count is
+// not pending input — it consumes nothing on its own.
+func (s *State) pendingInput() bool {
+	if s.WaitingForChar || s.WaitingForTextObj || s.Operator != OpNone {
+		return true
+	}
+	for _, c := range s.PendingBuf {
+		if c < '0' || c > '9' {
+			return true
+		}
+	}
+	return false
+}

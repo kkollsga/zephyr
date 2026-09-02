@@ -100,6 +100,13 @@ All notable changes to Zephyr are documented here.
   step, so an undo after one of them could damage unrelated text.
 - Vim `J` on a line containing non-ASCII text no longer leaves a fragment of
   that line behind.
+- A keyboard shortcut pressed while a vim key is waiting for its argument now
+  reaches the app instead of being eaten as that argument. On Windows and Linux
+  `r` followed by Ctrl+S replaced the character under the cursor with an "s"
+  and never saved; on macOS Cmd+S went through but left the `r` pending, so it
+  swallowed the next key typed. The same holds for `f`/`t`/`F`/`T`, a pending
+  operator, `i`/`a` waiting for a text object, and the `g`/`z`/`[`/`]` and
+  `<Space>` sequences.
 - Replacing a selection — typing over it, pasting over it, Replace and
   Replace All in the find bar, or a visual-mode put — is now a single
   undoable step that restores the original text, instead of an undo that

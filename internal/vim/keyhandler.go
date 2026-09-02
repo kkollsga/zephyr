@@ -31,6 +31,17 @@ const (
 // HandleKey processes a key input and returns an action.
 // The caller is responsible for executing the action on the editor.
 func (s *State) HandleKey(ev KeyInput) Action {
+	// A host accelerator arriving while a key is waiting for its argument
+	// cancels that key instead of feeding it. Off macOS the shortcut modifier
+	// is Ctrl, so Ctrl+S reaches vim as a printable 's': fed to a pending r it
+	// replaced the character under the cursor and the file was never saved.
+	// Cancelling matters as much on macOS, where Cmd+S was passed through but
+	// left the pending r up, and it then swallowed the next real keystroke.
+	if (ev.Ctrl || ev.Shortcut) && s.pendingInput() {
+		s.reset()
+		return Action{Kind: ActionNone}
+	}
+
 	// Host accelerators (Cmd+S, Cmd+C, …) are not vim keys. Off macOS the
 	// shortcut modifier *is* Ctrl, so a bare Shortcut test would also discard
 	// every Ctrl binding (Ctrl+d, Ctrl+r, Ctrl+v); Ctrl keeps them here and the
