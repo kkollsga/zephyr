@@ -149,9 +149,11 @@ func (s *State) handleTextObjDelimiter(ev KeyInput) Action {
 	objType := s.WaitingForTextObjType
 	s.reset()
 
-	// Valid text object delimiters
+	// Delimiters with an executor behind them. A delimiter accepted here without
+	// one parses into a complete action that does nothing, which reads to the
+	// user as a successful edit; the tag object 't' was exactly that.
 	switch ch {
-	case 'w', 'W', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', 'b', 'B', 't', 'h':
+	case 'w', 'W', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', 'b', 'B', 'h':
 		return Action{
 			Kind:        opToAction(op),
 			MotionType:  MotionCharWise,

@@ -46,6 +46,19 @@ All notable changes to Zephyr are documented here.
   matches are a deeper amber. Match, current match and selection are three
   different things and now look like it.
 
+### Navigator
+
+- Navigator keys with nothing behind them no longer report success. `go`,
+  `gi`, `g?`, `<Space>f` and `<Space>b` used to be accepted and silently do
+  nothing, so `go` in particular claimed to show HEAD content while you were
+  still reading your own buffer. They are inert until each one lands.
+- The vim tag text object `t` is no longer accepted: `dit` used to parse into
+  a delete that could not be carried out and looked like an edit that had
+  happened.
+- Documentation: `<Space>e` (open the project root) was marked planned but has
+  always worked; the keys that genuinely do not exist are now listed as
+  unavailable rather than planned.
+
 ### Markdown
 
 - Markdown read mode now renders color emoji on macOS, including ZWJ

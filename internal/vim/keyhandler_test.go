@@ -426,3 +426,29 @@ func TestHandleKeyCtrlBindingsSurviveShortcutModifier(t *testing.T) {
 		t.Errorf("Ctrl+s = %v, want ActionNone", got.Kind)
 	}
 }
+
+// TestUnimplementedTextObjectIsInert pins the rule that an accepted delimiter
+// must have an executor behind it. The tag object `t` parsed into a complete
+// delete action that nothing could carry out, so `dit` consumed the keys and
+// reported success while changing nothing.
+func TestUnimplementedTextObjectIsInert(t *testing.T) {
+	for _, objType := range []rune{'i', 'a'} {
+		s := NewState()
+		var a Action
+		for _, inp := range []KeyInput{charInput('d'), charInput(objType), charInput('t')} {
+			a = s.HandleKey(inp)
+		}
+		if a.Kind != ActionNone {
+			t.Errorf("d%ct = %d, want ActionNone", objType, a.Kind)
+		}
+	}
+	// The hunk object stays accepted — C2 implements it.
+	s := NewState()
+	var a Action
+	for _, inp := range []KeyInput{charInput('d'), charInput('i'), charInput('h')} {
+		a = s.HandleKey(inp)
+	}
+	if a.Kind != ActionDelete || a.TextObj != 'h' {
+		t.Errorf("dih = kind %d obj %c, want ActionDelete obj h", a.Kind, a.TextObj)
+	}
+}

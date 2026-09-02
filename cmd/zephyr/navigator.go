@@ -1095,34 +1095,9 @@ func (st *appState) executeNavAction(action vim.Action) bool {
 	case vim.ActionNavToggleReadMode:
 		st.toggleMarkdownPreview()
 		return true
-
-	// Stubs for features implemented in later phases
-	case vim.ActionNavToggleOriginal:
-		return true
-	case vim.ActionNavOpenEntry:
-		return true
-	case vim.ActionNavStage:
-		return true
-	case vim.ActionNavUnstage:
-		return true
-	case vim.ActionNavDiscard:
-		return true
-	case vim.ActionNavToggleDiff:
-		return true
-	case vim.ActionNavSectionNext:
-		return true
-	case vim.ActionNavSectionPrev:
-		return true
-	case vim.ActionNavRefresh:
-		return true
-	case vim.ActionNavGoImports:
-		return true
-	case vim.ActionNavFindFiles:
-		return true
-	case vim.ActionNavFindChanged:
-		return true
-	case vim.ActionNavHelp:
-		return true
 	}
+	// Anything else — gi, g? and the status-buffer actions outside a status
+	// buffer — is unhandled, so the key stays inert instead of reporting an
+	// action that never happened.
 	return false
 }

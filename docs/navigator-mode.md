@@ -111,13 +111,12 @@ Cursor positions are remembered per directory — navigate away and back, and yo
 
 ---
 
-## Import & Alternate Navigation
+## Alternate & File Navigation
 
 | Key | Action |
 |-----|--------|
 | `ga` | Alternate file — switches between implementation and test |
 | `gf` | Go to file — opens the quoted path under cursor |
-| `gi` | Show imports (planned) |
 
 ### Alternate File Patterns
 
@@ -179,9 +178,7 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 | `<Space>n` | Next changed file |
 | `<Space>N` | Previous changed file |
 | `<Space>g` | Open git status buffer |
-| `<Space>f` | Find files (planned) |
-| `<Space>b` | Find changed files only (planned) |
-| `<Space>e` | Open project root directory (planned) |
+| `<Space>e` | Open project root directory |
 
 ### Hunk Navigation (alternate keys)
 | Key | Action |
@@ -190,17 +187,12 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 | `[c` | Previous hunk (same as `<Space>C`) |
 | `]C` | Next changed file (same as `<Space>n`) |
 | `[C` | Previous changed file (same as `<Space>N`) |
-| `go` | Toggle original/modified view (planned) |
-| `ih` | Hunk text object — works with `d`, `y`, `v`, `c` (planned execution) |
 
 ### g-prefix
 | Key | Action |
 |-----|--------|
 | `ga` | Alternate file (test <-> implementation) |
 | `gf` | Go to file under cursor |
-| `gi` | Show imports (planned) |
-| `go` | Toggle original content (planned) |
-| `g?` | Context-sensitive help (planned) |
 
 ### File Tree
 | Key | Action |
@@ -213,3 +205,9 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 |-----|--------|
 | `Ctrl-o` | Jump back (vim jumplist) |
 | `Ctrl-i` | Jump forward |
+
+### Not available
+
+`gi` (show imports) and `g?` (context help) are not implemented. The keys do
+nothing — they are listed here only so a reader who expects them from the
+design notes knows they are absent rather than broken.

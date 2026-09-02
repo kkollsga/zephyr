@@ -240,8 +240,18 @@ func TestNavigatorPureHelpersAndMarkdownScroll(t *testing.T) {
 	if st.handleStatusBufferAction(vim.Action{Kind: vim.ActionMoveDown}) {
 		t.Fatal("status buffer consumed normal movement")
 	}
-	if !st.executeNavAction(vim.Action{Kind: vim.ActionNavToggleOriginal}) {
-		t.Fatal("navigator stub action was not handled")
+	// Keys with no implementation behind them must report "not handled" so the
+	// press is inert. Reporting success made a documented key look like it had
+	// acted — `go` in particular claimed to show HEAD content while the user
+	// was still looking at their own buffer.
+	unimplemented := map[string]vim.ActionKind{
+		"gi": vim.ActionNavGoImports,
+		"g?": vim.ActionNavHelp,
+	}
+	for name, kind := range unimplemented {
+		if st.executeNavAction(vim.Action{Kind: kind}) {
+			t.Errorf("%s reported handled; it has no implementation", name)
+		}
 	}
 }
 
