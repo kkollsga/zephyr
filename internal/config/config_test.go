@@ -90,3 +90,44 @@ func TestConfig_RecentRoots_JSON(t *testing.T) {
 		t.Errorf("first root = %q, want /project/y", loaded.RecentRoots[0])
 	}
 }
+
+func TestConfig_LoadDropsMissingLastSaveDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	existing := filepath.Join(home, "docs")
+	if err := os.MkdirAll(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notADir := filepath.Join(home, "file.txt")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(ConfigDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(ConfigDir(), "settings.json")
+
+	for _, tc := range []struct {
+		name  string
+		saved string
+		want  string
+	}{
+		{"existing directory is kept", existing, existing},
+		{"deleted directory is dropped", filepath.Join(home, "gone"), ""},
+		{"a file is not a folder", notADir, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(Config{LastSaveDir: tc.saved})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(settings, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := LoadConfig().LastSaveDir; got != tc.want {
+				t.Fatalf("LastSaveDir = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

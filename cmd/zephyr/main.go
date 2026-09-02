@@ -198,6 +198,13 @@ type appState struct {
 		confirmClobber   bool    // true when a save is blocked by an external change
 	}
 
+	// Folder of the most recent successful Save As, used to preselect the
+	// Save As directory for untitled buffers only.
+	lastSaveDir string
+	// persistConfig applies a mutation to the settings file. It is nil outside
+	// the real app so a unit test never writes the user's settings.json.
+	persistConfig func(func(*config.Config))
+
 	// Vim mode
 	vimEnabled    bool
 	vimState      *vim.State
@@ -382,6 +389,8 @@ func run() {
 		indentWidth:   cfg.IndentWidth,
 		vimEnabled:    cfg.VimMode,
 		tooltipTabIdx: -1,
+		lastSaveDir:   cfg.LastSaveDir,
+		persistConfig: applyToConfigFile,
 	}
 
 	if st.vimEnabled {
@@ -683,6 +692,14 @@ func (st *appState) initThemeMenu() {
 		names = []string{"default"}
 	}
 	setupThemeMenu(names, st.themeName)
+}
+
+// applyToConfigFile reads the settings file, applies mutate, and writes it
+// back.
+func applyToConfigFile(mutate func(*config.Config)) {
+	cfg := config.LoadConfig()
+	mutate(&cfg)
+	config.SaveConfig(cfg)
 }
 
 // persistThemeConfig saves the current theme name and dark mode preference.

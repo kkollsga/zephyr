@@ -29,6 +29,9 @@ All notable changes to Zephyr are documented here.
 - Windows: saving a file that another program has open no longer fails with
   "Access is denied". The replacement is retried for up to half a second while
   the other reader holds the file.
+- Save As on an untitled buffer now opens in the folder your last save went
+  to, remembered across launches. A buffer that already has a file still saves
+  next to that file.
 
 ### Markdown
 

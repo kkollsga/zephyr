@@ -18,6 +18,9 @@ type Config struct {
 	IndentWidth int      `json:"indentWidth"`
 	VimMode     bool     `json:"vimMode"`
 	RecentRoots []string `json:"recentRoots,omitempty"`
+	// LastSaveDir is the folder of the most recent Save As. It preselects the
+	// Save As folder for untitled buffers across launches.
+	LastSaveDir string `json:"lastSaveDir,omitempty"`
 }
 
 const maxRecentRoots = 10
@@ -91,6 +94,13 @@ func LoadConfig() Config {
 	}
 	if cfg.LineHeight > 3.0 {
 		cfg.LineHeight = 3.0
+	}
+	// A remembered folder that has since been deleted or replaced by a file
+	// would silently send the next Save As somewhere unwritable.
+	if cfg.LastSaveDir != "" {
+		if info, err := os.Stat(cfg.LastSaveDir); err != nil || !info.IsDir() {
+			cfg.LastSaveDir = ""
+		}
 	}
 
 	return cfg

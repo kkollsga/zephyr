@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kristianweb/zephyr/internal/config"
 	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/highlight"
 	"github.com/kristianweb/zephyr/internal/ui"
@@ -79,10 +80,15 @@ func (st *appState) populateSaveAsFields(idx int) {
 		}
 	}
 
+	// A buffer that already has a path keeps its own folder; only an untitled
+	// buffer, which has no folder of its own, follows the last save.
 	dir := ""
-	if tab.Editor.FilePath != "" {
+	switch {
+	case tab.Editor.FilePath != "":
 		dir = filepath.Dir(tab.Editor.FilePath)
-	} else {
+	case st.lastSaveDir != "":
+		dir = st.lastSaveDir
+	default:
 		dir, _ = os.UserHomeDir()
 	}
 
@@ -492,7 +498,20 @@ func (st *appState) saveTabToPath(tab *ui.Tab, path string) bool {
 	}
 	st.snapshotEditorFile(tab.Editor)
 	st.refreshGitDiffForEditor(tab.Editor)
+	st.rememberSaveDir(filepath.Dir(path))
 	return true
+}
+
+// rememberSaveDir records where the last Save As landed, for the next untitled
+// buffer's Save As folder, and persists it across launches.
+func (st *appState) rememberSaveDir(dir string) {
+	if dir == "" || dir == st.lastSaveDir {
+		return
+	}
+	st.lastSaveDir = dir
+	if st.persistConfig != nil {
+		st.persistConfig(func(cfg *config.Config) { cfg.LastSaveDir = dir })
+	}
 }
 
 func (st *appState) hasUnsavedChanges() bool {

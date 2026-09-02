@@ -223,3 +223,51 @@ func TestShortenDir(t *testing.T) {
 		t.Fatalf("non-home path changed to %q", got)
 	}
 }
+
+func TestSaveAsDirPreselectsLastSaveDirOnlyForUntitledBuffers(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	st, _, _ := testAppWithText("save me", "Plain Text")
+
+	st.showSaveAsMenu(0, false, false)
+	if st.saveMenu.dir != home {
+		t.Fatalf("untitled buffer with no prior save: dir = %q, want %q", st.saveMenu.dir, home)
+	}
+
+	saved := t.TempDir()
+	st.saveMenu.tabIdx = 0
+	st.saveMenu.dir = saved
+	st.saveMenu.filename = []rune("first.txt")
+	st.forceExecuteSaveAs()
+	if st.lastSaveDir != saved {
+		t.Fatalf("lastSaveDir = %q, want %q after a successful Save As", st.lastSaveDir, saved)
+	}
+
+	// A second untitled buffer starts where the last save landed.
+	untitled := editor.NewEditor(buffer.NewFromString("second"), "")
+	st.tabBar.OpenEditor(untitled, "Untitled")
+	st.tabStates[untitled] = &tabState{viewport: render.NewViewport(), foldState: render.NewFoldState(), langLabel: "Plain Text"}
+	st.showSaveAsMenu(1, false, false)
+	if st.saveMenu.dir != saved {
+		t.Fatalf("untitled buffer: dir = %q, want the remembered %q", st.saveMenu.dir, saved)
+	}
+
+	// A buffer that already has a path keeps its own folder.
+	otherDir := t.TempDir()
+	existing := filepath.Join(otherDir, "kept.txt")
+	if err := os.WriteFile(existing, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ed, err := editor.NewEditorFromFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.tabBar.OpenEditor(ed, "kept.txt")
+	st.tabStates[ed] = &tabState{viewport: render.NewViewport(), foldState: render.NewFoldState(), langLabel: "Plain Text"}
+	st.showSaveAsMenu(2, false, false)
+	if st.saveMenu.dir != otherDir {
+		t.Fatalf("file-backed buffer: dir = %q, want its own folder %q", st.saveMenu.dir, otherDir)
+	}
+}
