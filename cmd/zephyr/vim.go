@@ -286,19 +286,12 @@ func (st *appState) executeVimAction(action vim.Action) {
 		st.vimPut(ed, action, true)
 
 	case vim.ActionReplace:
-		for i := 0; i < count; i++ {
-			offset := ed.Buffer.LineColToOffsetSafe(ed.Cursor.Line, ed.Cursor.Col+i)
-			if offset < ed.Buffer.Length() {
-				ed.Buffer.Delete(offset, 1)
-				ed.Buffer.Insert(offset, string(action.Char))
-			}
-		}
-		ed.Modified = true
+		ed.ReplaceRunes(count, action.Char)
 		st.afterEdit()
 
 	case vim.ActionJoinLines:
 		for i := 0; i < count; i++ {
-			vimJoinLines(ed)
+			ed.JoinLines()
 		}
 		st.afterEdit()
 
@@ -351,9 +344,9 @@ func (st *appState) executeVimAction(action vim.Action) {
 	// --- Command/Search ---
 	case vim.ActionEnterCommand, vim.ActionEnterSearch, vim.ActionEnterSearchBack:
 		// Mode already set by the state machine; just invalidate for render
-		st.window.Invalidate()
+		st.invalidate()
 	case vim.ActionCancelCommand:
-		st.window.Invalidate()
+		st.invalidate()
 	case vim.ActionExecCommand:
 		cmdAction := vim.ParseCommand(action.Text)
 		if cmdAction.Kind != vim.ActionNone {
@@ -412,7 +405,7 @@ func (st *appState) executeVimAction(action vim.Action) {
 	if st.cursorRend != nil {
 		st.cursorRend.ResetBlink()
 	}
-	st.window.Invalidate()
+	st.invalidate()
 }
 
 // isRepeatableAction returns true for actions that can be repeated with dot.
@@ -668,6 +661,14 @@ func (st *appState) vimExecuteTextObject(ed *editor.Editor, action vim.Action, o
 	}
 }
 
+func vimIndentLine(ed *editor.Editor, line int, indent bool) {
+	if indent {
+		ed.IndentLine(line)
+	} else {
+		ed.DedentLine(line)
+	}
+}
+
 // vimExecuteIndent handles >> / << and visual mode > / <.
 func (st *appState) vimExecuteIndent(ed *editor.Editor, action vim.Action, indent bool) {
 	count := action.EffectiveCount()
@@ -689,32 +690,6 @@ func (st *appState) vimExecuteIndent(ed *editor.Editor, action vim.Action, inden
 			}
 		}
 		st.afterEdit()
-	}
-}
-
-func vimIndentLine(ed *editor.Editor, line int, indent bool) {
-	lineText, err := ed.Buffer.Line(line)
-	if err != nil {
-		return
-	}
-	offset, _ := ed.Buffer.LineColToOffset(buffer.LineCol{Line: line, Col: 0})
-	if indent {
-		ed.Buffer.Insert(offset, "    ")
-		ed.Modified = true
-	} else {
-		// Remove up to 4 leading spaces
-		remove := 0
-		for _, r := range lineText {
-			if r == ' ' && remove < 4 {
-				remove++
-			} else {
-				break
-			}
-		}
-		if remove > 0 {
-			ed.Buffer.Delete(offset, remove)
-			ed.Modified = true
-		}
 	}
 }
 
@@ -1277,25 +1252,6 @@ func vimDeleteLineContent(ed *editor.Editor) {
 	ed.Cursor.Col = 0
 }
 
-func vimJoinLines(ed *editor.Editor) {
-	if ed.Cursor.Line >= ed.Buffer.LineCount()-1 {
-		return
-	}
-	// Move to end of current line
-	ed.Cursor.MoveToLineEnd(ed.Buffer)
-	nextLine, _ := ed.Buffer.Line(ed.Cursor.Line + 1)
-	trimmed := strings.TrimLeft(nextLine, " \t")
-	// Delete the newline and leading whitespace of next line
-	offset := ed.Buffer.LineColToOffsetSafe(ed.Cursor.Line, ed.Cursor.Col)
-	nextLineLen := utf8.RuneCountInString(nextLine) + 1 // +1 for newline
-	ed.Buffer.Delete(offset, nextLineLen)
-	// Insert a space and the trimmed content
-	if len(trimmed) > 0 {
-		ed.Buffer.Insert(offset, " "+trimmed)
-	}
-	ed.Modified = true
-}
-
 func (st *appState) vimSwapVisualAnchorHelper(ed *editor.Editor) {
 	if !ed.Selection.Active {
 		return
@@ -1505,5 +1461,5 @@ func (st *appState) openVimTutor() {
 	st.tabBar.OpenEditor(ed, "Vim Tutor")
 	st.activeTabState()
 	st.updateWindowTitle()
-	st.window.Invalidate()
+	st.invalidate()
 }

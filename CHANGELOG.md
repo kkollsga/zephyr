@@ -12,6 +12,11 @@ All notable changes to Zephyr are documented here.
 
 ### Editing
 
+- Vim `r`, `>>`, `<<`, and `J` are now undoable. They edited the buffer
+  behind the undo history's back, which also corrupted every older undo
+  step, so an undo after one of them could damage unrelated text.
+- Vim `J` on a line containing non-ASCII text no longer leaves a fragment of
+  that line behind.
 - Replacing a selection — typing over it, pasting over it, Replace and
   Replace All in the find bar, or a visual-mode put — is now a single
   undoable step that restores the original text, instead of an undo that
