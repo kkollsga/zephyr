@@ -107,6 +107,10 @@ func (st *appState) handleKey(ke key.Event) {
 			st.handleClobberKey(ke)
 			return
 		}
+		if st.saveMenu.confirmOverwrite {
+			st.handleOverwriteKey(ke)
+			return
+		}
 		if st.saveMenuShowSaveAs() {
 			// Save As rows visible — handle filename editing keys
 			switch {

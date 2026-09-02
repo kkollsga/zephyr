@@ -32,6 +32,9 @@ All notable changes to Zephyr are documented here.
 - Save As on an untitled buffer now opens in the folder your last save went
   to, remembered across launches. A buffer that already has a file still saves
   next to that file.
+- The Save As overwrite prompt now answers to the keyboard: Return overwrites,
+  Escape goes back to the filename with the existing file untouched. Return
+  used to re-raise the same prompt and Escape closed the whole menu.
 
 ### Find
 

@@ -241,7 +241,7 @@ expect_buffer() {
 # and listed in SCENARIOS. It launches its own app, traps stop_app, and states a
 # pass condition read off the app or the filesystem — never off a screenshot.
 
-SCENARIOS=(smoke regression clipboard)
+SCENARIOS=(smoke regression clipboard save-as)
 
 list_scenarios() {
     printf '%s\n' "${SCENARIOS[@]}"
@@ -259,6 +259,73 @@ run_scenario() {
     echo "unknown scenario: $name" >&2
     echo "known scenarios: ${SCENARIOS[*]}" >&2
     return 2
+}
+
+# scenario_save_as drives Save As onto a file that already exists, and the
+# overwrite prompt's keyboard confirm: Return overwrites, Escape goes back with
+# the target untouched. Both halves are read off the target file's bytes.
+scenario_save_as() {
+    local work="$STATE_DIR/artifacts/save-as"
+    rm -rf "$work"
+    mkdir -p "$work"
+    local src="$work/save_as_source.go"
+    local target="$work/target.go"
+    cp "$DEFAULT_FIXTURE" "$src"
+    printf 'package target\n// this file must survive Escape\n' >"$target"
+
+    # The bytes the target must still hold after Escape, and the document the
+    # buffer must hold — and therefore what the target must hold after Return.
+    local target_before="$work/expected-target-before.go"
+    cp "$target" "$target_before"
+    local marker='//zephyr-save-as '
+    local expected_buffer="$work/expected-buffer.go"
+    printf '%s' "$marker" >"$expected_buffer"
+    cat "$DEFAULT_FIXTURE" >>"$expected_buffer"
+
+    launch_app "$src"
+    trap stop_app EXIT
+    pid=$(require_pid)
+    sleep 0.7
+
+    "$DRIVER" click "$pid" 300 165 left
+    sleep 0.2
+    "$DRIVER" key "$pid" up cmd
+    sleep 0.15
+    "$DRIVER" type "$pid" "$marker"
+    sleep 0.4
+    expect_buffer "typing the marker" "$expected_buffer"
+
+    "$DRIVER" key "$pid" s cmd shift
+    sleep 0.5
+    capture_checked 30-save-as-menu
+    "$DRIVER" type "$pid" "$(basename "$target")"
+    sleep 0.3
+    "$DRIVER" key "$pid" return
+    sleep 0.5
+    capture_checked 31-save-as-overwrite-prompt
+
+    "$DRIVER" key "$pid" escape
+    sleep 0.5
+    diff -q "$target" "$target_before" >/dev/null || {
+        echo "Escape at the overwrite prompt wrote the target anyway" >&2
+        diff "$target_before" "$target" | head -n 20 >&2
+        exit 1
+    }
+
+    "$DRIVER" key "$pid" return
+    sleep 0.5
+    "$DRIVER" key "$pid" return
+    sleep 0.8
+    diff -q "$target" "$expected_buffer" >/dev/null || {
+        echo "the confirmed overwrite did not write the buffer to the target" >&2
+        diff "$expected_buffer" "$target" | head -n 20 >&2
+        exit 1
+    }
+    capture_checked 32-save-as-saved
+
+    echo "Save As scenario completed; artifacts: $STATE_DIR/artifacts"
+    stop_app
+    trap - EXIT
 }
 
 # CLIPBOARD_BACKUP holds whatever was on the pasteboard before the clipboard

@@ -95,6 +95,10 @@ save through real keystrokes. It runs against a copy of the fixture inside the
 state dir, never the tracked one, and it saves and restores the pasteboard
 around the run — including when the run fails part-way.
 
+`save-as` drives Save As onto a file that already exists and both answers to
+the overwrite prompt: Escape goes back with the target's bytes untouched,
+Return overwrites it with the buffer. Both are asserted from the target file.
+
 Run the end-to-end input and screenshot smoke test with:
 
 ```sh
