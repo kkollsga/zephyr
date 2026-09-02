@@ -638,10 +638,20 @@ func (st *appState) flushReparse() {
 	}
 }
 
+// transferClaimWait is how long an offered tab waits for another instance to
+// claim it before this one falls back to spawning a process.
+const transferClaimWait = 500 * time.Millisecond
+
 // offerTabTransfer writes an IPC offer for the tab and waits for another
-// instance to claim it. If nobody claims within 500ms, falls back to
-// spawning a new instance. Runs in a goroutine.
+// instance to claim it. If nobody claims, falls back to spawning a new
+// instance. Runs in a goroutine.
 func (st *appState) offerTabTransfer(idx int) {
+	st.offerTabTransferWithin(idx, transferClaimWait)
+}
+
+// offerTabTransferWithin is offerTabTransfer with the claim window as an
+// argument, so a test does not have to wait out the real one.
+func (st *appState) offerTabTransferWithin(idx int, claimWait time.Duration) {
 	if idx < 0 || idx >= len(st.tabBar.Tabs) {
 		return
 	}
@@ -675,23 +685,26 @@ func (st *appState) offerTabTransfer(idx int) {
 		return
 	}
 
-	// Wait up to 500ms for another instance to claim the offer
-	deadline := time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(claimWait)
 	for time.Now().Before(deadline) {
 		if ipc.WasClaimed() {
-			// Another instance took the tab — close it here
+			// Another instance took the tab — close it here. The claimer owns
+			// the content file and removes it once it has read it.
 			st.forceCloseTab(idx)
-			st.window.Invalidate()
+			st.invalidate()
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Nobody claimed — clean up offer.
+	// Nobody claimed — drop both halves of the offer. The content file is a
+	// plaintext copy of the buffer, so leaving it in the temp directory leaks
+	// the user's text to anything that can read there.
 	ipc.CleanupOffer()
+	os.Remove(tmpFile.Name())
 	// Don't spawn a new instance if this is the last tab (pointless restart).
 	if len(st.tabBar.Tabs) <= 1 {
-		st.window.Invalidate()
+		st.invalidate()
 		return
 	}
 	st.detachTabToNewInstance(idx)
@@ -730,6 +743,9 @@ func (st *appState) checkIncomingTabTransfer() bool {
 	}
 	st.tabBar.OpenEditor(ed, title)
 	st.activeTabState()
+	// A transferred tab is file-backed as often as not, and it arrives without
+	// passing through openFileInTab.
+	st.watchEditorFile(ed)
 	st.updateWindowTitle()
 	return true
 }
@@ -789,4 +805,18 @@ func (st *appState) detachTabToNewInstance(idx int) {
 
 func langToExtension(lang string) string {
 	return highlight.ExtensionForLanguage(lang)
+}
+
+// openFileInTab opens path in a tab. It is the one door for opening a file:
+// registering the file with the watcher belongs to every tab, not only to the
+// one the window started with.
+func (st *appState) openFileInTab(path string) (*editor.Editor, error) {
+	ed, err := st.tabBar.OpenFile(path)
+	if err != nil {
+		return nil, err
+	}
+	// Creates the tab state, which takes the file's disk snapshot.
+	st.activeTabState()
+	st.watchEditorFile(ed)
+	return ed, nil
 }

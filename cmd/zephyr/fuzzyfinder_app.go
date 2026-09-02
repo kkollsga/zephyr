@@ -139,7 +139,7 @@ func (st *appState) openFuzzySelection() {
 	if path == "" {
 		return
 	}
-	if _, err := st.tabBar.OpenFile(path); err != nil {
+	if _, err := st.openFileInTab(path); err != nil {
 		st.notify("Could not open "+filepath.Base(path), 5*time.Second)
 		return
 	}

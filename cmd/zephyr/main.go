@@ -506,7 +506,7 @@ func run() {
 					delete(st.tabStates, st.tabBar.Tabs[0].Editor)
 					st.tabBar.ForceCloseTab(0)
 				}
-				st.tabBar.OpenFile(openPath)
+				st.openFileInTab(openPath)
 				st.activeTabState() // init tab state (incl. markdown read mode)
 				st.updateWindowTitle()
 				w.Invalidate()

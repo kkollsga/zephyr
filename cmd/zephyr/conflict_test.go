@@ -495,3 +495,78 @@ func TestConflictBadgeSurfaces(t *testing.T) {
 		t.Fatal("badge survived conflict resolution")
 	}
 }
+
+// Every open tab's file is registered with the watcher, not only the one the
+// window started with: a second tab used to get no conflict detection at all.
+func TestEveryOpenTabsFileIsWatched(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.Join(dir, "first.go")
+	second := filepath.Join(dir, "second.go")
+	for _, p := range []string{first, second} {
+		if err := os.WriteFile(p, []byte("package p\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	st, _, _ := testAppWithText("", "Plain Text")
+	st.tabBar = ui.NewTabBar()
+	st.tabStates = map[*editor.Editor]*tabState{}
+	fw, err := fileio.NewWatcher()
+	if err != nil {
+		t.Skipf("watcher unavailable: %v", err)
+	}
+	defer fw.Close()
+	st.watcher = fw
+	startWatcherPump(fw.Events, &st.watcherPending, nil)
+
+	for _, p := range []string{first, second} {
+		if _, err := st.openFileInTab(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	secondTab := st.tabBar.Tabs[1]
+	// Unsaved edits in the tab: an external change to a clean buffer reloads
+	// it, and the standing conflict is what a save has to be refused against.
+	secondTab.Editor.Modified = true
+
+	if err := os.WriteFile(second, []byte("package p // changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		st.pollFileWatcher()
+		if ts := st.tabStates[secondTab.Editor]; ts != nil && ts.conflict != conflictNone {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("an external change to the second tab's file was never reported")
+}
+
+// The tab-transfer offer copies the buffer to a temp file in plaintext. When
+// nobody claims the offer, that copy has to go with it.
+func TestUnclaimedTabTransferRemovesItsContentFile(t *testing.T) {
+	t.Setenv("ZEPHYR_GUI_STATE_DIR", t.TempDir())
+	st, ed, _ := testAppWithText("secret working text\n", "Plain Text")
+	_ = ed
+
+	before, err := filepath.Glob(filepath.Join(os.TempDir(), "zephyr-transfer-*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One tab, so the no-claim path stops before spawning a second instance.
+	st.offerTabTransferWithin(0, 10*time.Millisecond)
+
+	after, err := filepath.Glob(filepath.Join(os.TempDir(), "zephyr-transfer-*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("the unclaimed offer left %d transfer file(s) behind: %v", len(after)-len(before), after)
+	}
+}

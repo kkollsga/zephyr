@@ -10,6 +10,12 @@ All notable changes to Zephyr are documented here.
   idle. Previously the watcher's events were only read on the next frame, so
   a file changed while Zephyr was in the background went unreported until
   something else redrew the window.
+- External-change detection now covers every open tab. Only the file the
+  window started with was registered with the watcher, so a change to a file
+  opened later — from the file finder, the navigator, or a tab dragged in from
+  another window — was never reported, and a save over it was never questioned.
+- A tab dragged out and dropped where no other Zephyr window claimed it no
+  longer leaves a plaintext copy of the buffer behind in the temp directory.
 - A file deleted or moved out from under an open tab is reported as deleted
   and the buffer is kept as unsaved work, instead of being announced as
   "Reloaded:" while the tab silently held the only remaining copy.

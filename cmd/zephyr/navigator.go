@@ -377,7 +377,7 @@ func (st *appState) navOpenEntry() {
 	if entry.IsDir {
 		st.openDirBuffer(entry.Path)
 	} else {
-		st.tabBar.OpenFile(entry.Path)
+		st.openFileInTab(entry.Path)
 	}
 }
 
@@ -651,7 +651,7 @@ func (st *appState) navStatusOpenFile() {
 		return
 	}
 	fullPath := filepath.Join(st.gitRepo.Root, entry.Path)
-	st.tabBar.OpenFile(fullPath)
+	st.openFileInTab(fullPath)
 }
 
 // navCommit commits staged changes and clears undo history for committed files.
@@ -768,7 +768,7 @@ func (st *appState) navNextChangedFile(count int) {
 
 	if currentRel != "" && st.gitRepo != nil {
 		fullPath := filepath.Join(st.gitRepo.Root, currentRel)
-		st.tabBar.OpenFile(fullPath)
+		st.openFileInTab(fullPath)
 		// Jump to first hunk in the new file
 		ts := st.activeTabState()
 		newEd := st.activeEd()
@@ -814,7 +814,7 @@ func (st *appState) navPrevChangedFile(count int) {
 
 	if currentRel != "" && st.gitRepo != nil {
 		fullPath := filepath.Join(st.gitRepo.Root, currentRel)
-		st.tabBar.OpenFile(fullPath)
+		st.openFileInTab(fullPath)
 		ts := st.activeTabState()
 		newEd := st.activeEd()
 		if ts != nil && ts.gitDiff != nil && newEd != nil {
@@ -859,7 +859,7 @@ func (st *appState) navGoAlternate() {
 	}
 	alt := navigator.AlternateFile(ed.FilePath)
 	if alt != "" {
-		st.tabBar.OpenFile(alt)
+		st.openFileInTab(alt)
 	}
 }
 
@@ -885,7 +885,7 @@ func (st *appState) navGoFile() {
 		// Try relative to repo root
 		fullPath := filepath.Join(st.gitRepo.Root, path)
 		if _, err := filepath.Glob(fullPath); err == nil {
-			st.tabBar.OpenFile(fullPath)
+			st.openFileInTab(fullPath)
 			return
 		}
 	}
@@ -894,7 +894,7 @@ func (st *appState) navGoFile() {
 		dir := filepath.Dir(ed.FilePath)
 		fullPath := filepath.Join(dir, path)
 		if _, err := filepath.Glob(fullPath); err == nil {
-			st.tabBar.OpenFile(fullPath)
+			st.openFileInTab(fullPath)
 			return
 		}
 	}
