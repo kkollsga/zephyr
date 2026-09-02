@@ -92,8 +92,14 @@ func (st *appState) handleEvents(gtx layout.Context, w *app.Window) {
 }
 
 func (st *appState) handleKey(ke key.Event) {
-	// Unified save menu intercepts all input
+	// Unified save menu intercepts all input. Each confirmation sub-state gets
+	// its own handler so a new one adds a case here rather than another branch
+	// inside the filename editor.
 	if st.saveMenu.visible {
+		if st.saveMenu.confirmClobber {
+			st.handleClobberKey(ke)
+			return
+		}
 		if st.saveMenuShowSaveAs() {
 			// Save As rows visible — handle filename editing keys
 			switch {
@@ -787,6 +793,9 @@ func (st *appState) handleGutterClick(pe pointer.Event) {
 }
 
 func (st *appState) handleTextInput(text string) {
+	if st.saveMenu.visible && st.saveMenu.confirmClobber {
+		return // the clobber prompt has no text field
+	}
 	if st.saveMenu.visible && st.saveMenuShowSaveAs() {
 		st.saveAsInsertText(text)
 		return

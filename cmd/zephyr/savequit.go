@@ -42,6 +42,8 @@ func (st *appState) showSaveMenu(idx int, closeAfter, forQuit bool) {
 	st.saveMenu.closeAfterSave = closeAfter
 	st.saveMenu.forQuit = forQuit
 	st.saveMenu.saveAsExpanded = false
+	st.saveMenu.confirmOverwrite = false
+	st.saveMenu.confirmClobber = false
 	st.saveMenu.tags = [7]bool{}
 
 	// Pre-populate Save As fields so they're ready when expanded/shown
@@ -104,6 +106,7 @@ func (st *appState) handleSaveMenuClick(x, y int) {
 	// Click outside → cancel
 	if x < dx || x >= dx+dw || y < dy || y >= dy+dropdownH {
 		st.saveMenu.visible = false
+		st.saveMenu.confirmClobber = false
 		st.quitInProgress = false
 		return
 	}
@@ -111,6 +114,10 @@ func (st *appState) handleSaveMenuClick(x, y int) {
 	idx := st.saveMenu.tabIdx
 	if idx < 0 || idx >= len(st.tabBar.Tabs) {
 		st.saveMenu.visible = false
+		return
+	}
+	if st.saveMenu.confirmClobber {
+		st.handleClobberClick(x, y, dy, dw, itemH)
 		return
 	}
 	tab := st.tabBar.Tabs[idx]
@@ -212,13 +219,14 @@ func (st *appState) handleSaveMenuClick(x, y int) {
 			if showSaveAs {
 				st.executeSaveAs()
 			} else {
+				closeAfter, forQuit := st.saveMenu.closeAfterSave, st.saveMenu.forQuit
 				st.saveMenu.visible = false
-				if st.saveTab(tab) {
+				if st.saveTabWithPrompt(tab, closeAfter, forQuit) {
 					st.showSaveNotification(tab.Editor.FilePath)
-					if st.saveMenu.closeAfterSave {
+					if closeAfter {
 						st.forceCloseTab(idx)
 					}
-					if st.saveMenu.forQuit {
+					if forQuit {
 						st.continueQuitFlow()
 					}
 				}
@@ -258,6 +266,14 @@ func (st *appState) executeSaveAs() {
 	}
 
 	path := filepath.Join(st.saveMenu.dir, filename)
+
+	tab := st.tabBar.Tabs[idx]
+	if path == tab.Editor.FilePath && st.saveWouldClobber(tab) {
+		// Saving As onto the tab's own changed file is the same clobber the
+		// plain Save path refuses; "the file exists" is not the real question.
+		st.raiseClobberPrompt(idx, st.saveMenu.closeAfterSave, st.saveMenu.forQuit)
+		return
+	}
 
 	// Check if the target file already exists
 	if _, err := os.Stat(path); err == nil {
@@ -371,7 +387,29 @@ func (st *appState) saveAsDeleteForward() {
 
 // --- Shared save helpers ---
 
+// saveTab writes a tab to its file. It refuses and raises the clobber prompt
+// when the file changed underneath the buffer, so a save can never silently
+// destroy someone else's write.
 func (st *appState) saveTab(tab *ui.Tab) bool {
+	return st.saveTabWithPrompt(tab, false, false)
+}
+
+// saveTabWithPrompt is saveTab carrying the close-tab and quit flags of the
+// flow that requested the save, so a refusal can hand them to the prompt.
+func (st *appState) saveTabWithPrompt(tab *ui.Tab, closeAfter, forQuit bool) bool {
+	if tab.Editor.FilePath == "" {
+		return st.saveTabAs(tab)
+	}
+	if st.saveWouldClobber(tab) {
+		st.raiseClobberPrompt(st.tabIndexOf(tab), closeAfter, forQuit)
+		return false
+	}
+	return st.forceSaveTab(tab)
+}
+
+// forceSaveTab writes the buffer to its file without the conflict check. Only
+// the guard above and the prompt's explicit Overwrite may call it.
+func (st *appState) forceSaveTab(tab *ui.Tab) bool {
 	if tab.Editor.FilePath == "" {
 		return st.saveTabAs(tab)
 	}
@@ -397,6 +435,7 @@ func (st *appState) saveTab(tab *ui.Tab) bool {
 	// an external write that lands inside that window is invisible to the
 	// watcher and only the next snapshot comparison will surface it.
 	st.snapshotEditorFile(tab.Editor)
+	st.clearConflict(tab)
 	st.refreshGitDiffForEditor(tab.Editor)
 	return true
 }

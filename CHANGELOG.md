@@ -16,6 +16,16 @@ All notable changes to Zephyr are documented here.
 - A reload that fails now says so instead of reporting a successful reload.
 - Saving no longer produces a spurious "File changed externally" warning for
   Zephyr's own write.
+- Saving a file that changed on disk while the buffer had unsaved edits no
+  longer overwrites that change without asking. Zephyr now offers Overwrite,
+  Reload, or Cancel; Return and Escape both cancel, so neither key can be the
+  one that loses a version. Reload is undoable — one Cmd+Z brings your text
+  back.
+- An unresolved external change is now a standing badge — an amber dot on the
+  tab and "changed on disk" (or "deleted on disk") in the status bar — instead
+  of a notification that expired after ten seconds and left no trace.
+- Refusing a save during quit now leaves the tab open and the quit
+  unfinished, rather than closing a tab whose file was never written.
 
 ### Markdown
 

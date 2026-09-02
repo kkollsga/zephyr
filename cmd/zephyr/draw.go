@@ -1046,7 +1046,7 @@ func (st *appState) drawTabBar(gtx layout.Context) {
 				Min: image.Pt(dotCx-dotR, closeY-dotR),
 				Max: image.Pt(dotCx+dotR, closeY+dotR),
 			}.Push(gtx.Ops)
-			paint.ColorOp{Color: st.theme.TabModifiedDot}.Add(gtx.Ops)
+			paint.ColorOp{Color: st.tabDotColor(tab, false)}.Add(gtx.Ops)
 			paint.PaintOp{}.Add(gtx.Ops)
 			dotEllipse.Pop()
 		} else {
@@ -1209,10 +1209,7 @@ func (st *appState) drawSingleTab(gtx layout.Context, i, tabX, textY, radius int
 	closeHovered := inTabBar && st.hoverX >= closeX && st.hoverX < tabX+tabW
 
 	if tab.Editor.Modified {
-		dotColor := st.theme.TabModifiedDot
-		if closeHovered {
-			dotColor = st.theme.TabCloseHover
-		}
+		dotColor := st.tabDotColor(tab, closeHovered)
 		dotCx := closeX + m.closeW/2
 		dotEllipse := clip.Ellipse{
 			Min: image.Pt(dotCx-dotR, closeY-dotR),
@@ -1384,7 +1381,7 @@ func (st *appState) drawOverflowDropdown(gtx layout.Context) {
 				Min: image.Pt(dotCx-dotR, dotCy-dotR),
 				Max: image.Pt(dotCx+dotR, dotCy+dotR),
 			}.Push(gtx.Ops)
-			paint.ColorOp{Color: st.theme.TabModifiedDot}.Add(gtx.Ops)
+			paint.ColorOp{Color: st.tabDotColor(tab, false)}.Add(gtx.Ops)
 			paint.PaintOp{}.Add(gtx.Ops)
 			dotEllipse.Pop()
 		}
@@ -1447,7 +1444,7 @@ func (st *appState) drawOverflowDropdown(gtx layout.Context) {
 				Min: image.Pt(dotCx-dotR, dotCy-dotR),
 				Max: image.Pt(dotCx+dotR, dotCy+dotR),
 			}.Push(gtx.Ops)
-			paint.ColorOp{Color: st.theme.TabModifiedDot}.Add(gtx.Ops)
+			paint.ColorOp{Color: st.tabDotColor(tab, false)}.Add(gtx.Ops)
 			paint.PaintOp{}.Add(gtx.Ops)
 			dotEllipse.Pop()
 		}
@@ -1544,6 +1541,9 @@ func (st *appState) saveMenuShowSaveAs() bool {
 
 // saveMenuRowCount returns the number of visible rows in the save menu.
 func (st *appState) saveMenuRowCount() int {
+	if st.saveMenu.confirmClobber {
+		return 2 // warning line + Overwrite/Reload/Cancel
+	}
 	idx := st.saveMenu.tabIdx
 	fileBacked := idx >= 0 && idx < len(st.tabBar.Tabs) && st.tabBar.Tabs[idx].Editor.FilePath != ""
 
@@ -1642,6 +1642,10 @@ func (st *appState) drawSaveMenu(gtx layout.Context) {
 
 	dx, dy, dw, dropdownH, itemH := st.saveMenuRect()
 	if dropdownH == 0 {
+		return
+	}
+	if st.saveMenu.confirmClobber {
+		st.drawClobberMenu(gtx, tab, dx, dy, dw, dropdownH, itemH)
 		return
 	}
 
@@ -2017,6 +2021,16 @@ func (st *appState) drawStatusLine(gtx layout.Context, ed *editor.Editor, ts *ta
 		sr.RenderGlyphs(gtx.Ops, gtx, status, 8, textY, st.theme.StatusFg)
 	}
 
+	// Conflict badge, immediately right of line:col. It stays for as long as
+	// the conflict does, unlike the notification beside it.
+	badgeW := 0
+	if c := st.tabConflict(st.tabBar.ActiveTab()); c != conflictNone {
+		badge := "! " + c.label()
+		badgeX := 8 + len("999:999")*sr.CharWidth + sr.CharWidth
+		sr.RenderGlyphs(gtx.Ops, gtx, badge, badgeX, textY, warningColor())
+		badgeW = (utf8.RuneCountInString(badge) + 1) * sr.CharWidth
+	}
+
 	// Language on right
 	lang := ""
 	if ts != nil {
@@ -2122,7 +2136,7 @@ func (st *appState) drawStatusLine(gtx layout.Context, ed *editor.Editor, ts *ta
 
 		// Notifications rendered left of center to avoid overlap
 		if st.notification != "" && time.Now().Before(st.notificationUntil) {
-			notifX := 8 + len("999:999")*sr.CharWidth + sr.CharWidth*2
+			notifX := 8 + len("999:999")*sr.CharWidth + sr.CharWidth*2 + badgeW
 			sr.RenderGlyphs(gtx.Ops, gtx, st.notification, notifX, textY, st.theme.Foreground)
 			gtx.Execute(op.InvalidateCmd{})
 		} else if st.notification != "" {

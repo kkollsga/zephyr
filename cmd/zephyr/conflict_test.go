@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/io/key"
+
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/kristianweb/zephyr/internal/editor"
@@ -25,7 +27,14 @@ func conflictTestApp(t *testing.T, path string) (*appState, *editor.Editor, *tab
 	tb := ui.NewTabBar()
 	tb.OpenEditor(ed, filepath.Base(path))
 	ts := &tabState{viewport: render.NewViewport(), foldState: render.NewFoldState(), lastCursorLine: -1}
-	st := &appState{tabBar: tb, tabStates: map[*editor.Editor]*tabState{ed: ts}}
+	if snap, err := fileio.TakeSnapshot(path); err == nil {
+		ts.diskSnap = snap
+	}
+	st := &appState{
+		tabBar: tb, tabStates: map[*editor.Editor]*tabState{ed: ts},
+		tabRend:    &render.TextRenderer{CharWidth: 8, LineHeightPx: 18},
+		barTabIdxs: []int{0}, lastMaxX: 900, tabBarHeight: 28,
+	}
 	return st, ed, ts
 }
 
@@ -244,5 +253,245 @@ func TestPendingWatchEventsCoalescePerPath(t *testing.T) {
 	}
 	if got[0].Op&fsnotify.Write == 0 || got[1].Op&fsnotify.Remove == 0 {
 		t.Fatalf("coalesced ops lost information: %+v", got)
+	}
+}
+
+// A save must never silently overwrite a change made on disk while the buffer
+// was dirty: the external bytes stay until the user chooses what happens.
+func TestSaveRefusesToClobberExternalChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "contested.go")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, ed, _ := conflictTestApp(t, path)
+	tab := st.tabBar.Tabs[0]
+
+	ed.Cursor.SetPosition(ed.Buffer, 0, 0)
+	ed.InsertText("mine ")
+	if err := os.WriteFile(path, []byte("theirs\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st.handleExternalFileChange(path)
+
+	saved := st.saveTab(tab)
+	if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+		t.Fatalf("external change was clobbered: disk = %q", got)
+	}
+	if saved {
+		t.Fatal("saveTab reported success while a conflict was unresolved")
+	}
+	if !ed.Modified {
+		t.Fatal("refused save cleared the modified flag")
+	}
+}
+
+// conflictedTab leaves path holding external bytes while the tab holds unsaved
+// edits, with the resulting conflict already recorded.
+func conflictedTab(t *testing.T, mine, theirs string) (*appState, *editor.Editor, *tabState, string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "contested.go")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, ed, ts := conflictTestApp(t, path)
+	ed.Cursor.SetPosition(ed.Buffer, 0, 0)
+	ed.InsertText(mine)
+	if err := os.WriteFile(path, []byte(theirs), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st.handleExternalFileChange(path)
+	if ts.conflict != conflictModified {
+		t.Fatalf("conflict state = %v, want conflictModified", ts.conflict)
+	}
+	return st, ed, ts, path
+}
+
+func TestClobberPromptRaisedInsteadOfWriting(t *testing.T) {
+	st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+	if st.saveTabWithPrompt(st.tabBar.Tabs[0], false, false) {
+		t.Fatal("save was not refused")
+	}
+	if !st.saveMenu.visible || !st.saveMenu.confirmClobber {
+		t.Fatalf("clobber prompt not raised: %+v", st.saveMenu)
+	}
+	if st.saveMenuRowCount() != 2 {
+		t.Fatalf("clobber sub-state row count = %d, want 2", st.saveMenuRowCount())
+	}
+	if ts.conflict != conflictModified {
+		t.Fatalf("conflict cleared by the prompt: %v", ts.conflict)
+	}
+}
+
+func TestClobberOverwriteWritesBufferAndClearsConflict(t *testing.T) {
+	st, ed, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	tab := st.tabBar.Tabs[0]
+	st.saveTab(tab)
+
+	st.clobberOverwrite()
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != ed.Buffer.Text() {
+		t.Fatalf("disk = %q, buffer = %q", got, ed.Buffer.Text())
+	}
+	if ts.conflict != conflictNone {
+		t.Fatalf("conflict survived Overwrite: %v", ts.conflict)
+	}
+	if st.diskChangedSinceLoad(tab) {
+		t.Fatal("snapshot was not refreshed by Overwrite")
+	}
+	if ed.Modified || st.saveMenu.visible || st.saveMenu.confirmClobber {
+		t.Fatalf("post-Overwrite state modified=%v menu=%+v", ed.Modified, st.saveMenu)
+	}
+}
+
+func TestClobberReloadTakesDiskAndOneUndoRestoresMine(t *testing.T) {
+	st, ed, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	mine := ed.Buffer.Text()
+	st.saveTab(st.tabBar.Tabs[0])
+
+	st.clobberReload()
+
+	if ed.Buffer.Text() != "theirs\n" {
+		t.Fatalf("buffer after Reload = %q", ed.Buffer.Text())
+	}
+	if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+		t.Fatalf("Reload wrote to disk: %q", got)
+	}
+	if ed.Modified {
+		t.Fatal("buffer still modified after Reload")
+	}
+	if ts.conflict != conflictNone {
+		t.Fatalf("conflict survived Reload: %v", ts.conflict)
+	}
+	if !ed.Undo() || ed.Buffer.Text() != mine {
+		t.Fatalf("one undo did not restore the user's text: %q", ed.Buffer.Text())
+	}
+}
+
+func TestClobberCancelLeavesDiskAndBufferUntouched(t *testing.T) {
+	st, ed, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	mine := ed.Buffer.Text()
+	st.saveTab(st.tabBar.Tabs[0])
+
+	st.dismissClobberPrompt()
+
+	if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+		t.Fatalf("Cancel changed the file: %q", got)
+	}
+	if ed.Buffer.Text() != mine || !ed.Modified {
+		t.Fatalf("Cancel changed the buffer: %q modified=%v", ed.Buffer.Text(), ed.Modified)
+	}
+	if ts.conflict != conflictModified {
+		t.Fatalf("Cancel resolved the conflict: %v", ts.conflict)
+	}
+	if st.saveMenu.visible || st.saveMenu.confirmClobber {
+		t.Fatalf("Cancel left the prompt open: %+v", st.saveMenu)
+	}
+}
+
+// The prompt's three choices must be reachable by clicking the row the layout
+// actually draws.
+func TestClobberClickHitsOverwriteReloadAndCancel(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		third  int
+		wantOn string
+	}{
+		{"overwrite", 0, "mine original\n"},
+		{"reload", 1, "theirs\n"},
+		{"cancel", 2, "theirs\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, _, _, path := conflictedTab(t, "mine ", "theirs\n")
+			st.saveTab(st.tabBar.Tabs[0])
+			dx, dy, dw, _, itemH := st.saveMenuRect()
+			x := dx + dw/3*tc.third + dw/6
+			st.handleSaveMenuClick(x, dy+itemH+itemH/2)
+			got, _ := os.ReadFile(path)
+			if string(got) != tc.wantOn {
+				t.Fatalf("disk after %s = %q, want %q", tc.name, got, tc.wantOn)
+			}
+			if st.saveMenu.confirmClobber {
+				t.Fatalf("%s left the prompt open", tc.name)
+			}
+		})
+	}
+}
+
+// Escape and Return both cancel: neither may be the key that loses a version.
+func TestClobberKeysCancelOnly(t *testing.T) {
+	for _, name := range []key.Name{key.NameEscape, key.NameReturn} {
+		st, ed, ts, path := conflictedTab(t, "mine ", "theirs\n")
+		st.saveTab(st.tabBar.Tabs[0])
+		st.handleKey(key.Event{Name: name})
+		if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+			t.Fatalf("key %v wrote to disk: %q", name, got)
+		}
+		if !ed.Modified || ts.conflict != conflictModified {
+			t.Fatalf("key %v resolved the conflict", name)
+		}
+		if st.saveMenu.visible {
+			t.Fatalf("key %v left the prompt open", name)
+		}
+	}
+}
+
+// Pre-mortem 3: a save refused inside the quit flow must leave the tab open
+// and must not let the quit complete.
+func TestRefusedSaveDuringQuitLeavesTabOpen(t *testing.T) {
+	st, ed, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	st.startQuitFlow()
+	if !st.saveMenu.visible || !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
+		t.Fatalf("quit prompt = %+v", st.saveMenu)
+	}
+
+	// Click Save on the quit prompt.
+	dx, dy, dw, dropdownH, itemH := st.saveMenuRect()
+	st.handleSaveMenuClick(dx+dw/6, dy+dropdownH-itemH/2)
+
+	if !st.saveMenu.confirmClobber {
+		t.Fatalf("save during quit did not raise the clobber prompt: %+v", st.saveMenu)
+	}
+	if !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
+		t.Fatal("clobber prompt dropped the quit flow flags")
+	}
+	if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+		t.Fatalf("quit-flow save clobbered the file: %q", got)
+	}
+	if st.exitPending {
+		t.Fatal("quit completed over an unresolved conflict")
+	}
+
+	st.dismissClobberPrompt()
+	if len(st.tabBar.Tabs) != 1 || st.tabBar.Tabs[0].Editor != ed {
+		t.Fatal("cancelling the clobber prompt closed the tab")
+	}
+	if st.exitPending || st.quitInProgress || ts.conflict != conflictModified {
+		t.Fatalf("cancel state exit=%v quit=%v conflict=%v", st.exitPending, st.quitInProgress, ts.conflict)
+	}
+}
+
+// A conflict must show up in the tab bar as well as the status bar.
+func TestConflictBadgeSurfaces(t *testing.T) {
+	st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+	tab := st.tabBar.Tabs[0]
+	if st.tabDotColor(tab, false) != warningColor() {
+		t.Fatal("tab dot did not carry the conflict badge")
+	}
+	if ts.conflict.label() != "changed on disk" {
+		t.Fatalf("status badge label = %q", ts.conflict.label())
+	}
+	ts.conflict = conflictDeleted
+	if ts.conflict.label() != "deleted on disk" || st.clobberWarning(tab) != "Deleted on disk" {
+		t.Fatalf("deleted labels = %q / %q", ts.conflict.label(), st.clobberWarning(tab))
+	}
+	ts.conflict = conflictNone
+	if st.tabDotColor(tab, false) == warningColor() {
+		t.Fatal("badge survived conflict resolution")
 	}
 }

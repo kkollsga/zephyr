@@ -195,6 +195,7 @@ type appState struct {
 		dir              string  // directory to save in
 		tags             [7]bool // macOS Finder tags: Red, Orange, Yellow, Green, Blue, Purple, Gray
 		confirmOverwrite bool    // true when waiting for overwrite confirmation
+		confirmClobber   bool    // true when a save is blocked by an external change
 	}
 
 	// Vim mode
