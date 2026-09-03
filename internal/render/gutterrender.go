@@ -203,16 +203,57 @@ func (gr *GutterRenderer) RenderGutter(gtx layout.Context, ops *op.Ops, firstLin
 	return width
 }
 
-// RenderDiffSign draws a 2px colored bar at the left edge of the gutter for a diff sign.
-// signType: '+' = added, '~' = modified.
-func (gr *GutterRenderer) RenderDiffSign(ops *op.Ops, y, lineHeight int, signType rune, added, modified, deleted color.NRGBA) {
-	var c color.NRGBA
+// diffSignColor maps a gutter diff sign to the color it is drawn in, reporting
+// false for a sign the gutter draws nothing for.
+func diffSignColor(signType rune, added, modified, deleted color.NRGBA) (color.NRGBA, bool) {
 	switch signType {
 	case '+':
-		c = added
+		return added, true
 	case '~':
-		c = modified
-	default:
+		return modified, true
+	case '-':
+		return deleted, true
+	}
+	return color.NRGBA{}, false
+}
+
+// deletedWedgePoints returns the outline of the deletion marker for a line box
+// at y: a right-pointing wedge on the gutter's left edge, vertically centred.
+// It is a wedge rather than a bar because the line it sits on was not itself
+// deleted — the deletion happened at its boundary.
+func deletedWedgePoints(y, lineHeight int) [3]f32.Point {
+	d := lineHeight / 4
+	if d < 3 {
+		d = 3
+	}
+	mid := float32(y) + float32(lineHeight)/2
+	return [3]f32.Point{
+		{X: 1, Y: mid - float32(d)},
+		{X: 1, Y: mid + float32(d)},
+		{X: 1 + float32(d), Y: mid},
+	}
+}
+
+// RenderDiffSign draws the gutter marker for a diff sign at the left edge:
+// a 2px colored bar for '+' (added) and '~' (modified), and a wedge for '-',
+// the boundary line of a run of deleted lines.
+func (gr *GutterRenderer) RenderDiffSign(ops *op.Ops, y, lineHeight int, signType rune, added, modified, deleted color.NRGBA) {
+	c, ok := diffSignColor(signType, added, modified, deleted)
+	if !ok {
+		return
+	}
+	if signType == '-' {
+		pts := deletedWedgePoints(y, lineHeight)
+		var path clip.Path
+		path.Begin(ops)
+		path.MoveTo(pts[0])
+		path.LineTo(pts[1])
+		path.LineTo(pts[2])
+		path.Close()
+		area := clip.Outline{Path: path.End()}.Op().Push(ops)
+		paint.ColorOp{Color: c}.Add(ops)
+		paint.PaintOp{}.Add(ops)
+		area.Pop()
 		return
 	}
 	rect := clip.Rect{

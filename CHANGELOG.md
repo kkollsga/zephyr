@@ -110,6 +110,11 @@ All notable changes to Zephyr are documented here.
   when the name does not exist at the repo root. The root candidate was tested
   with a call that accepts any path, so it always won and `gf` on a sibling
   file did nothing.
+- Lines deleted from the working file are now marked in the gutter. A red
+  wedge sits on the surviving line at the boundary — the line after the
+  deletion, or the line before it when the deletion runs to the end of the
+  file — so a delete-only change (a formatter, a `git checkout`) no longer
+  shows an empty gutter.
 
 ### Markdown
 

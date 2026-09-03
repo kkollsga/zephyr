@@ -426,3 +426,82 @@ func TestFileDiff_NilSafe(t *testing.T) {
 		t.Error("nil FileDiff.HunkAt should return nil")
 	}
 }
+
+// TestFileDiff_LineStatus_DeletionBoundary pins the boundary rule for lines
+// the new file lost: the diffs below are verbatim `git diff` output for each
+// shape, so the expectations track what git actually emits rather than a
+// hand-built hunk.
+func TestFileDiff_LineStatus_DeletionBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		diff string
+		want map[int]rune // new-file line -> status; lines absent must be ' '
+	}{
+		{
+			name: "delete only, mid file",
+			// "d" removed from a..h; the survivor after it is new line 4 ("e").
+			diff: "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+				"@@ -1,7 +1,6 @@\n a\n b\n c\n-d\n e\n f\n g\n",
+			want: map[int]rune{4: '-'},
+		},
+		{
+			name: "delete only, at EOF",
+			// "h" removed from the end; nothing follows it, so the marker falls
+			// on the line before, new line 7 ("g").
+			diff: "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+				"@@ -5,4 +5,3 @@ d\n e\n f\n g\n-h\n",
+			want: map[int]rune{7: '-'},
+		},
+		{
+			name: "delete only, at start of file",
+			diff: "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+				"@@ -1,4 +1,3 @@\n-a\n b\n c\n d\n",
+			want: map[int]rune{1: '-'},
+		},
+		{
+			name: "append only carries no deletion marker",
+			diff: "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+				"@@ -6,3 +6,4 @@ e\n f\n g\n h\n+i\n",
+			want: map[int]rune{9: '+'},
+		},
+		{
+			name: "replace three lines with one",
+			// The first delete pairs with the add as a modification; the two
+			// unpaired deletes surface at the following line.
+			diff: "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+				"@@ -1,8 +1,6 @@\n a\n b\n-c\n-d\n-e\n+X\n f\n g\n h\n",
+			want: map[int]rune{3: '~', 4: '-'},
+		},
+		{
+			name: "whole file emptied has no new-file line to mark",
+			diff: "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+				"@@ -1,3 +0,0 @@\n-a\n-b\n-c\n",
+			want: map[int]rune{},
+		},
+		{
+			name: "zero-context hunk marks the line the deletion followed",
+			diff: "diff --git a/f.txt b/f.txt\nindex 1..2 100644\n--- a/f.txt\n+++ b/f.txt\n" +
+				"@@ -2,2 +1,0 @@\n-b\n-c\n",
+			want: map[int]rune{1: '-'},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diffs := ParseUnifiedDiff([]byte(tt.diff))
+			if len(diffs) != 1 {
+				t.Fatalf("ParseUnifiedDiff returned %d files, want 1", len(diffs))
+			}
+			fd := &diffs[0]
+			for line := 1; line <= 12; line++ {
+				want, ok := tt.want[line]
+				if !ok {
+					want = ' '
+				}
+				if got := fd.LineStatus(line); got != want {
+					t.Errorf("LineStatus(%d) = %q, want %q", line, got, want)
+				}
+			}
+		})
+	}
+}

@@ -236,15 +236,51 @@ func (fd *FileDiff) buildLineStatusCache() {
 				}
 				newLine++
 			case DiffLineContext:
-				pendingDeletes = 0
+				if pendingDeletes > 0 {
+					fd.markDeletion(newLine)
+					pendingDeletes = 0
+				}
 				newLine++
 			}
+		}
+		if pendingDeletes > 0 {
+			// The hunk ends on deleted lines, so no new-file line follows them:
+			// the marker goes on the line before. A hunk with no new-file lines
+			// of its own (NewCount == 0) carries that line in NewStart, which is
+			// the line the deletion followed.
+			boundary := newLine - 1
+			if boundary < h.NewStart {
+				boundary = h.NewStart
+			}
+			fd.markDeletion(boundary)
 		}
 	}
 }
 
+// markDeletion records a deletion boundary at a 1-based new-file line, leaving
+// any '+' or '~' already there in place: a line that changed in its own right
+// shows its own sign, and the deletion is still visible at the next boundary
+// the hunk reaches.
+func (fd *FileDiff) markDeletion(line int) {
+	if line < 1 {
+		return
+	}
+	if _, ok := fd.lineStatusCache[line]; !ok {
+		fd.lineStatusCache[line] = '-'
+	}
+}
+
 // LineStatus returns the diff status for a 1-based new-file line number.
-// Returns '+' for added, '~' for modified, or ' ' for unchanged.
+// Returns '+' for added, '~' for modified, '-' for a deletion boundary, or ' '
+// for unchanged.
+//
+// Deleted lines have no new-file line number of their own, so a run of
+// deletions that no addition paired with is reported on the surviving line at
+// its boundary: the new-file line immediately after the deletion, or — when the
+// deletion runs to the end of the file — the line immediately before it. The
+// marker therefore says "lines were removed next to this one", and a line that
+// was itself added or modified keeps its own '+'/'~' instead.
+//
 // Uses a lazily-built cache for O(1) lookups after first call.
 func (fd *FileDiff) LineStatus(line int) rune {
 	if fd == nil {

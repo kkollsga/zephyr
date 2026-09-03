@@ -234,13 +234,19 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 				break
 			}
 			sign := ts.gitDiff.LineStatus(bufLine + 1)
-			if sign != '+' && sign != '~' {
+			if sign != '+' && sign != '~' && sign != '-' {
 				continue
 			}
 			y := i*st.textRend.LineHeightPx + editorTopPad - ts.viewport.PixelOffset
 			// Gutter sign
 			st.gutterRend.RenderDiffSign(gtx.Ops, y, st.textRend.LineHeightPx, sign,
 				st.theme.GitAdded, st.theme.GitModified, st.theme.GitDeleted)
+			if sign == '-' {
+				// A deletion marker names a boundary, not a changed line: the
+				// line under it still holds unchanged text, so it keeps the
+				// normal background.
+				continue
+			}
 			// Line background
 			var bgColor color.NRGBA
 			if sign == '+' {

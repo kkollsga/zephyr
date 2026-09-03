@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/text"
@@ -94,14 +95,57 @@ func TestGutterSizingAndRenderPaths(t *testing.T) {
 	if got := gr.RenderGutter(gtx, gtx.Ops, 2, 5, 100, 10, 3); got != 40 {
 		t.Fatalf("RenderGutter width = %d", got)
 	}
-	gr.RenderDiffSign(gtx.Ops, 10, 20, '+', color.NRGBA{G: 255, A: 255}, color.NRGBA{B: 255, A: 255}, color.NRGBA{})
-	gr.RenderDiffSign(gtx.Ops, 30, 20, '~', color.NRGBA{}, color.NRGBA{B: 255, A: 255}, color.NRGBA{})
-	gr.RenderDiffSign(gtx.Ops, 50, 20, '-', color.NRGBA{}, color.NRGBA{}, color.NRGBA{R: 255, A: 255})
+	added := color.NRGBA{G: 255, A: 255}
+	modified := color.NRGBA{B: 255, A: 255}
+	deleted := color.NRGBA{R: 255, A: 255}
+	gr.RenderDiffSign(gtx.Ops, 10, 20, '+', added, modified, deleted)
+	gr.RenderDiffSign(gtx.Ops, 30, 20, '~', added, modified, deleted)
+	gr.RenderDiffSign(gtx.Ops, 50, 20, '-', added, modified, deleted)
 
 	fs := NewFoldState()
 	fs.SetRegions([]FoldRegion{{StartLine: 1, EndLine: 4}}, 8)
 	fs.Toggle(1, 8)
 	if got := gr.RenderGutterFolded(gtx, gtx.Ops, 0, 4, 8, fs, 10, 3); got != 40 {
 		t.Fatalf("RenderGutterFolded width = %d", got)
+	}
+}
+
+// TestDiffSignAppearance asserts what RenderDiffSign draws for each sign. The
+// ops list it emits into is opaque to a test, so the colour choice and the
+// deleted wedge's outline are asserted through the helpers the renderer itself
+// draws from — including '-', which the renderer used to drop on the floor.
+func TestDiffSignAppearance(t *testing.T) {
+	added := color.NRGBA{G: 255, A: 255}
+	modified := color.NRGBA{B: 255, A: 255}
+	deleted := color.NRGBA{R: 255, A: 255}
+
+	colorCases := []struct {
+		sign  rune
+		want  color.NRGBA
+		drawn bool
+	}{
+		{'+', added, true},
+		{'~', modified, true},
+		{'-', deleted, true},
+		{' ', color.NRGBA{}, false},
+		{'?', color.NRGBA{}, false},
+	}
+	for _, tc := range colorCases {
+		got, drawn := diffSignColor(tc.sign, added, modified, deleted)
+		if drawn != tc.drawn || got != tc.want {
+			t.Errorf("diffSignColor(%q) = (%v, %v), want (%v, %v)", tc.sign, got, drawn, tc.want, tc.drawn)
+		}
+	}
+
+	// A right-pointing wedge on the gutter's left edge, vertically centred on
+	// the line it marks.
+	pts := deletedWedgePoints(50, 20)
+	want := [3]f32.Point{{X: 1, Y: 55}, {X: 1, Y: 65}, {X: 6, Y: 60}}
+	if pts != want {
+		t.Errorf("deletedWedgePoints(50, 20) = %v, want %v", pts, want)
+	}
+	// A cramped line still gets a wedge with a floor on its size.
+	if pts := deletedWedgePoints(0, 4); pts[2].X-pts[0].X < 3 || pts[1].Y-pts[0].Y < 6 {
+		t.Errorf("deletedWedgePoints(0, 4) = %v, want a wedge at the minimum size", pts)
 	}
 }
