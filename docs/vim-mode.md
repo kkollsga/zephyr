@@ -167,8 +167,10 @@ Text objects define a range around or inside delimiters. Use `i` for **inner** (
 | `[` or `]` | Inside `[...]` | Including brackets |
 | `{` or `}` or `B` | Inside `{...}` | Including braces |
 | `<` or `>` | Inside `<...>` | Including angle brackets |
-| `t` | Inside HTML/XML tag | Including tags |
-| `h` | Git hunk (Navigator Mode) | Git hunk |
+| `h` | Git hunk — the changed lines under the cursor (Navigator Mode) | *(not available: `ah` would take in context lines nobody changed)* |
+
+The tag object `t` (`dit`, `vit`) is **not available** — Zephyr has no HTML/XML
+parser, so there is nothing to resolve the tag against.
 
 ### Text Object Examples
 
@@ -178,7 +180,7 @@ Text objects define a range around or inside delimiters. Use `i` for **inner** (
 | `ci"` | Change inside double quotes |
 | `da{` | Delete around braces (including braces) |
 | `yi)` | Yank inside parentheses |
-| `vit` | Select inside HTML tag |
+| `viw` | Select the word under the cursor |
 
 ---
 
@@ -199,8 +201,26 @@ Enter visual mode with `v` (character), `V` (line), or `Ctrl+v` (block). All mot
 | `p` | Replace selection with register |
 | `J` | Join selected lines |
 | `o` | Swap cursor and anchor |
+| `gg` | Extend the selection to the start of the file |
 | `v` | Exit visual mode |
 | `Escape` | Exit visual mode |
+
+### Text Objects in Visual Mode
+
+`i` or `a` followed by a delimiter makes that text object the selection, ready
+for an operator or for a further motion. The same delimiters as above are
+accepted; `t` is not available.
+
+| Keys | Selects |
+|------|---------|
+| `viw` / `vaw` | The word under the cursor, without / with its trailing whitespace |
+| `vi"` | The text inside the surrounding quotes |
+| `vi(` / `vi{` / `vi[` | The text inside the surrounding brackets |
+| `vih` | The changed lines of the hunk under the cursor (switches to V-LINE) |
+
+The selection ends where the object ends, so `viw` followed by `d` deletes
+exactly what `diw` deletes. If the cursor is not inside the object, the
+selection is left as it was.
 
 ---
 

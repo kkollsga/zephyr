@@ -149,28 +149,33 @@ func (s *State) handleTextObjDelimiter(ev KeyInput) Action {
 	objType := s.WaitingForTextObjType
 	s.reset()
 
-	// The hunk object is inner-only: `ih` is the run of changed lines, and there
-	// is no "a hunk" reading of it that does not include context lines nobody
-	// changed.
-	if ch == 'h' && objType != 'i' {
+	if !acceptedTextObj(ch, objType) {
 		return Action{Kind: ActionNone}
 	}
-
-	// Delimiters with an executor behind them. A delimiter accepted here without
-	// one parses into a complete action that does nothing, which reads to the
-	// user as a successful edit; the tag object 't' was exactly that.
-	switch ch {
-	case 'w', 'W', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', 'b', 'B', 'h':
-		return Action{
-			Kind:        opToAction(op),
-			MotionType:  MotionCharWise,
-			Count:       count,
-			TextObj:     ch,
-			TextObjType: objType,
-		}
+	return Action{
+		Kind:        opToAction(op),
+		MotionType:  MotionCharWise,
+		Count:       count,
+		TextObj:     ch,
+		TextObjType: objType,
 	}
+}
 
-	return Action{Kind: ActionNone}
+// acceptedTextObj reports whether ch names a text object with an executor
+// behind it, for objType 'i' (inner) or 'a' (around). A delimiter accepted
+// without an executor parses into a complete action that does nothing, which
+// reads to the user as a successful edit; the tag object 't' was exactly that.
+// The hunk object is inner-only: `ih` is the run of changed lines, and there is
+// no "a hunk" reading of it that does not include context lines nobody changed.
+func acceptedTextObj(ch, objType rune) bool {
+	if ch == 'h' {
+		return objType == 'i'
+	}
+	switch ch {
+	case 'w', 'W', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', 'b', 'B':
+		return true
+	}
+	return false
 }
 
 // isOperatorChar checks if the char matches the current pending operator.

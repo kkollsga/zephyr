@@ -53,24 +53,25 @@ const (
 	ActionSubstLine       // S (delete line + insert)
 
 	// Editing
-	ActionDelete    // d{motion}, dd, x, X
-	ActionChange    // c{motion}, cc, C, s, S
-	ActionYank      // y{motion}, yy, Y
-	ActionPut       // p
-	ActionPutBefore // P
-	ActionReplace   // r{char}
-	ActionJoinLines // J
-	ActionUndo      // u
-	ActionRedo      // Ctrl+r
+	ActionDelete     // d{motion}, dd, x, X
+	ActionChange     // c{motion}, cc, C, s, S
+	ActionYank       // y{motion}, yy, Y
+	ActionPut        // p
+	ActionPutBefore  // P
+	ActionReplace    // r{char}
+	ActionJoinLines  // J
+	ActionUndo       // u
+	ActionRedo       // Ctrl+r
 	ActionRepeatLast // .
-	ActionIndent    // >{motion}, >>
-	ActionDedent    // <{motion}, <<
+	ActionIndent     // >{motion}, >>
+	ActionDedent     // <{motion}, <<
 
 	// Visual mode
-	ActionVisualStart     // v
-	ActionVisualLineStart // V
+	ActionVisualStart      // v
+	ActionVisualLineStart  // V
 	ActionVisualBlockStart // Ctrl+v
-	ActionVisualEscape    // escape from visual
+	ActionVisualEscape     // escape from visual
+	ActionSelectTextObject // viw, vi", vih — text object replaces the selection
 
 	// Command/Search
 	ActionEnterCommand    // :
@@ -94,33 +95,33 @@ const (
 	ActionEnterNormal // generic enter normal
 
 	// Navigator: Hunk navigation
-	ActionNavNextHunk      // ]c
-	ActionNavPrevHunk      // [c
-	ActionNavNextFile      // ]C — next changed file
-	ActionNavPrevFile      // [C — previous changed file
+	ActionNavNextHunk       // ]c
+	ActionNavPrevHunk       // [c
+	ActionNavNextFile       // ]C — next changed file
+	ActionNavPrevFile       // [C — previous changed file
 	ActionNavToggleOriginal // go — toggle original/modified
 
 	// Navigator: File navigation
-	ActionNavOpenParent    // - — open parent directory
-	ActionNavOpenEntry     // Enter/l in directory buffer
-	ActionNavCloseSpecial  // q in directory/status buffer
-	ActionNavOpenRoot      // <Space>e — open project root
+	ActionNavOpenParent   // - — open parent directory
+	ActionNavOpenEntry    // Enter/l in directory buffer
+	ActionNavCloseSpecial // q in directory/status buffer
+	ActionNavOpenRoot     // <Space>e — open project root
 
 	// Navigator: Status buffer
-	ActionNavOpenStatus    // <Space>g — open git status
-	ActionNavStage         // s in status buffer
-	ActionNavUnstage       // u in status buffer
-	ActionNavDiscard       // x in status buffer
-	ActionNavToggleDiff    // = in status buffer
-	ActionNavSectionNext   // n in status buffer
-	ActionNavSectionPrev   // p in status buffer
-	ActionNavRefresh       // R in status buffer
-	ActionNavCommit        // cc in status buffer — commit staged changes
+	ActionNavOpenStatus  // <Space>g — open git status
+	ActionNavStage       // s in status buffer
+	ActionNavUnstage     // u in status buffer
+	ActionNavDiscard     // x in status buffer
+	ActionNavToggleDiff  // = in status buffer
+	ActionNavSectionNext // n in status buffer
+	ActionNavSectionPrev // p in status buffer
+	ActionNavRefresh     // R in status buffer
+	ActionNavCommit      // cc in status buffer — commit staged changes
 
 	// Navigator: Import & alternate
-	ActionNavGoFile       // gf — go to file under cursor
-	ActionNavGoImports    // gi — show imports
-	ActionNavGoAlternate  // ga — alternate file (test <-> impl)
+	ActionNavGoFile      // gf — go to file under cursor
+	ActionNavGoImports   // gi — show imports
+	ActionNavGoAlternate // ga — alternate file (test <-> impl)
 
 	// Navigator: Fuzzy finding
 	ActionNavFindFiles   // <Space>f — find files
@@ -130,7 +131,7 @@ const (
 	ActionNavHelp // g? — context help
 
 	// Navigator: Directory buffer
-	ActionNavToggleHidden  // . — toggle hidden files
+	ActionNavToggleHidden   // . — toggle hidden files
 	ActionNavToggleReadMode // <Space>r — toggle markdown read/edit
 
 	// Generic keys used by special buffers

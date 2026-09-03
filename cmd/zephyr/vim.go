@@ -334,6 +334,8 @@ func (st *appState) executeVimAction(action vim.Action) {
 		ed.Selection.Start(ed.Cursor)
 	case vim.ActionVisualEscape:
 		ed.Selection.Clear()
+	case vim.ActionSelectTextObject:
+		st.vimVisualTextObject(ed, action)
 
 	// --- Command/Search ---
 	case vim.ActionEnterCommand, vim.ActionEnterSearch, vim.ActionEnterSearchBack:

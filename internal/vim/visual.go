@@ -4,6 +4,12 @@ package vim
 func (s *State) handleVisual(ev KeyInput) Action {
 	ch := ev.Char
 
+	// i/a is waiting for its delimiter (viw, va"). Ahead of the Escape branch:
+	// Escape cancels the pending key and leaves the selection up, as in vim.
+	if s.WaitingForTextObj {
+		return s.handleVisualTextObj(ev)
+	}
+
 	// Escape returns to Normal
 	if ev.Name == NameEscape || (ch == 'c' && ev.Ctrl) {
 		s.Mode = ModeNormal
@@ -40,64 +46,11 @@ func (s *State) handleVisual(ev KeyInput) Action {
 
 	count := s.Count
 
-	// Motion keys extend the selection
-	switch ch {
-	case 'h':
-		s.reset()
-		return Action{Kind: ActionMoveLeft, Count: count}
-	case 'j':
-		s.reset()
-		return Action{Kind: ActionMoveDown, Count: count}
-	case 'k':
-		s.reset()
-		return Action{Kind: ActionMoveUp, Count: count}
-	case 'l':
-		s.reset()
-		return Action{Kind: ActionMoveRight, Count: count}
-	case 'w':
-		s.reset()
-		return Action{Kind: ActionMoveWordForward, Count: count}
-	case 'b':
-		s.reset()
-		return Action{Kind: ActionMoveWordBackward, Count: count}
-	case 'e':
-		s.reset()
-		return Action{Kind: ActionMoveWordEnd, Count: count}
-	case '0':
-		s.reset()
-		return Action{Kind: ActionMoveLineStart}
-	case '$':
-		s.reset()
-		return Action{Kind: ActionMoveLineEnd}
-	case '^':
-		s.reset()
-		return Action{Kind: ActionMoveFirstNonBlank}
-	case 'G':
-		if count > 0 {
-			s.reset()
-			return Action{Kind: ActionMoveToLine, Line: count}
-		}
-		s.reset()
-		return Action{Kind: ActionMoveFileEnd}
-	case '{':
-		s.reset()
-		return Action{Kind: ActionMoveParagraphUp, Count: count}
-	case '}':
-		s.reset()
-		return Action{Kind: ActionMoveParagraphDown, Count: count}
-	case '%':
-		s.reset()
-		return Action{Kind: ActionMoveBracketMatch}
-	case 'g':
-		s.PendingBuf = "g"
-		return Action{Kind: ActionNone}
-	}
-
-	// Handle g-prefix in visual mode
+	// A pending g consumes this key. This has to precede visualMotionKey, whose
+	// `case 'g'` would otherwise re-arm the prefix on the second g of gg.
 	if len(s.PendingBuf) > 0 && s.PendingBuf[0] == 'g' {
 		s.reset()
-		switch ch {
-		case 'g':
+		if ch == 'g' {
 			if count > 0 {
 				return Action{Kind: ActionMoveToLine, Line: count}
 			}
@@ -106,101 +59,201 @@ func (s *State) handleVisual(ev KeyInput) Action {
 		return Action{Kind: ActionNone}
 	}
 
-	// Operators act on the visual selection
+	if a, ok := s.visualMotionKey(ch, count); ok {
+		return a
+	}
+	if a, ok := s.visualOperatorKey(ch); ok {
+		return a
+	}
+	if a, ok := s.visualModeKey(ch, count); ok {
+		return a
+	}
+
+	s.reset()
+	return Action{Kind: ActionNone}
+}
+
+// visualMotionKey handles the keys that move the cursor, and so extend the
+// selection, plus the prefixes (g, i, a) that wait for a second key.
+func (s *State) visualMotionKey(ch rune, count int) (Action, bool) {
+	switch ch {
+	case 'h':
+		s.reset()
+		return Action{Kind: ActionMoveLeft, Count: count}, true
+	case 'j':
+		s.reset()
+		return Action{Kind: ActionMoveDown, Count: count}, true
+	case 'k':
+		s.reset()
+		return Action{Kind: ActionMoveUp, Count: count}, true
+	case 'l':
+		s.reset()
+		return Action{Kind: ActionMoveRight, Count: count}, true
+	case 'w':
+		s.reset()
+		return Action{Kind: ActionMoveWordForward, Count: count}, true
+	case 'b':
+		s.reset()
+		return Action{Kind: ActionMoveWordBackward, Count: count}, true
+	case 'e':
+		s.reset()
+		return Action{Kind: ActionMoveWordEnd, Count: count}, true
+	case '0':
+		s.reset()
+		return Action{Kind: ActionMoveLineStart}, true
+	case '$':
+		s.reset()
+		return Action{Kind: ActionMoveLineEnd}, true
+	case '^':
+		s.reset()
+		return Action{Kind: ActionMoveFirstNonBlank}, true
+	case 'G':
+		s.reset()
+		if count > 0 {
+			return Action{Kind: ActionMoveToLine, Line: count}, true
+		}
+		return Action{Kind: ActionMoveFileEnd}, true
+	case '{':
+		s.reset()
+		return Action{Kind: ActionMoveParagraphUp, Count: count}, true
+	case '}':
+		s.reset()
+		return Action{Kind: ActionMoveParagraphDown, Count: count}, true
+	case '%':
+		s.reset()
+		return Action{Kind: ActionMoveBracketMatch}, true
+	case 'g':
+		s.PendingBuf = "g"
+		return Action{Kind: ActionNone}, true
+	case 'i', 'a':
+		s.WaitingForTextObj = true
+		s.WaitingForTextObjType = ch
+		s.PendingBuf += string(ch)
+		return Action{Kind: ActionNone}, true
+	}
+	return Action{}, false
+}
+
+// visualOperatorKey handles the operators that act on the current selection and
+// leave visual mode.
+func (s *State) visualOperatorKey(ch rune) (Action, bool) {
 	switch ch {
 	case 'd', 'x':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionDelete, MotionType: MotionCharWise, Text: "visual"}
+		return Action{Kind: ActionDelete, MotionType: MotionCharWise, Text: "visual"}, true
 	case 'c', 's':
 		s.Mode = ModeInsert
 		s.reset()
-		return Action{Kind: ActionChange, MotionType: MotionCharWise, Text: "visual"}
+		return Action{Kind: ActionChange, MotionType: MotionCharWise, Text: "visual"}, true
 	case 'y':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionYank, MotionType: MotionCharWise, Text: "visual"}
+		return Action{Kind: ActionYank, MotionType: MotionCharWise, Text: "visual"}, true
 	case 'D':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionDelete, MotionType: MotionLineWise, Text: "visual"}
+		return Action{Kind: ActionDelete, MotionType: MotionLineWise, Text: "visual"}, true
 	case 'C', 'S':
 		s.Mode = ModeInsert
 		s.reset()
-		return Action{Kind: ActionChange, MotionType: MotionLineWise, Text: "visual"}
+		return Action{Kind: ActionChange, MotionType: MotionLineWise, Text: "visual"}, true
 	case 'Y':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionYank, MotionType: MotionLineWise, Text: "visual"}
+		return Action{Kind: ActionYank, MotionType: MotionLineWise, Text: "visual"}, true
 	case 'p':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionPut, Text: "visual", Register: s.Register}
+		return Action{Kind: ActionPut, Text: "visual", Register: s.Register}, true
 	case 'J':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionJoinLines, Text: "visual"}
+		return Action{Kind: ActionJoinLines, Text: "visual"}, true
 	case '>':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionIndent, Text: "visual"}
+		return Action{Kind: ActionIndent, Text: "visual"}, true
 	case '<':
 		s.Mode = ModeNormal
 		s.reset()
-		return Action{Kind: ActionDedent, Text: "visual"}
+		return Action{Kind: ActionDedent, Text: "visual"}, true
+	}
+	return Action{}, false
+}
 
-	// Switch visual sub-mode
+// visualModeKey handles the sub-mode switches, the anchor swap and the
+// search/command-line entries.
+func (s *State) visualModeKey(ch rune, count int) (Action, bool) {
+	switch ch {
 	case 'v':
 		if s.Mode == ModeVisual {
 			s.Mode = ModeNormal
 			s.reset()
-			return Action{Kind: ActionVisualEscape}
+			return Action{Kind: ActionVisualEscape}, true
 		}
 		s.Mode = ModeVisual
-		return Action{Kind: ActionVisualStart}
+		return Action{Kind: ActionVisualStart}, true
 	case 'V':
 		if s.Mode == ModeVisualLine {
 			s.Mode = ModeNormal
 			s.reset()
-			return Action{Kind: ActionVisualEscape}
+			return Action{Kind: ActionVisualEscape}, true
 		}
 		s.Mode = ModeVisualLine
-		return Action{Kind: ActionVisualLineStart}
+		return Action{Kind: ActionVisualLineStart}, true
 
 	// o swaps anchor and cursor
 	case 'o':
 		s.reset()
-		return Action{Kind: ActionNone, Text: "swap_anchor"}
+		return Action{Kind: ActionNone, Text: "swap_anchor"}, true
 
-	// Search
 	case '/':
 		s.PrevMode = s.Mode
 		s.Mode = ModeSearch
 		s.SearchDir = 1
 		s.CommandLine = ""
 		s.CommandCursor = 0
-		return Action{Kind: ActionEnterSearch}
+		return Action{Kind: ActionEnterSearch}, true
 	case '?':
 		s.PrevMode = s.Mode
 		s.Mode = ModeSearch
 		s.SearchDir = -1
 		s.CommandLine = ""
 		s.CommandCursor = 0
-		return Action{Kind: ActionEnterSearchBack}
+		return Action{Kind: ActionEnterSearchBack}, true
 	case 'n':
 		s.reset()
-		return Action{Kind: ActionSearchNext, Count: count}
+		return Action{Kind: ActionSearchNext, Count: count}, true
 	case 'N':
 		s.reset()
-		return Action{Kind: ActionSearchPrev, Count: count}
+		return Action{Kind: ActionSearchPrev, Count: count}, true
 	case ':':
 		s.PrevMode = s.Mode
 		s.Mode = ModeCommand
 		s.CommandLine = ""
 		s.CommandCursor = 0
-		return Action{Kind: ActionEnterCommand}
+		return Action{Kind: ActionEnterCommand}, true
 	}
+	return Action{}, false
+}
 
+// handleVisualTextObj processes the delimiter after i/a in visual mode. The
+// object replaces the selection instead of being operated on, so the mode stays
+// visual and the executor gets ActionSelectTextObject.
+func (s *State) handleVisualTextObj(ev KeyInput) Action {
+	if ev.Name == NameEscape {
+		s.reset()
+		return Action{Kind: ActionNone}
+	}
+	ch := ev.Char
+	if ch == 0 {
+		return Action{Kind: ActionNone}
+	}
+	objType := s.WaitingForTextObjType
 	s.reset()
-	return Action{Kind: ActionNone}
+	if !acceptedTextObj(ch, objType) {
+		return Action{Kind: ActionNone}
+	}
+	return Action{Kind: ActionSelectTextObject, TextObj: ch, TextObjType: objType}
 }

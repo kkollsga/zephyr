@@ -181,6 +181,15 @@ All notable changes to Zephyr are documented here.
   converts the buffer between minified and pretty-printed form in place, so
   saving stores the selected form; the conversion preserves key order and is
   a single undo step.
+- Vim text objects now work in visual mode: `viw`, `va"`, `vi(`, `vih` and the
+  rest select the object so you can see it before acting on it. The selection
+  covers exactly what the operator form would take, so `viw` then `d` deletes
+  what `diw` deletes; `vih` selects the changed lines of the hunk under the
+  cursor line-wise. Previously the `i` was discarded and the delimiter ran as
+  its own command — `vip` pasted over the selection and `vix` deleted it.
+- Vim `gg` now works in visual mode. The second `g` re-armed the `g` prefix
+  instead of completing the motion, so the selection never reached the start
+  of the file.
 
 ### Cross-platform
 
