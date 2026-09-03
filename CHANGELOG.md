@@ -275,6 +275,13 @@ All notable changes to Zephyr are documented here.
   benchmark run as a TSV carrying the host, arch, OS, Go version, commit and
   load averages it was taken under. `bench/history/<version>.tsv` is the
   committed per-release record; see `bench/README.md`.
+- Added `scripts/check-bench-anchor.sh` and `make bench-anchor`: the release
+  flow now compares each release's capture against the one roughly three
+  releases back, so drift that accumulates 5% at a time without any single
+  release looking bad is visible. It returns PASS, FAIL, or VOID — VOID when a
+  control cell moved or the two captures came from different machines, which
+  means the comparison carries no information rather than that it passed.
+  `--self-test` reproduces every verdict on fixtures.
 
 ### Installation
 

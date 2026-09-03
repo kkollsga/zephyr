@@ -136,8 +136,45 @@ silently.
   `make install-test` (touched `install.sh`), `make docs-test` (touched
   `README.md` / `docs/index.html` / `docs/install.md`), the GUI harness
   (`make gui-test-build && make gui-test-launch`, `./scripts/gui-test.sh
-  capture`, `make gui-test-smoke` / `make gui-test-regression`) for a UI diff,
-  `make bench` / `make perf` for a perf diff.
+  capture`, `make gui-test-smoke` / `make gui-test-regression`) for a UI diff.
+- **`make perf` for a perf diff — and say what it is.** Every
+  `ZEPHYR_PERF_MAX_*` in `scripts/perf-test.sh` defaults to `0`, meaning "no
+  ceiling", so a bare `make perf` produces numbers and **cannot fail on a
+  regression**; only its sample minimums are enforced. Reporting its exit code
+  as a perf gate is the decorative-gate failure `R1` names. To gate on it, set
+  the relevant maximum for the run and say which value you set.
+- **Benchmark capture and the anchor check — every release, unconditionally.**
+  Not "if the diff looked perf-sensitive": drift that no single release causes
+  is exactly what a conditional cannot see (`R11`).
+  1. `make bench-capture OUT=bench/history/<the new version>.tsv` — the version
+     this release is shipping, no `v` prefix. Stage that file by path into the
+     release commit alongside `VERSION` and `CHANGELOG.md`.
+     `bench/history/<version>.tsv` is one file per released version and is
+     **never rewritten**; if the file already exists, the version decision is
+     wrong, not the file. See `bench/README.md`.
+  2. `make bench-anchor` — the new capture against the one ~3 releases back,
+     over the intersection of benchmark names, on the median, at the threshold
+     the script documents. **Exit 0 PASS, 1 FAIL, 2 VOID.**
+  - **VOID is not a pass and not a failure.** It means a control cell in
+    `internal/benchcontrol` moved beyond tolerance, or the two captures carry
+    different `host` / `arch` / `go_series` headers — the instrument moved, so
+    the comparison carries no information. Report it as VOID and name the
+    condition that differed; never round it up to green. A control that moves
+    by the *same* amount on every re-measure has had its premise expire, and
+    that is a finding about this check rather than about the machine.
+  - **A regression verdict is retried once, automatically.** The script
+    recaptures and compares again, keeping both files (the retry lands under
+    `.artifacts/bench/`, never in `bench/history/`), because a real regression
+    reproduces on the immediate recapture and machine noise does not. The
+    retry's verdict is the verdict.
+  - **On FAIL: fix the regression, or accept it explicitly** with the reason
+    written into this release's `CHANGELOG.md` entry, so the acceptance ships
+    with the release rather than living in a chat log. **Never recapture to
+    clear it** — recapturing the baseline is precisely what makes a per-release
+    gate blind; only recovering the performance clears this check.
+  - `scripts/check-bench-anchor.sh --self-test` (`make bench-anchor
+    ARGS=--self-test`) reproduces every verdict on fixtures. Run it if you have
+    any doubt the check can still fail.
 - **The GUI harness needs a logged-in macOS GUI session with Accessibility and
   Screen Recording permission.** If this session cannot run it, the step reports
   **"not run"** in the release report and the release does not claim the UI was
@@ -226,6 +263,9 @@ hold before the commit:
 7. No unpushed `release(...)` commit other than the one being made.
 8. No `release.yml` run currently in flight for this tag — `auto-release.yml`
    refuses to act while one is (`gh run list --workflow=release.yml`).
+9. `bench/history/<VERSION>.tsv` exists, is newly created by this run rather
+   than an overwrite, and is staged; `make bench-anchor` returned PASS, or a
+   FAIL/VOID that step 5 explicitly recorded with its reason.
 
 A failed item is fixed, not waived. **Never relax a check to get green** — that
 is `R10`'s decorative-gate failure.

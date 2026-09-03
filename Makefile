@@ -1,4 +1,4 @@
-.PHONY: build build-windows app run test bench bench-capture fuzz perf clean vet fmt lint all baseline install-test docs-test gui-test-build gui-test-launch gui-test-stop gui-test-permissions gui-test-smoke gui-test-regression gate check-dev-docs check-buffer-mutations
+.PHONY: build build-windows app run test bench bench-capture bench-anchor fuzz perf clean vet fmt lint all baseline install-test docs-test gui-test-build gui-test-launch gui-test-stop gui-test-permissions gui-test-smoke gui-test-regression gate check-dev-docs check-buffer-mutations
 
 # Bounds for check-dev-docs. DEV_DOCS_MAX_MB caps the gitignored working
 # folder; MIN_FREE_MB is a floor on free space of the volume the repo sits on,
@@ -62,6 +62,14 @@ bench:
 ## bench/history/<version>.tsv with this — see bench/README.md.
 bench-capture:
 	./scripts/bench-capture.sh $(OUT)
+
+## Cumulative drift check, run by the release flow after bench-capture has
+## written bench/history/<version>.tsv. Exit 0 PASS, 1 FAIL, 2 VOID — VOID
+## means a control moved or the two captures came from different machines, so
+## the comparison carries no information. It is NOT part of `make gate`.
+## `--self-test` is how each verdict was observed on a fixture (R1).
+bench-anchor:
+	./scripts/check-bench-anchor.sh $(ARGS)
 
 fuzz:
 	go test ./internal/buffer -run '^$$' -fuzz=FuzzPieceTableEditModel -fuzztime=30s

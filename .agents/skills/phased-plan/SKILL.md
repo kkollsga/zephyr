@@ -306,12 +306,15 @@ event-to-submit p95, RSS, optional soak) against `testdata/gui/mouse_fixture.go`
   regression**; it produces numbers. Treating its exit code as a perf gate is
   exactly the decorative-gate failure `R1` names. To make it a gate, set the
   relevant `ZEPHYR_PERF_MAX_*` for the run and say which value you set.
-- **Control cells exist; the anchor comparison does not yet.**
+- **The cross-release comparison is the release flow's, not a plan's.**
   `internal/benchcontrol` carries two benchmarks that measure no Zephyr code, so
   a capture can tell load moving every cell from a real regression moving one
-  (`R11`). But nothing compares this release's capture against three releases
-  back, so slow cumulative drift is still invisible here. Do not imply
-  otherwise in a report.
+  (`R11`), and `make bench-anchor` compares a release's capture against one ~3
+  releases back. Both run at release time over `bench/history/`, not here: a
+  branch has no release history, so `make bench-anchor` on a branch reports
+  "nothing to compare" and that is not evidence of anything. What a plan can do
+  is `make bench-capture` before and after its own work and compare the two
+  files by hand.
 - Outputs land under `.artifacts/perf/latest` and `.artifacts/baseline/latest`
   (`ZEPHYR_PERF_DIR` / `ZEPHYR_BASELINE_DIR` override). `.artifacts/` is
   gitignored and has no purge tier of its own; a number worth keeping is copied

@@ -47,6 +47,7 @@ make test     # go test ./... -count=1
 make build    # the binary;  make app  bundles + ad-hoc-signs Zephyr.app
 make bench    # Go benchmarks: buffer, fuzzy, git, highlight, navigator, benchcontrol
 make bench-capture  # the same run recorded as a TSV with its machine conditions
+make bench-anchor   # release-time cumulative drift check (0 PASS, 1 FAIL, 2 VOID)
 make fuzz     # 30s fuzz of the piece table, editor, and both diff paths
 ```
 
@@ -67,13 +68,18 @@ and say so when they cannot run.**
   **It is deliberately not in `make gate`** — a headless or unattended session
   cannot run it. If it cannot run, say so; it is not a pass.
 - **Perf-sensitive change** (buffer, highlighter, layout, frame path) → `make
-  perf` (`scripts/perf-test.sh`, gates configurable through its `ZEPHYR_PERF_*`
-  environment variables) and `make bench`. **A number is meaningless without
-  the conditions it was taken under** (`R11`): record the machine state with any
-  number you compare across sessions, and carry an unchanged-path control cell
-  so load moving every cell is distinguishable from a real regression. Both
-  scripts write under `.artifacts/`, which nothing purges — see
-  `make check-dev-docs`.
+  bench` and `make perf`. **`make perf` reports; it is not a gate.** Every
+  `ZEPHYR_PERF_MAX_*` in `scripts/perf-test.sh` defaults to `0`, which means
+  "no ceiling", so a bare `make perf` **cannot fail on a regression** — only its
+  sample *minimums* are enforced. To gate on it, set the maximum you care about
+  for that run and say which value you set; otherwise read it as numbers and
+  call it numbers. **A number is meaningless without the conditions it was taken
+  under** (`R11`): `make bench-capture` records them, and the two control cells
+  in `internal/benchcontrol` measure no Zephyr code, so load moving every cell
+  stays distinguishable from a real regression moving one. The only
+  cross-release perf gate is `make bench-anchor` (`bench/README.md`), run by the
+  release flow — never by `make gate`. `perf-test.sh` and `baseline.sh` write
+  under `.artifacts/`, which nothing purges — see `make check-dev-docs`.
 - **Packaging or install change** → `make install-test`; **docs change** →
   `make docs-test`.
 - **Before a long-lived branch's first push** → `make baseline`
