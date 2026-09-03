@@ -285,6 +285,14 @@ All notable changes to Zephyr are documented here.
 - CI now cancels a pull request's in-flight run when a newer push supersedes
   it, instead of running three OS matrices per checkpoint push to completion.
   Runs on `main` are never cancelled and never queue behind each other.
+- Added a nightly workflow: five minutes of fuzzing per target with a cached
+  corpus, ten shuffled `-race` repetitions of the buffer, editor, git and
+  navigator packages on Linux and macOS, and a benchmark capture uploaded as a
+  trend artifact (never a gate — hosted runners are not comparable with the
+  release machine). A crasher is uploaded and printed, never pushed back.
+  **Validated only by a post-merge `workflow_dispatch` run**: GitHub fires
+  `schedule` and offers `workflow_dispatch` only for workflows already on the
+  default branch, so nothing about this file can run before it merges.
 
 ### Installation
 

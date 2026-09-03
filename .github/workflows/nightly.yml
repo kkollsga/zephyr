@@ -1,0 +1,162 @@
+# Nightly — the long checks that do not fit a per-push CI run: 5-minute fuzz
+# per target, repeated shuffled race runs, and a benchmark trend capture.
+#
+# NOT VALIDATED ON THE BRANCH IT WAS WRITTEN ON. GitHub only fires `schedule`
+# from the default branch, and `workflow_dispatch` only offers a workflow that
+# already exists there, so nothing about this file can run until it is merged.
+# The first real evidence it works is a post-merge `workflow_dispatch` run —
+# until that run is green, treat this workflow as unproven.
+#
+# Failure surfaces as a red run plus artifacts. Nothing here pushes to the
+# repository or opens an issue: a crasher is uploaded for a human to commit
+# into the package's own internal/<pkg>/testdata/fuzz/ deliberately.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+# Never cancel a nightly in flight: a 5-minute fuzz leg that gets cancelled
+# reports nothing, and there is no newer push to supersede it.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: FuzzPieceTableEditModel
+            pkg: ./internal/buffer
+          - target: FuzzParseUnifiedDiff
+            pkg: ./internal/git
+          - target: FuzzLineDiff
+            pkg: ./internal/git
+          - target: FuzzEditorCommandSequence
+            pkg: ./internal/editor
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev \
+            libvulkan-dev
+
+      - name: Locate the fuzz corpus cache
+        id: cache-dir
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+
+      # The generated corpus is what makes consecutive nights cumulative
+      # rather than each one starting from the seed corpus again.
+      - name: Cache the generated fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.cache-dir.outputs.dir }}
+          key: fuzz-${{ runner.os }}-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-${{ runner.os }}-${{ matrix.target }}-
+
+      - name: Fuzz
+        run: |
+          go test ${{ matrix.pkg }} -run '^$' -fuzz=${{ matrix.target }} \
+            -fuzztime=5m -fuzzminimizetime=10s
+
+      # A crasher lands in the *package's* testdata/fuzz/, e.g.
+      # internal/git/testdata/fuzz/FuzzLineDiff/<hash> — not in the repo-root
+      # testdata/. Print it as well as uploading it, so a failed run carries
+      # the reproducer in its log even when the artifact step finds nothing
+      # (the leg can also fail without producing a seed at all).
+      - name: Show any new seed corpus
+        if: failure()
+        run: |
+          # A crasher is an untracked file; the checked-in seeds are tracked.
+          git status --porcelain --untracked-files=all -- '*/testdata/fuzz/*' || true
+          git ls-files --others --exclude-standard -- '*/testdata/fuzz/*' |
+            while read -r f; do echo "--- $f"; cat "$f"; done
+
+      # Uploaded, never committed from here — CI does not push to this
+      # repository. Committing a crasher as a regression seed is a human call.
+      - name: Upload the crasher
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crasher-${{ matrix.target }}
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: warn
+
+  race-shuffle:
+    name: Race + shuffle (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux
+          - os: macos-latest
+            name: macOS
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev \
+            libvulkan-dev
+
+      # -shuffle=on prints the seed it chose; a failing run is reproduced with
+      # -shuffle=<that seed>, so read the seed out of the log before rerunning.
+      - name: Ten shuffled race repetitions
+        run: |
+          go test -race -count=10 -shuffle=on \
+            ./internal/buffer/ ./internal/editor/ ./internal/git/ ./internal/navigator/
+
+  bench-trend:
+    name: Benchmark trend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libxcursor-dev \
+            libvulkan-dev
+
+      # Trend only — this job never fails on a number. Hosted runners are
+      # shared hardware and their captures are not comparable with the
+      # release machine's, so the gate is `make bench-anchor` at release time
+      # against bench/history/, not this artifact.
+      - name: Capture
+        run: |
+          mkdir -p bench-trend
+          BENCH_COUNT=5 ./scripts/bench-capture.sh \
+            "bench-trend/$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}.tsv"
+
+      - name: Upload the capture
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-trend
+          path: bench-trend/
