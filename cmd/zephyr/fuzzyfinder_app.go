@@ -132,8 +132,18 @@ func (st *appState) fuzzyFinderInsert(text string) {
 	st.invalidate()
 }
 
-// openFuzzySelection opens the highlighted path as a tab and closes the finder.
+// openFuzzySelection accepts the highlighted row and closes the finder: the
+// picker's own callback when it has one, otherwise the file finder's default of
+// opening the path as a tab.
 func (st *appState) openFuzzySelection() {
+	if accept := st.fuzzyFinder.OnAccept; accept != nil {
+		item := st.fuzzyFinder.SelectedItem()
+		st.fuzzyFinder.Close()
+		if item != "" {
+			accept(item)
+		}
+		return
+	}
 	path := st.fuzzyFinder.SelectedPath()
 	st.fuzzyFinder.Close()
 	if path == "" {
@@ -204,7 +214,7 @@ func (st *appState) drawFuzzyFinder(gtx layout.Context) {
 	paint.PaintOp{}.Add(gtx.Ops)
 	bg.Pop()
 
-	prompt := "> " + ff.Query
+	prompt := ff.Prompt()
 	sr.RenderGlyphs(gtx.Ops, gtx, prompt, sr.CharWidth, 2, st.theme.Foreground)
 
 	for i := 0; i < lay.rows; i++ {

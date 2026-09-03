@@ -30,6 +30,15 @@ type FuzzyFinder struct {
 	Files    []string
 	RootDir  string
 
+	// Title labels the overlay when it is picking something other than a file
+	// under RootDir. Empty for the file finder.
+	Title string
+
+	// OnAccept takes the selected row when the user accepts it. Nil — the file
+	// finder's case — leaves the host to open SelectedPath instead. Open and
+	// OpenChanged clear it, so a picker's callback cannot outlive its list.
+	OnAccept func(item string)
+
 	// Scan lists the files under root, relative to it and in slash form. It
 	// runs on its own goroutine and must return promptly once stop is closed.
 	// Replaceable so a test can drive the handoff without a real tree.
@@ -40,8 +49,10 @@ type FuzzyFinder struct {
 	// be safe to call from another goroutine.
 	OnResults func()
 
-	changedOnly bool
-	scanning    bool
+	// injected is set while Files came from the caller rather than from a scan
+	// of RootDir, so the next scan-backed open knows not to reuse the list.
+	injected bool
+	scanning bool
 	// gen rises on every Open and Close. A scan carries the generation it
 	// started under, so the result of a superseded or closed scan is dropped
 	// instead of replacing a newer list.
@@ -74,13 +85,15 @@ func (ff *FuzzyFinder) Open(rootDir string) {
 	ff.Visible = true
 	ff.Query = ""
 	ff.Selected = 0
-	if ff.RootDir != rootDir || ff.changedOnly {
-		// Another root's files, or the changed-file list, describe something
+	if ff.RootDir != rootDir || ff.injected {
+		// Another root's files, or a caller-supplied list, describe something
 		// else; showing them under this root would be a lie, not a stale cache.
 		ff.Files = nil
 	}
 	ff.RootDir = rootDir
-	ff.changedOnly = false
+	ff.injected = false
+	ff.Title = ""
+	ff.OnAccept = nil
 	ff.rank()
 	ff.startScan(rootDir)
 }
@@ -96,7 +109,26 @@ func (ff *FuzzyFinder) OpenChanged(rootDir string, changedFiles []string) {
 	// keeps the invariant one line rather than one per producer, since
 	// SelectedPath converts back on the way out.
 	ff.Files = ToFinderPaths(changedFiles)
-	ff.changedOnly = true
+	ff.injected = true
+	ff.Title = ""
+	ff.OnAccept = nil
+	ff.rank()
+}
+
+// OpenItems shows an arbitrary list under title, with onAccept called with the
+// row the user accepts. Nothing is scanned: the caller owns the list, and the
+// rows are matched and displayed exactly as given.
+func (ff *FuzzyFinder) OpenItems(title string, items []string, onAccept func(item string)) {
+	ff.cancelScan()
+	ff.Visible = true
+	ff.Query = ""
+	ff.Selected = 0
+	// No root: these rows are not paths, so SelectedPath must not resolve one.
+	ff.RootDir = ""
+	ff.Files = items
+	ff.injected = true
+	ff.Title = title
+	ff.OnAccept = onAccept
 	ff.rank()
 }
 
@@ -237,12 +269,30 @@ func (ff *FuzzyFinder) MoveDown() {
 	}
 }
 
-// SelectedPath returns the full path of the selected file, or empty string.
-func (ff *FuzzyFinder) SelectedPath() string {
+// SelectedItem returns the selected row as it is displayed, or empty string.
+func (ff *FuzzyFinder) SelectedItem() string {
 	if ff.Selected < 0 || ff.Selected >= len(ff.Results) {
 		return ""
 	}
-	return filepath.Join(ff.RootDir, filepath.FromSlash(ff.Results[ff.Selected].Text))
+	return ff.Results[ff.Selected].Text
+}
+
+// SelectedPath returns the full path of the selected file, or empty string.
+func (ff *FuzzyFinder) SelectedPath() string {
+	item := ff.SelectedItem()
+	if item == "" {
+		return ""
+	}
+	return filepath.Join(ff.RootDir, filepath.FromSlash(item))
+}
+
+// Prompt is the overlay's first line: the query, prefixed with the title when
+// the picker is showing something other than files.
+func (ff *FuzzyFinder) Prompt() string {
+	if ff.Title == "" {
+		return "> " + ff.Query
+	}
+	return ff.Title + " > " + ff.Query
 }
 
 // toFinderPath rewrites a relative path built with sep into slash form. The

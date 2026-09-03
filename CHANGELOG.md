@@ -75,6 +75,15 @@ All notable changes to Zephyr are documented here.
   and scans the project in the background, so a large tree no longer freezes
   the window, and every open rescans, so a deleted or renamed file is listed
   correctly.
+- `g?` now works: it lists every navigator key binding in the finder overlay,
+  filterable by typing, with `Enter` or `Escape` closing it. The list is
+  generated from a table in the code that a test checks in both directions
+  against the key handler, so a binding cannot change without the help
+  changing with it.
+- Documentation: `<Space>r` (toggle the markdown read view) has always worked
+  but was not listed anywhere; `Ctrl-o` and `Ctrl-i` were listed as jumplist
+  keys but no jumplist exists, and they are now recorded as unavailable
+  alongside `gi`.
 - `<Space>f` inside a git repository now lists the files git lists, so
   `.gitignore` is honoured and a build directory no longer fills the results.
   Tracked and untracked-but-not-ignored files are offered; a file deleted from

@@ -246,12 +246,15 @@ func TestNavigatorPureHelpersAndMarkdownScroll(t *testing.T) {
 	// was still looking at their own buffer.
 	unimplemented := map[string]vim.ActionKind{
 		"gi": vim.ActionNavGoImports,
-		"g?": vim.ActionNavHelp,
 	}
 	for name, kind := range unimplemented {
 		if st.executeNavAction(vim.Action{Kind: kind}) {
 			t.Errorf("%s reported handled; it has no implementation", name)
 		}
+	}
+	// g? is implemented now; navhelp_test.go covers what it shows.
+	if !st.executeNavAction(vim.Action{Kind: vim.ActionNavHelp}) {
+		t.Error("g? reported unhandled")
 	}
 }
 

@@ -199,6 +199,16 @@ finder abandons the scan.
 
 ---
 
+## Key Help
+
+`g?` opens the same picker over the navigator's key bindings instead of files:
+one row per binding, the keys in the left column and what they do on the right.
+Type to filter — the query matches the keys and the description alike, so
+`hunk` narrows to the hunk keys. `Enter` and `Escape` both just close it; a row
+is a key sequence, not something to open, and accepting one does not run it.
+
+---
+
 ## Header & Root Folder
 
 When Navigator Mode is active, the tab bar is replaced by a header showing the project root folder name centered:
@@ -252,6 +262,7 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 | `<Space>e` | Open project root directory |
 | `<Space>f` | Find files under the project root |
 | `<Space>b` | Find changed files only |
+| `<Space>r` | Toggle the markdown read view |
 
 ### Hunk Navigation (alternate keys)
 | Key | Action |
@@ -272,6 +283,7 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 | `ga` | Alternate file (test <-> implementation) |
 | `gf` | Go to file under cursor |
 | `go` | Toggle the HEAD view (read-only committed content) |
+| `g?` | Show the key list (see Key Help) |
 
 ### File Tree
 | Key | Action |
@@ -279,14 +291,19 @@ Toggling Navigator Mode off restores the tab bar with all tabs intact.
 | `-` | Open parent directory |
 | `q` | Close special buffer |
 
-### Universal
-| Key | Action |
-|-----|--------|
-| `Ctrl-o` | Jump back (vim jumplist) |
-| `Ctrl-i` | Jump forward |
-
 ### Not available
 
-`gi` (show imports) and `g?` (context help) are not implemented. The keys do
-nothing — they are listed here only so a reader who expects them from the
-design notes knows they are absent rather than broken.
+`gi` (show imports), `Ctrl-o` (jump back) and `Ctrl-i` (jump forward) are not
+implemented. The keys do nothing — they are listed here only so a reader who
+expects them from the design notes knows they are absent rather than broken.
+There is no jumplist behind `Ctrl-o`/`Ctrl-i`; this reference claimed one until
+the key help was checked against the code.
+
+The tables above are written by hand, but `navBindings` in
+`cmd/zephyr/navhelp.go` — the table `g?` shows — is the source of truth: a test
+feeds every row of it through the vim state machine and sweeps the machine for
+sequences no row covers, so a binding cannot change without that table changing
+with it. This document follows the table. Keys that only mean something inside
+a status or directory buffer are listed in their own sections above and are not
+part of it — they are reinterpretations of ordinary vim actions in those
+buffers, not bindings of their own.

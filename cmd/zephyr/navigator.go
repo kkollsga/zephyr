@@ -1025,6 +1025,9 @@ func (st *appState) executeNavAction(action vim.Action) bool {
 	case vim.ActionNavFindChanged:
 		st.openFuzzyFinder(true)
 		return true
+	case vim.ActionNavHelp:
+		st.openNavHelp()
+		return true
 	}
 
 	ed := st.activeEd()
