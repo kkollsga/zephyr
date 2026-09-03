@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel a PR's in-flight run when a newer push to the same PR supersedes it —
+# every push costs three OS matrices plus the quality job, and a superseded run
+# tells nobody anything. Never on `main`: each main run gets its own group
+# (`github.run_id` is unique), so a main run is never cancelled by a later push
+# and main runs are never serialised behind each other either.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     strategy:

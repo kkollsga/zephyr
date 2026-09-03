@@ -282,6 +282,9 @@ All notable changes to Zephyr are documented here.
   control cell moved or the two captures came from different machines, which
   means the comparison carries no information rather than that it passed.
   `--self-test` reproduces every verdict on fixtures.
+- CI now cancels a pull request's in-flight run when a newer push supersedes
+  it, instead of running three OS matrices per checkpoint push to completion.
+  Runs on `main` are never cancelled and never queue behind each other.
 
 ### Installation
 
