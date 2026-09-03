@@ -178,11 +178,18 @@ Clicking a row opens it; clicking outside closes the finder. Only one overlay
 is up at a time — the finder does not open over the save menu, the language
 selector, a focused find bar or the root-folder dropdown.
 
-The file list skips hidden files and directories, `node_modules`, `vendor` and
-`__pycache__` inside the project; the rules never apply to the project root
+Inside a git repository the list is git's own — every tracked file plus the
+untracked ones your ignore rules keep — so `.gitignore`, `.git/info/exclude`
+and the global excludes all apply, and a build directory stays out of the
+results. A file still in the index but deleted from your working tree is not
+offered, since there is nothing to open. `<Space>b` remains the narrower list:
+only the files git reports as changed.
+
+Outside a repository — or if git cannot answer — the list comes from a plain
+walk that skips hidden files and directories, `node_modules`, `vendor` and
+`__pycache__` inside the project. Those rules never apply to the project root
 itself, so a project in `~/.dotfiles` or in a directory called `vendor` lists
-normally. It does not read `.gitignore`; use `<Space>b` when you want the list
-git itself considers interesting.
+normally.
 
 Every `<Space>f` rescans the root, so a file created, renamed or deleted since
 the last one is listed correctly. The scan runs in the background: the overlay

@@ -59,9 +59,11 @@ type scanResult struct {
 	files []string
 }
 
-// NewFuzzyFinder creates a new fuzzy file finder.
+// NewFuzzyFinder creates a new fuzzy file finder with the plain directory
+// walk as its scanner. A host that can do better — cmd/zephyr replaces it with
+// a git-aware scanner — overwrites Scan after construction.
 func NewFuzzyFinder() *FuzzyFinder {
-	return &FuzzyFinder{Scan: scanFiles}
+	return &FuzzyFinder{Scan: WalkFiles}
 }
 
 // Open shows the fuzzy finder over rootDir and starts a fresh scan of it. It
@@ -93,7 +95,7 @@ func (ff *FuzzyFinder) OpenChanged(rootDir string, changedFiles []string) {
 	// git prints its status paths with forward slashes already; normalising
 	// keeps the invariant one line rather than one per producer, since
 	// SelectedPath converts back on the way out.
-	ff.Files = toFinderPaths(changedFiles)
+	ff.Files = ToFinderPaths(changedFiles)
 	ff.changedOnly = true
 	ff.rank()
 }
@@ -125,7 +127,7 @@ func (ff *FuzzyFinder) startScan(root string) {
 
 	scan, notify := ff.Scan, ff.OnResults
 	if scan == nil {
-		scan = scanFiles
+		scan = WalkFiles
 	}
 	go func() {
 		files := scan(root, stop)
@@ -259,7 +261,9 @@ func toFinderPath(p string, sep rune) string {
 	return strings.ReplaceAll(p, string(sep), "/")
 }
 
-func toFinderPaths(paths []string) []string {
+// ToFinderPaths normalises a batch of relative paths built with the host
+// separator into the slash form the finder displays and matches.
+func ToFinderPaths(paths []string) []string {
 	if filepath.Separator == '/' {
 		return paths
 	}
@@ -273,9 +277,10 @@ func toFinderPaths(paths []string) []string {
 // errScanStopped ends the walk early; filepath.Walk has no other way out.
 var errScanStopped = errors.New("scan stopped")
 
-// scanFiles walks root off the UI goroutine, listing every file the finder
-// offers.
-func scanFiles(root string, stop <-chan struct{}) []string {
+// WalkFiles walks root off the UI goroutine, listing every file the finder
+// offers, relative to root and in slash form. It is the default Scan and the
+// fallback for a scanner that cannot list a particular root.
+func WalkFiles(root string, stop <-chan struct{}) []string {
 	var files []string
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

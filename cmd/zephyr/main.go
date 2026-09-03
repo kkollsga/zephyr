@@ -408,6 +408,7 @@ func run() {
 	// The finder's directory scan runs off the UI goroutine and repaints when
 	// it lands. The window is captured rather than reached through st, which
 	// the scan goroutine must not touch.
+	st.fuzzyFinder.Scan = gitFinderScan
 	st.fuzzyFinder.OnResults = w.Invalidate
 
 	// Start file watcher

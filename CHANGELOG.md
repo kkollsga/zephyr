@@ -75,6 +75,11 @@ All notable changes to Zephyr are documented here.
   and scans the project in the background, so a large tree no longer freezes
   the window, and every open rescans, so a deleted or renamed file is listed
   correctly.
+- `<Space>f` inside a git repository now lists the files git lists, so
+  `.gitignore` is honoured and a build directory no longer fills the results.
+  Tracked and untracked-but-not-ignored files are offered; a file deleted from
+  the working tree but still in the index is not. Outside a repository the
+  previous directory walk still applies.
 - `go` now shows the file's committed content in place: same tab, same cursor
   line, ` (HEAD)` on the tab title and on the navigator breadcrumb, and the
   gutter's diff markers and the header's diff stats hidden because they
