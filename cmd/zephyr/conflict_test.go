@@ -13,8 +13,10 @@ import (
 
 	"github.com/kristianweb/zephyr/internal/editor"
 	"github.com/kristianweb/zephyr/internal/fileio"
+	"github.com/kristianweb/zephyr/internal/git"
 	"github.com/kristianweb/zephyr/internal/render"
 	"github.com/kristianweb/zephyr/internal/ui"
+	"github.com/kristianweb/zephyr/internal/vim"
 )
 
 // conflictTestApp opens path in a one-tab appState wired the way run() does.
@@ -34,6 +36,10 @@ func conflictTestApp(t *testing.T, path string) (*appState, *editor.Editor, *tab
 		tabBar: tb, tabStates: map[*editor.Editor]*tabState{ed: ts},
 		tabRend:    &render.TextRenderer{CharWidth: 8, LineHeightPx: 18},
 		barTabIdxs: []int{0}, lastMaxX: 900, tabBarHeight: 28,
+		// The key routes ahead of the save menu consult these, and only a
+		// visible save menu short-circuits past them.
+		langSel: ui.NewLanguageSelector(),
+		findBar: ui.NewFindReplaceBar(),
 	}
 	return st, ed, ts
 }
@@ -394,35 +400,6 @@ func TestClobberCancelLeavesDiskAndBufferUntouched(t *testing.T) {
 	}
 }
 
-// The prompt's three choices must be reachable by clicking the row the layout
-// actually draws.
-func TestClobberClickHitsOverwriteReloadAndCancel(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		third  int
-		wantOn string
-	}{
-		{"overwrite", 0, "mine original\n"},
-		{"reload", 1, "theirs\n"},
-		{"cancel", 2, "theirs\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			st, _, _, path := conflictedTab(t, "mine ", "theirs\n")
-			st.saveTab(st.tabBar.Tabs[0])
-			dx, dy, dw, _, itemH := st.saveMenuRect()
-			x := dx + dw/3*tc.third + dw/6
-			st.handleSaveMenuClick(x, dy+itemH+itemH/2)
-			got, _ := os.ReadFile(path)
-			if string(got) != tc.wantOn {
-				t.Fatalf("disk after %s = %q, want %q", tc.name, got, tc.wantOn)
-			}
-			if st.saveMenu.confirmClobber {
-				t.Fatalf("%s left the prompt open", tc.name)
-			}
-		})
-	}
-}
-
 // Escape and Return both cancel: neither may be the key that loses a version.
 func TestClobberKeysCancelOnly(t *testing.T) {
 	for _, name := range []key.Name{key.NameEscape, key.NameReturn} {
@@ -568,5 +545,293 @@ func TestUnclaimedTabTransferRemovesItsContentFile(t *testing.T) {
 	}
 	if len(after) != len(before) {
 		t.Fatalf("the unclaimed offer left %d transfer file(s) behind: %v", len(after)-len(before), after)
+	}
+}
+
+// --- Compare with disk ---
+
+// pressCompareExit sends a compare exit the way the app receives it: Escape is
+// a named key event, c is a character and arrives as an edit event.
+func (st *appState) pressCompareExit(name key.Name) {
+	if name == "C" {
+		st.handleEditEvent("c")
+		return
+	}
+	st.dispatchKey(key.Event{Name: name})
+}
+
+// compareRepoTab is conflictedTab in a git repository, so the git cache that
+// refreshes a tab's diff is real.
+func compareRepoTab(t *testing.T, mine, theirs string) (*appState, *editor.Editor, *tabState, string) {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := git.RunSilent(dir, "init"); err != nil {
+		t.Skipf("git unavailable: %v", err)
+	}
+	git.RunSilent(dir, "config", "user.email", "test@test.com")
+	git.RunSilent(dir, "config", "user.name", "Test")
+	path := filepath.Join(dir, "contested.go")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.RunSilent(dir, "add", "contested.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.RunSilent(dir, "commit", "-m", "initial"); err != nil {
+		t.Fatal(err)
+	}
+	st, ed, ts := conflictTestApp(t, path)
+	repo, err := git.Discover(dir)
+	if err != nil || repo == nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	st.gitRepo, st.gitCache = repo, git.NewCache(repo)
+	ed.Cursor.SetPosition(ed.Buffer, 0, 0)
+	ed.InsertText(mine)
+	if err := os.WriteFile(path, []byte(theirs), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st.handleExternalFileChange(path)
+	if ts.conflict != conflictModified {
+		t.Fatalf("conflict state = %v, want conflictModified", ts.conflict)
+	}
+	return st, ed, ts, path
+}
+
+// Compare is a read of both versions: it may not write either one, and it may
+// not resolve the conflict it was reached from.
+func TestCompareTouchesNeitherDiskNorBuffer(t *testing.T) {
+	st, ed, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	mine := ed.Buffer.Text()
+	st.saveTab(st.tabBar.Tabs[0])
+
+	st.handleEditEvent("c")
+
+	if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+		t.Fatalf("Compare changed the file: %q", got)
+	}
+	if ed.Buffer.Text() != mine || !ed.Modified {
+		t.Fatalf("Compare changed the buffer: %q modified=%v", ed.Buffer.Text(), ed.Modified)
+	}
+	if ts.conflict != conflictModified {
+		t.Fatalf("Compare resolved the conflict: %v", ts.conflict)
+	}
+	if ts.compareDiff == nil {
+		t.Fatal("Compare left no diff to show")
+	}
+	if st.saveMenu.visible || st.saveMenu.confirmClobber {
+		t.Fatalf("Compare left the prompt up: %+v", st.saveMenu)
+	}
+	// old = disk, new = buffer: the buffer's own line is an addition.
+	if ts.activeDiff() != ts.compareDiff {
+		t.Fatal("the compare diff is not what the gutter would read")
+	}
+	if added, _ := ts.compareDiff.Stats(); added == 0 {
+		t.Fatal("the compare diff reports nothing added, but the buffer has a line disk lacks")
+	}
+}
+
+// Leaving compare puts the same prompt back, still carrying the flags of the
+// flow that raised it, so a refusal inside a quit is still inside that quit.
+func TestCompareReturnsToPromptWithFlagsIntact(t *testing.T) {
+	for _, back := range []key.Name{"C", key.NameEscape} {
+		st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+		// Vim mode, because that is where c is the exit and not a character.
+		st.vimEnabled = true
+		st.vimState = vim.NewState()
+		st.startQuitFlow()
+		// Click Save on the quit prompt; the conflict turns it into the
+		// clobber prompt, still carrying the quit's flags.
+		dx, dy, dw, dropdownH, itemH := st.saveMenuRect()
+		st.handleSaveMenuClick(dx+dw/6, dy+dropdownH-itemH/2)
+		if !st.saveMenu.confirmClobber || !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
+			t.Fatalf("quit prompt = %+v", st.saveMenu)
+		}
+		st.handleEditEvent("c")
+		st.pressCompareExit(back)
+
+		if !st.saveMenu.visible || !st.saveMenu.confirmClobber {
+			t.Fatalf("%v did not put the prompt back: %+v", back, st.saveMenu)
+		}
+		if !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
+			t.Fatalf("%v lost the prompt's flags: %+v", back, st.saveMenu)
+		}
+		if ts.compareDiff != nil {
+			t.Fatalf("%v left the compare overlay up", back)
+		}
+	}
+}
+
+func TestCompareThenOverwriteWritesTheBuffer(t *testing.T) {
+	st, ed, _, path := conflictedTab(t, "mine ", "theirs\n")
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	st.dispatchKey(key.Event{Name: key.NameEscape})
+
+	st.clobberOverwrite()
+
+	got, _ := os.ReadFile(path)
+	if string(got) != ed.Buffer.Text() {
+		t.Fatalf("disk = %q, buffer = %q", got, ed.Buffer.Text())
+	}
+}
+
+func TestCompareThenReloadTakesDisk(t *testing.T) {
+	st, ed, _, path := conflictedTab(t, "mine ", "theirs\n")
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	st.dispatchKey(key.Event{Name: key.NameEscape})
+
+	st.clobberReload()
+
+	if ed.Buffer.Text() != "theirs\n" {
+		t.Fatalf("buffer after Reload = %q", ed.Buffer.Text())
+	}
+	if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+		t.Fatalf("Reload wrote to disk: %q", got)
+	}
+}
+
+// Pre-mortem: a save asked for while comparing must hit the same guard, not
+// slip past it because the prompt is currently stood down.
+func TestSaveWhileComparingRaisesThePromptAndWritesNothing(t *testing.T) {
+	st, _, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+
+	st.dispatchKey(key.Event{Name: "S", Modifiers: key.ModShortcut})
+
+	if got, _ := os.ReadFile(path); string(got) != "theirs\n" {
+		t.Fatalf("a save while comparing wrote to disk: %q", got)
+	}
+	if !st.saveMenu.visible || !st.saveMenu.confirmClobber {
+		t.Fatalf("save while comparing did not raise the prompt: %+v", st.saveMenu)
+	}
+	if ts.compareDiff != nil {
+		t.Fatal("the prompt came back with the compare overlay still up")
+	}
+}
+
+// The git cache refresh overwrites gitDiff. It must not take the compare
+// overlay down with it.
+func TestGitCacheRefreshDuringCompareLeavesCompareDiffIntact(t *testing.T) {
+	st, ed, ts, _ := compareRepoTab(t, "mine ", "theirs\n")
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	before := ts.compareDiff
+	if before == nil {
+		t.Fatal("Compare left no diff to show")
+	}
+
+	st.refreshGitDiffForEditor(ed)
+
+	if ts.compareDiff != before {
+		t.Fatal("the git refresh replaced the compare diff")
+	}
+	if ts.activeDiff() != before {
+		t.Fatal("the git refresh took over what the gutter reads")
+	}
+}
+
+// The prompt's four choices must be reachable by clicking the row the layout
+// actually draws.
+func TestClobberClickHitsAllFourCells(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		quarter     int
+		wantOn      string
+		wantCompare bool
+	}{
+		{"overwrite", 0, "mine original\n", false},
+		{"reload", 1, "theirs\n", false},
+		{"compare", 2, "theirs\n", true},
+		{"cancel", 3, "theirs\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, _, ts, path := conflictedTab(t, "mine ", "theirs\n")
+			st.saveTab(st.tabBar.Tabs[0])
+			dx, dy, dw, _, itemH := st.saveMenuRect()
+			x := dx + dw/4*tc.quarter + dw/8
+			st.handleSaveMenuClick(x, dy+itemH+itemH/2)
+			got, _ := os.ReadFile(path)
+			if string(got) != tc.wantOn {
+				t.Fatalf("disk after %s = %q, want %q", tc.name, got, tc.wantOn)
+			}
+			if st.saveMenu.confirmClobber {
+				t.Fatalf("%s left the prompt open", tc.name)
+			}
+			if (ts.compareDiff != nil) != tc.wantCompare {
+				t.Fatalf("%s: compare overlay up = %v, want %v", tc.name, ts.compareDiff != nil, tc.wantCompare)
+			}
+		})
+	}
+}
+
+// Vim mode routes keys past handleKey entirely, so the overlay's exit has to
+// sit ahead of the vim handler. Observed in the GUI harness: with the
+// navigator (and so vim) on, Escape was swallowed as "back to normal mode" and
+// compare could not be left.
+func TestCompareExitsUnderVimMode(t *testing.T) {
+	for _, name := range []key.Name{"C", key.NameEscape} {
+		st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+		st.vimEnabled = true
+		st.vimState = vim.NewState()
+		st.saveTab(st.tabBar.Tabs[0])
+		st.handleEditEvent("c")
+		if ts.compareDiff == nil {
+			t.Fatal("c at the prompt did not enter compare")
+		}
+
+		st.pressCompareExit(name)
+
+		if ts.compareDiff != nil || !st.saveMenu.confirmClobber {
+			t.Fatalf("%v did not leave compare under vim mode", name)
+		}
+	}
+}
+
+// In insert mode both keys belong to the buffer: Escape ends insert mode and c
+// is a character. Neither may pull the prompt back over the text being typed.
+func TestCompareExitKeysDeferToVimInsertMode(t *testing.T) {
+	for _, name := range []key.Name{"C", key.NameEscape} {
+		st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+		st.vimEnabled = true
+		st.vimState = vim.NewState()
+		st.saveTab(st.tabBar.Tabs[0])
+		st.handleEditEvent("c")
+		st.vimState.Mode = vim.ModeInsert
+
+		st.pressCompareExit(name)
+		if ts.compareDiff == nil {
+			t.Fatalf("%v left compare from insert mode", name)
+		}
+	}
+}
+
+// ]c and [c step through the very hunks compare is showing, so the c that
+// completes them must not be taken as the overlay's exit.
+func TestCompareLeavesBracketCSequenceAlone(t *testing.T) {
+	for _, bracket := range []key.Name{"]", "["} {
+		st, ed, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+		st.vimEnabled = true
+		st.vimState = vim.NewState()
+		st.saveTab(st.tabBar.Tabs[0])
+		st.handleEditEvent("c")
+		if ts.compareDiff == nil {
+			t.Fatal("c at the prompt did not enter compare")
+		}
+
+		st.handleEditEvent(string(bracket))
+		st.handleEditEvent("c")
+		if ts.compareDiff == nil {
+			t.Fatalf("%vc left compare instead of navigating", bracket)
+		}
+		if st.saveMenu.confirmClobber {
+			t.Fatalf("%vc put the prompt back", bracket)
+		}
+		_ = ed
 	}
 }

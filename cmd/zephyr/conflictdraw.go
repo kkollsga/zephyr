@@ -13,8 +13,13 @@ import (
 	"github.com/kristianweb/zephyr/internal/ui"
 )
 
+// clobberCellCount is the number of choices on the clobber prompt's action
+// row. The click router and the draw split the row on it, so they cannot
+// disagree about where a cell begins.
+const clobberCellCount = 4
+
 // drawClobberMenu renders the save menu's clobber sub-state: a line naming
-// what happened to the file, then the three ways out of it.
+// what happened to the file, then the four ways out of it.
 func (st *appState) drawClobberMenu(gtx layout.Context, tab *ui.Tab, dx, dy, dw, dropdownH, itemH int) {
 	tr := st.tabRend
 	if tr == nil {
@@ -34,19 +39,20 @@ func (st *appState) drawClobberMenu(gtx layout.Context, tab *ui.Tab, dx, dy, dw,
 	drawMenuSeparator(gtx, st.theme.TabBorder, dx, dy+itemH-1, dw)
 
 	rowY := dy + itemH
-	thirdW := dw / 3
-	labels := [3]string{"Overwrite", "Reload", "Cancel"}
-	colors := [3]color.NRGBA{warningColor(), st.theme.Foreground, st.theme.Foreground}
-	for i := 0; i < 3; i++ {
-		cellX := dx + thirdW*i
-		cellW := thirdW
-		if i == 2 {
-			cellW = dw - thirdW*2
+	cell := dw / clobberCellCount
+	labels := [clobberCellCount]string{"Overwrite", "Reload", "Compare", "Cancel"}
+	colors := [clobberCellCount]color.NRGBA{warningColor(), st.theme.Foreground, st.theme.Foreground, st.theme.Foreground}
+	for i := 0; i < clobberCellCount; i++ {
+		cellX := dx + cell*i
+		cellW := cell
+		if i == clobberCellCount-1 {
+			cellW = dw - cell*(clobberCellCount-1)
 		}
 		if st.hoverX >= cellX && st.hoverX < cellX+cellW && st.hoverY >= rowY && st.hoverY < rowY+itemH {
 			drawMenuPanel(gtx, st.theme.DropdownSel, cellX, rowY, cellW, itemH)
 		}
-		tr.RenderGlyphs(gtx.Ops, gtx, labels[i], cellX+8, rowY+(itemH-tr.LineHeightPx)/2, colors[i])
+		labelX := cellX + (cellW-utf8.RuneCountInString(labels[i])*tr.CharWidth)/2
+		tr.RenderGlyphs(gtx.Ops, gtx, labels[i], labelX, rowY+(itemH-tr.LineHeightPx)/2, colors[i])
 		if i > 0 {
 			drawMenuPanel(gtx, st.theme.TabBorder, cellX, rowY+2, 1, itemH-4)
 		}

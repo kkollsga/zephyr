@@ -14,6 +14,12 @@ func (st *appState) dispatchKey(ke key.Event) {
 	if st.handleUnfocusedFindBarKey(ke) {
 		return
 	}
+	// The compare overlay's exit runs ahead of the vim handler for the reason
+	// the find bar does: vim would swallow Escape as "back to normal mode" and
+	// c as the start of a change operator.
+	if st.handleCompareKey(ke) {
+		return
+	}
 	if st.vimEnabled && st.vimState != nil && !st.fuzzyFinderHasKeys() &&
 		!st.saveMenu.visible && !st.langSel.Visible && !st.findBarHasKeys() {
 		st.handleVimKeyEvent(ke)

@@ -221,7 +221,7 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 	// Git diff gutter signs + line background highlights (single pass). The
 	// diff describes the working file, so it says nothing about the lines of a
 	// HEAD view and is not drawn over one.
-	if ts.gitDiff != nil && ts.bufType != bufOriginal {
+	if diff := ts.activeDiff(); diff != nil && ts.bufType != bufOriginal {
 		for i := 0; i <= lastLine-firstLine; i++ {
 			dispLine := firstLine + i
 			var bufLine int
@@ -233,7 +233,7 @@ func (st *appState) drawEditorNormal(gtx layout.Context, w *app.Window, ed *edit
 			if bufLine >= ed.Buffer.LineCount() {
 				break
 			}
-			sign := ts.gitDiff.LineStatus(bufLine + 1)
+			sign := diff.LineStatus(bufLine + 1)
 			if sign != '+' && sign != '~' && sign != '-' {
 				continue
 			}
@@ -730,8 +730,8 @@ func (st *appState) drawBreadcrumb(gtx layout.Context, ed *editor.Editor, ts *ta
 
 	// Compute per-file diff stats
 	var addedStr, deletedStr string
-	if ts != nil && ts.gitDiff != nil && ts.bufType != bufOriginal {
-		added, deleted := ts.gitDiff.Stats()
+	if diff := ts.activeDiff(); diff != nil && ts.bufType != bufOriginal {
+		added, deleted := diff.Stats()
 		if added > 0 {
 			addedStr = fmt.Sprintf(" +%d", added)
 		}
@@ -1574,7 +1574,7 @@ func (st *appState) saveMenuShowSaveAs() bool {
 // saveMenuRowCount returns the number of visible rows in the save menu.
 func (st *appState) saveMenuRowCount() int {
 	if st.saveMenu.confirmClobber {
-		return 2 // warning line + Overwrite/Reload/Cancel
+		return 2 // warning line + Overwrite/Reload/Compare/Cancel
 	}
 	idx := st.saveMenu.tabIdx
 	fileBacked := idx >= 0 && idx < len(st.tabBar.Tabs) && st.tabBar.Tabs[idx].Editor.FilePath != ""
@@ -1605,6 +1605,11 @@ func (st *appState) saveMenuRect() (x, y, w, h, itemH int) {
 	nRows := st.saveMenuRowCount()
 	h = nRows * itemH
 	w = 32 * tr.CharWidth // fixed width for the dropdown
+	if st.saveMenu.confirmClobber {
+		// Four labelled cells share one row, so the widest label plus its
+		// padding has to fit in a quarter of the panel.
+		w = 44 * tr.CharWidth
+	}
 
 	// Center below the prompted tab
 	tabX := st.trafficLightPx
@@ -2056,8 +2061,7 @@ func (st *appState) drawStatusLine(gtx layout.Context, ed *editor.Editor, ts *ta
 	// Conflict badge, immediately right of line:col. It stays for as long as
 	// the conflict does, unlike the notification beside it.
 	badgeW := 0
-	if c := st.tabConflict(st.tabBar.ActiveTab()); c != conflictNone {
-		badge := "! " + c.label()
+	if badge := st.statusConflictBadge(); badge != "" {
 		badgeX := 8 + len("999:999")*sr.CharWidth + sr.CharWidth
 		sr.RenderGlyphs(gtx.Ops, gtx, badge, badgeX, textY, warningColor())
 		badgeW = (utf8.RuneCountInString(badge) + 1) * sr.CharWidth

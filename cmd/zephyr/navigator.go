@@ -158,13 +158,14 @@ func (st *appState) handleNavRootDropdownClick(x, y int) {
 // navNextHunk moves the cursor to the next changed line (hunk start).
 func (st *appState) navNextHunk(ed *editor.Editor, count int) {
 	ts := st.activeTabState()
-	if ts == nil || ts.gitDiff == nil {
+	diff := ts.activeDiff()
+	if diff == nil {
 		return
 	}
 	if count <= 0 {
 		count = 1
 	}
-	starts := ts.gitDiff.HunkStartLines()
+	starts := diff.HunkStartLines()
 	if len(starts) == 0 {
 		return
 	}
@@ -190,13 +191,14 @@ func (st *appState) navNextHunk(ed *editor.Editor, count int) {
 // navPrevHunk moves the cursor to the previous changed line (hunk start).
 func (st *appState) navPrevHunk(ed *editor.Editor, count int) {
 	ts := st.activeTabState()
-	if ts == nil || ts.gitDiff == nil {
+	diff := ts.activeDiff()
+	if diff == nil {
 		return
 	}
 	if count <= 0 {
 		count = 1
 	}
-	starts := ts.gitDiff.HunkStartLines()
+	starts := diff.HunkStartLines()
 	if len(starts) == 0 {
 		return
 	}

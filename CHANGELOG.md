@@ -119,6 +119,14 @@ All notable changes to Zephyr are documented here.
   already open. Their diff was looked up before the navigator created the git
   cache, so the markers and the header's diff stats stayed blank until a save
   or an external change happened to refresh them.
+- The "changed on disk" prompt has a fourth choice, Compare, reached with `c`.
+  It stands the prompt down and marks the buffer's divergence from the file on
+  disk in the gutter: added and modified markers are lines the buffer has that
+  disk does not, and a deletion wedge sits where disk has lines the buffer
+  lacks. `]c` and `[c` step through them, the file stays editable, and `c` or
+  Escape brings the same prompt back — carrying the close-tab and quit flags of
+  the flow that raised it, so nothing is decided by looking. Nothing is written
+  either: a save asked for while comparing hits the same guard.
 
 ### Markdown
 

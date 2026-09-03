@@ -90,6 +90,9 @@ func (st *appState) handleEditEvent(text string) {
 		st.fuzzyFinderInsert(text)
 		return
 	}
+	if st.handleConflictText(text) {
+		return
+	}
 	if st.vimEnabled && st.vimState != nil &&
 		!st.saveMenu.visible && !st.findBarHasKeys() {
 		st.handleVimEditEvent(text)

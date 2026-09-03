@@ -95,6 +95,16 @@ type tabState struct {
 	// as disposable; cleared if the file comes back (an atomic replace).
 	deleteForcedModified bool
 
+	// Compare-with-disk overlay: a diff of the file on disk (old) against this
+	// buffer (new), shown in place of the tab's git diff while the clobber
+	// prompt stands down. Non-nil means the overlay is up. It is held apart
+	// from gitDiff because a git cache refresh overwrites that field, and
+	// compareCloseAfter/compareForQuit are the prompt's flags, kept so the
+	// prompt comes back inside the same flow that raised it.
+	compareDiff       *git.FileDiff
+	compareCloseAfter bool
+	compareForQuit    bool
+
 	// Navigator mode
 	bufType   bufferType              // file, directory, status, or HEAD view
 	gitDiff   *git.FileDiff           // diff data for this file (nil if unchanged or not in repo)
@@ -276,6 +286,19 @@ type tabLayout struct {
 
 func (st *appState) activeEd() *editor.Editor {
 	return st.tabBar.ActiveEditor()
+}
+
+// activeDiff returns the diff the gutter markers, the diff stats and hunk
+// navigation read: the compare overlay's disk-to-buffer diff while comparing,
+// otherwise the tab's diff against git.
+func (ts *tabState) activeDiff() *git.FileDiff {
+	if ts == nil {
+		return nil
+	}
+	if ts.compareDiff != nil {
+		return ts.compareDiff
+	}
+	return ts.gitDiff
 }
 
 func (st *appState) activeTabState() *tabState {
