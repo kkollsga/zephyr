@@ -309,10 +309,10 @@ event-to-submit p95, RSS, optional soak) against `testdata/gui/mouse_fixture.go`
 - **The cross-release comparison is the release flow's, not a plan's.**
   `internal/benchcontrol` carries two benchmarks that measure no Zephyr code, so
   a capture can tell load moving every cell from a real regression moving one
-  (`R11`), and `make bench-anchor` compares a release's capture against one ~3
-  releases back. Both run at release time over `bench/history/`, not here: a
-  branch has no release history, so `make bench-anchor` on a branch reports
-  "nothing to compare" and that is not evidence of anything. What a plan can do
+  (`R11`), and `scripts/check-bench-anchor.sh` compares a release's capture
+  against one ~3 releases back. Both run at release time over `bench/history/`,
+  not here: a branch has no release history, so the anchor check on a branch
+  reports "nothing to compare" and that is not evidence of anything. What a plan can do
   is `make bench-capture` before and after its own work and compare the two
   files by hand.
 - Outputs land under `.artifacts/perf/latest` and `.artifacts/baseline/latest`

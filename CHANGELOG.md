@@ -280,13 +280,18 @@ All notable changes to Zephyr are documented here.
   benchmark run as a TSV carrying the host, arch, OS, Go version, commit and
   load averages it was taken under. `bench/history/<version>.tsv` is the
   committed per-release record; see `bench/README.md`.
-- Added `scripts/check-bench-anchor.sh` and `make bench-anchor`: the release
-  flow now compares each release's capture against the one roughly three
-  releases back, so drift that accumulates 5% at a time without any single
-  release looking bad is visible. It returns PASS, FAIL, or VOID — VOID when a
-  control cell moved or the two captures came from different machines, which
-  means the comparison carries no information rather than that it passed.
-  `--self-test` reproduces every verdict on fixtures.
+- Added `scripts/check-bench-anchor.sh`: the release flow now compares each
+  release's capture against the one roughly three releases back, so drift that
+  accumulates 5% at a time without any single release looking bad is visible.
+  It returns PASS, FAIL, or VOID — VOID when a control cell moved or the two
+  captures came from different machines, which means the comparison carries no
+  information rather than that it passed. The release flow runs the script by
+  path and reads its exit code; `make bench-anchor` is a convenience wrapper
+  that collapses FAIL and VOID into one status, as make does with any non-zero
+  recipe. A regression is recaptured once and both captures are kept under
+  `.artifacts/bench/`, of which the five newest survive each write.
+  `--self-test` reproduces every verdict on fixtures, and checks that the two
+  not-pass verdicts stay distinguishable.
 - CI now cancels a pull request's in-flight run when a newer push supersedes
   it, instead of running three OS matrices per checkpoint push to completion.
   Runs on `main` are never cancelled and never queue behind each other.

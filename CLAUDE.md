@@ -47,7 +47,9 @@ make test     # go test ./... -count=1
 make build    # the binary;  make app  bundles + ad-hoc-signs Zephyr.app
 make bench    # Go benchmarks: buffer, fuzzy, git, highlight, navigator, benchcontrol
 make bench-capture  # the same run recorded as a TSV with its machine conditions
-make bench-anchor   # release-time cumulative drift check (0 PASS, 1 FAIL, 2 VOID)
+scripts/check-bench-anchor.sh   # release-time cumulative drift check
+                    # 0 PASS, 1 FAIL, 2 VOID — read the script's own exit;
+                    # `make bench-anchor` wraps it but collapses 1 and 2
 make fuzz     # 30s fuzz of the piece table, editor, and both diff paths
 ```
 
@@ -77,9 +79,13 @@ and say so when they cannot run.**
   under** (`R11`): `make bench-capture` records them, and the two control cells
   in `internal/benchcontrol` measure no Zephyr code, so load moving every cell
   stays distinguishable from a real regression moving one. The only
-  cross-release perf gate is `make bench-anchor` (`bench/README.md`), run by the
-  release flow — never by `make gate`. `perf-test.sh` and `baseline.sh` write
-  under `.artifacts/`, which nothing purges — see `make check-dev-docs`.
+  cross-release perf gate is `scripts/check-bench-anchor.sh`
+  (`bench/README.md`), run by the release flow — never by `make gate`. **Run it
+  by path and read its exit code**: `make` turns any non-zero recipe status
+  into `2`, so a FAIL (`1`) and a VOID (`2`) are indistinguishable through
+  `make bench-anchor`, which stays a convenience wrapper. `perf-test.sh`,
+  `baseline.sh` and that script's retry captures write under `.artifacts/`,
+  which nothing purges — see `make check-dev-docs`.
 - **Packaging or install change** → `make install-test`; **docs change** →
   `make docs-test`.
 - **Before a long-lived branch's first push** → `make baseline`

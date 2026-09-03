@@ -152,9 +152,14 @@ silently.
      `bench/history/<version>.tsv` is one file per released version and is
      **never rewritten**; if the file already exists, the version decision is
      wrong, not the file. See `bench/README.md`.
-  2. `make bench-anchor` — the new capture against the one ~3 releases back,
-     over the intersection of benchmark names, on the median, at the threshold
-     the script documents. **Exit 0 PASS, 1 FAIL, 2 VOID.**
+  2. `scripts/check-bench-anchor.sh` — the new capture against the one ~3
+     releases back, over the intersection of benchmark names, on the median, at
+     the threshold the script documents. **Exit 0 PASS, 1 FAIL, 2 VOID, and it
+     is the script's own exit code you read.** Run it by path, not as `make
+     bench-anchor`: make turns any non-zero recipe status into `2`, so a
+     regression and a void comparison arrive here as the same number and the
+     step below cannot tell them apart. The target stays as a convenience for a
+     human reading the output.
   - **VOID is not a pass and not a failure.** It means a control cell in
     `internal/benchcontrol` moved beyond tolerance, or the two captures carry
     different `host` / `arch` / `go_series` headers — the instrument moved, so
@@ -166,15 +171,17 @@ silently.
     recaptures and compares again, keeping both files (the retry lands under
     `.artifacts/bench/`, never in `bench/history/`), because a real regression
     reproduces on the immediate recapture and machine noise does not. The
-    retry's verdict is the verdict.
+    retry's verdict is the verdict. That directory is bounded by the script
+    itself — the five newest retry captures survive each write.
   - **On FAIL: fix the regression, or accept it explicitly** with the reason
     written into this release's `CHANGELOG.md` entry, so the acceptance ships
     with the release rather than living in a chat log. **Never recapture to
     clear it** — recapturing the baseline is precisely what makes a per-release
     gate blind; only recovering the performance clears this check.
-  - `scripts/check-bench-anchor.sh --self-test` (`make bench-anchor
-    ARGS=--self-test`) reproduces every verdict on fixtures. Run it if you have
-    any doubt the check can still fail.
+  - `scripts/check-bench-anchor.sh --self-test` reproduces every verdict on
+    fixtures, asserts that FAIL and VOID are distinguishable through this
+    command, and asserts the retry tier's bound. Run it if you have any doubt
+    the check can still fail.
 - **The GUI harness needs a logged-in macOS GUI session with Accessibility and
   Screen Recording permission.** If this session cannot run it, the step reports
   **"not run"** in the release report and the release does not claim the UI was
@@ -264,8 +271,8 @@ hold before the commit:
 8. No `release.yml` run currently in flight for this tag — `auto-release.yml`
    refuses to act while one is (`gh run list --workflow=release.yml`).
 9. `bench/history/<VERSION>.tsv` exists, is newly created by this run rather
-   than an overwrite, and is staged; `make bench-anchor` returned PASS, or a
-   FAIL/VOID that step 5 explicitly recorded with its reason.
+   than an overwrite, and is staged; `scripts/check-bench-anchor.sh` returned
+   PASS, or a FAIL/VOID that step 5 explicitly recorded with its reason.
 
 A failed item is fixed, not waived. **Never relax a check to get green** — that
 is `R10`'s decorative-gate failure.

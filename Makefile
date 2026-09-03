@@ -63,11 +63,16 @@ bench:
 bench-capture:
 	./scripts/bench-capture.sh $(OUT)
 
-## Cumulative drift check, run by the release flow after bench-capture has
-## written bench/history/<version>.tsv. Exit 0 PASS, 1 FAIL, 2 VOID — VOID
-## means a control moved or the two captures came from different machines, so
-## the comparison carries no information. It is NOT part of `make gate`.
-## `--self-test` is how each verdict was observed on a fixture (R1).
+## Convenience wrapper for the cumulative drift check, run by the release flow
+## after bench-capture has written bench/history/<version>.tsv. It is NOT part
+## of `make gate`. `--self-test` is how each verdict was observed on a fixture
+## (R1).
+##
+## THIS TARGET COLLAPSES THE VERDICT. The script exits 0 PASS, 1 FAIL, 2 VOID,
+## but make turns any non-zero recipe status into 2, so a regression and a void
+## comparison are indistinguishable here. Anything that acts on the verdict —
+## the release flow does — runs ./scripts/check-bench-anchor.sh directly and
+## reads its exit code.
 bench-anchor:
 	./scripts/check-bench-anchor.sh $(ARGS)
 
@@ -208,4 +213,4 @@ check-dev-docs:
 		                      echo "$$stale" | sed 's/^/    /'; }; \
 	fi
 	@art=$$(du -sm .artifacts 2>/dev/null | cut -f1); \
-	[ -z "$$art" ] || echo ".artifacts/: $${art} MB (scripts/perf-test.sh + scripts/baseline.sh write here; no purge tier — reclaim with rm -rf .artifacts)"
+	[ -z "$$art" ] || echo ".artifacts/: $${art} MB (scripts/perf-test.sh, scripts/baseline.sh and check-bench-anchor.sh's retry captures write here; only the retry tier is self-bounded — reclaim with rm -rf .artifacts)"

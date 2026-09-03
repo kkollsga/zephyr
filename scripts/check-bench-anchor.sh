@@ -10,6 +10,10 @@
 #
 # Exit codes:  0 PASS (or a reported non-verdict)   1 FAIL   2 VOID
 #
+# Read THIS script's exit code. `make bench-anchor` is a convenience wrapper
+# only: make turns any non-zero recipe status into 2, so FAIL and VOID are
+# indistinguishable through it. The release flow invokes this path directly.
+#
 # VOID means the instrument, not the code, is what moved: a control cell moved
 # beyond tolerance, or the two captures were taken on different hosts, arches
 # or Go series. A VOID is not a pass and not a failure — it says this
@@ -55,7 +59,7 @@ while (($#)); do
     --control-tolerance) CONTROL_TOLERANCE=$2; shift 2 ;;
     --no-retry) RETRY=0; shift ;;
     --self-test) SELF_TEST=1; RETRY=0; shift ;;
-    -h | --help) sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '2,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -179,6 +183,23 @@ compare() {
     ' "$anc" "$cur"
 }
 
+# Retry captures land under .artifacts/, which has no purge tier of its own, so
+# this script is their bound and their owner (R4). The newest RETRY_KEEP
+# survive each write; the rest are the evidence of runs already reported on.
+# Ordering is by the UTC timestamp in the name, not by the whole name: version
+# prefixes sort 0.1.10 before 0.1.9 and would strand the newest file.
+RETRY_KEEP=5
+prune_retry_captures() {
+    local dir=$1 keep=$2 f n=0
+    [[ -d $dir ]] || return 0
+    while IFS= read -r f; do
+        n=$((n + 1))
+        ((n > keep)) && rm -f "$f"
+    done < <(find "$dir" -maxdepth 1 -name '*-retry-*.tsv' -type f |
+        awk -F'-retry-' '{ print $NF "\t" $0 }' | sort -r | cut -f2)
+    return 0
+}
+
 abspath() {
     local d b
     d=$(dirname "$1"); b=$(basename "$1")
@@ -188,7 +209,7 @@ abspath() {
 # Bash 3.2 is what macOS ships, so the history list is a newline-separated
 # string addressed with sed rather than an array with negative indices.
 run_check() {
-    local list n cur anchor oldest idx rc retry retry_dir
+    local list n cur anchor oldest idx rc retry retry_dir capture_rc
 
     list=$(list_history)
     if [[ -n $CURRENT ]]; then
@@ -243,7 +264,10 @@ run_check() {
     retry="$retry_dir/$(basename "$cur" .tsv)-retry-$(date -u +%Y%m%dT%H%M%SZ).tsv"
     echo
     echo "bench anchor: regression verdict — recapturing once before believing it."
-    if ! "$ROOT/scripts/bench-capture.sh" "$retry"; then
+    capture_rc=0
+    "$ROOT/scripts/bench-capture.sh" "$retry" || capture_rc=$?
+    prune_retry_captures "$retry_dir" "$RETRY_KEEP"
+    if ((capture_rc != 0)); then
         echo "VOID: the retry capture failed to run, so the first verdict stands unconfirmed."
         return 2
     fi
@@ -319,7 +343,10 @@ self_test() {
     fixture "$tmp/inflated/0.1.2.tsv" zephyr-host 45 0 12   # every cell +45%
     fixture "$tmp/control/0.1.2.tsv" zephyr-host 0 55 12    # controls only
     fixture "$tmp/host/0.1.2.tsv" other-host 0 0 12         # different machine
-    fixture "$tmp/thin/0.1.2.tsv" zephyr-host 0 0 4         # 4 cells + 2 controls
+    # The shift is past the threshold on purpose: with it, only the min-overlap
+    # branch can return 0. At shift 0 the fixture passed on its own merits and
+    # the assertion below held with the branch deleted (observed).
+    fixture "$tmp/thin/0.1.2.tsv" zephyr-host 45 0 4        # 4 cells + 2 controls
 
     echo "self-test: fixtures under $tmp"
     expect 0 "no history at all -> PASS with note" bash "$me" --history-dir "$tmp/empty" --no-retry
@@ -329,6 +356,39 @@ self_test() {
     expect 2 "perturbed control -> VOID" bash "$me" --history-dir "$tmp/control" --no-retry
     expect 2 "host mismatch -> VOID" bash "$me" --history-dir "$tmp/host" --no-retry
     expect 0 "overlap below --min-overlap -> report+pass" bash "$me" --history-dir "$tmp/thin" --no-retry
+
+    # The release flow reads this script's exit code directly, and the two
+    # not-pass verdicts have to be distinguishable through it. `make` turns any
+    # non-zero recipe status into 2, so `make bench-anchor` cannot carry the
+    # distinction; that is why the skill and CLAUDE.md name the script by path.
+    local fail_rc=0 void_rc=0
+    bash "$me" --history-dir "$tmp/inflated" --no-retry >/dev/null 2>&1 || fail_rc=$?
+    bash "$me" --history-dir "$tmp/control" --no-retry >/dev/null 2>&1 || void_rc=$?
+    if ((fail_rc == void_rc)); then
+        echo "self-test FAIL  FAIL and VOID both exit $fail_rc — the two verdicts are indistinguishable"
+        SELF_TEST_RC=1
+    else
+        printf 'self-test PASS  %-42s FAIL %d, VOID %d\n' "verdicts are distinguishable" "$fail_rc" "$void_rc"
+    fi
+
+    # The retry tier under .artifacts/ has a bound and this script owns it
+    # (R4). Eight captures in, five newest out.
+    local rdir="$tmp/retries" stamp
+    mkdir -p "$rdir"
+    for stamp in 01 02 03 04 05 06 07 08; do
+        : >"$rdir/0.1.2-retry-20260101T0000${stamp}Z.tsv"
+    done
+    prune_retry_captures "$rdir" 5
+    local left
+    left=$(find "$rdir" -name '*-retry-*.tsv' -type f | grep -c . || true)
+    if [[ $left != 5 ]] ||
+        [[ ! -f "$rdir/0.1.2-retry-20260101T000008Z.tsv" ]] ||
+        [[ -f "$rdir/0.1.2-retry-20260101T000001Z.tsv" ]]; then
+        echo "self-test FAIL  retry captures not pruned to the newest 5 ($left left)"
+        SELF_TEST_RC=1
+    else
+        printf 'self-test PASS  %-42s 8 -> 5\n' "retry captures pruned to the newest"
+    fi
 
     # The fixture generator has to be able to produce a red, or every "PASS"
     # above is vacuous. Prove the inflated fixture really is inflated.
