@@ -154,13 +154,22 @@ func (st *appState) applyExternalChange(tab *ui.Tab, ts *tabState, path string) 
 	snap, err := fileio.TakeSnapshot(path)
 	if err == nil && !snap.Exists {
 		st.markFileDeleted(tab, ts)
+		st.refreshCompareOverlay(tab, ts)
 		return
 	}
 	if err == nil && ts != nil && ts.diskSnap.Exists && snap.Equal(ts.diskSnap) {
 		// Disk holds exactly what we last loaded or wrote. If a conflict was
-		// standing, the change has been undone on disk and it is resolved.
+		// standing, the change has been undone on disk and it is resolved —
+		// including one a compare overlay was raised to decide, which now has
+		// no prompt left to return to.
 		st.clearDeletedConflict(tab, ts)
 		ts.conflict = conflictNone
+		if ts.compareDiff != nil {
+			st.notify("External change undone — compare closed", 5*time.Second)
+			if closeCompareOverlay(ts) {
+				st.continueQuitFlow()
+			}
+		}
 		return
 	}
 	st.clearDeletedConflict(tab, ts)
@@ -175,6 +184,7 @@ func (st *appState) applyExternalChange(tab *ui.Tab, ts *tabState, path string) 
 			ts.conflict = conflictModified
 		}
 		st.notify("File changed externally: "+filepath.Base(path), 10*time.Second)
+		st.refreshCompareOverlay(tab, ts)
 		return
 	}
 	if err == nil && snap.Equal(fileio.SnapshotOfBytes(tab.Editor.Buffer.TextBytes(nil))) {
@@ -417,6 +427,53 @@ func (st *appState) clobberCompare() {
 	st.invalidate()
 }
 
+// closeCompareOverlay takes the overlay down and reports the quit flag it was
+// carrying, so a caller that has resolved the conflict can carry that flow on.
+// It does not re-raise the prompt: only endCompare does that, and only because
+// the conflict there is still undecided.
+func closeCompareOverlay(ts *tabState) bool {
+	if ts == nil || ts.compareDiff == nil {
+		return false
+	}
+	forQuit := ts.compareForQuit
+	ts.compareDiff = nil
+	ts.compareCloseAfter, ts.compareForQuit = false, false
+	return forQuit
+}
+
+// refreshCompareOverlay keeps the overlay honest across a further write to the
+// file it is diffing against, so the markers describe disk as it is now rather
+// than as it was when Compare was pressed. Refreshing rather than closing,
+// because the user is looking at it.
+//
+// A write that leaves disk holding exactly what the buffer holds resolves the
+// conflict instead: there is no version to lose either way. The overlay closes
+// and a quit that was waiting on the decision goes on, rather than standing on
+// a prompt that will never be raised again.
+func (st *appState) refreshCompareOverlay(tab *ui.Tab, ts *tabState) {
+	if ts == nil || ts.compareDiff == nil {
+		return
+	}
+	disk, err := os.ReadFile(tab.Editor.FilePath)
+	if err != nil {
+		disk = nil
+	}
+	text := tab.Editor.Buffer.Text()
+	if string(disk) != text {
+		ts.compareDiff = git.LineDiff(string(disk), text)
+		return
+	}
+	ts.conflict = conflictNone
+	ts.deleteForcedModified = false
+	if snap, err := fileio.TakeSnapshot(tab.Editor.FilePath); err == nil {
+		ts.diskSnap = snap
+	}
+	st.notify("Disk now matches the buffer — compare closed", 5*time.Second)
+	if closeCompareOverlay(ts) {
+		st.continueQuitFlow()
+	}
+}
+
 // comparingTabState returns the active tab's state while its compare overlay
 // is up, or nil.
 func (st *appState) comparingTabState() *tabState {
@@ -434,20 +491,14 @@ func (st *appState) endCompare(ts *tabState) {
 	st.raiseClobberPrompt(st.tabIndexOf(st.tabBar.ActiveTab()), ts.compareCloseAfter, ts.compareForQuit)
 }
 
-// compareCKeyExits reports whether c leaves the compare overlay rather than
-// reaching the buffer. It does so only where a bare c is a command in its own
-// right: vim's normal mode with nothing pending. That excludes text (insert
-// mode, and every mode when vim is off) and the second half of a sequence —
-// ]c and [c step through the very hunks compare is showing, so c cannot be
-// taken while a bracket, an operator or a count is waiting for it.
-func (st *appState) compareCKeyExits() bool {
-	return st.vimEnabled && st.vimState != nil && st.vimIsIdleInNormalMode()
-}
-
 // handleCompareKey routes the compare overlay's Escape and reports whether it
-// consumed the event. Every other key still edits, because the buffer on
-// screen is the working file; re-raising the prompt is the only way out, since
-// the conflict behind it is still unresolved. Any other overlay outranks it.
+// consumed the event. Escape is the overlay's only exit key. Every other key
+// still edits, because the buffer on screen is the working file — a bare c in
+// normal mode is the change operator, so an overlay that ate it would make
+// cw, cc, ci( and caw unreachable for as long as the conflict stood, and the
+// conflict stands until something resolves it. Any other overlay outranks
+// this one; re-raising the prompt (Escape, or another Cmd+S) is the only way
+// out, since the conflict behind it is still unresolved.
 func (st *appState) handleCompareKey(ke key.Event) bool {
 	if ke.Name != key.NameEscape || st.overlayOwnsKeys() {
 		return false
@@ -466,26 +517,20 @@ func (st *appState) handleCompareKey(ke key.Event) bool {
 }
 
 // handleConflictText routes the c that enters the compare overlay from the
-// prompt and the c that leaves it again, reporting whether it consumed the
-// text. c is a character, so it arrives as an edit event; the key event that
-// accompanies it deliberately does nothing with c, because acting on both
-// would toggle compare straight back off.
+// clobber prompt, and reports whether it consumed the text. It only ever fires
+// while that prompt is up, which swallows every key of its own; a c anywhere
+// else is the buffer's, and compare has no c of its own to leave by.
+//
+// Entry is on the edit event and not on the key event that accompanies it:
+// acting on the key event closes the prompt first, and the edit event that
+// follows then reaches vim as the change operator, arming cw over a file the
+// user only asked to look at.
 func (st *appState) handleConflictText(text string) bool {
-	if text != "c" {
+	if text != "c" || !st.saveMenu.visible || !st.saveMenu.confirmClobber {
 		return false
 	}
-	if st.saveMenu.visible {
-		if st.saveMenu.confirmClobber {
-			st.clobberCompare()
-			return true
-		}
-		return false
-	}
-	if ts := st.comparingTabState(); ts != nil && st.compareCKeyExits() {
-		st.endCompare(ts)
-		return true
-	}
-	return false
+	st.clobberCompare()
+	return true
 }
 
 // vimIsIdleInNormalMode reports whether vim is in normal mode with no count,
@@ -553,7 +598,7 @@ func (st *appState) handleClobberClick(x, y, dy, dw, itemH int) {
 // not Overwrite or Reload: both of those discard one of the two versions of
 // the file, and a reflexive Return must not be the thing that loses work.
 // Compare answers to c, which is a character and so arrives at
-// handleConflictText instead.
+// handleConflictText as an edit event instead.
 func (st *appState) handleClobberKey(ke key.Event) {
 	switch ke.Name {
 	case key.NameEscape, key.NameReturn:
@@ -567,11 +612,7 @@ func (st *appState) handleClobberKey(ke key.Event) {
 // gutter is marking what the buffer has that disk does not.
 func (st *appState) statusConflictBadge() string {
 	if st.comparingTabState() != nil {
-		exit := "Esc"
-		if st.compareCKeyExits() {
-			exit = "c/Esc"
-		}
-		return "Comparing with disk — markers are the buffer's; " + exit + " returns"
+		return "Comparing with disk — markers are the buffer's; Esc returns"
 	}
 	if c := st.tabConflict(st.tabBar.ActiveTab()); c != conflictNone {
 		return "! " + c.label()

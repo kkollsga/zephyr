@@ -418,6 +418,16 @@ func (st *appState) saveTabWithPrompt(tab *ui.Tab, closeAfter, forQuit bool) boo
 		return st.saveTabAs(tab)
 	}
 	if st.saveWouldClobber(tab) {
+		// A save asked for while this tab's compare overlay is up arrives with
+		// no flags of its own — Cmd+S goes through saveTab. The prompt has to
+		// come back inside the flow that raised it, so the flags Compare
+		// stashed are OR-ed in: dropping them leaves quitInProgress standing
+		// with nothing on screen to resolve it, after which Cmd+Q and the
+		// window's close button do nothing at all.
+		if ts := st.tabStates[tab.Editor]; ts != nil && ts.compareDiff != nil {
+			closeAfter = closeAfter || ts.compareCloseAfter
+			forQuit = forQuit || ts.compareForQuit
+		}
 		st.raiseClobberPrompt(st.tabIndexOf(tab), closeAfter, forQuit)
 		return false
 	}

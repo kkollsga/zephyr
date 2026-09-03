@@ -14,9 +14,9 @@ func (st *appState) dispatchKey(ke key.Event) {
 	if st.handleUnfocusedFindBarKey(ke) {
 		return
 	}
-	// The compare overlay's exit runs ahead of the vim handler for the reason
-	// the find bar does: vim would swallow Escape as "back to normal mode" and
-	// c as the start of a change operator.
+	// The compare overlay's Escape runs ahead of the vim handler for the reason
+	// the find bar's does: vim would otherwise swallow it as "back to normal
+	// mode". Escape is the overlay's only exit — c stays the change operator.
 	if st.handleCompareKey(ke) {
 		return
 	}

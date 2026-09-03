@@ -41,7 +41,7 @@ func (st *appState) vimHunkObject(ed *editor.Editor, op vim.Operator) bool {
 	if ts == nil || st.vimState == nil {
 		return false
 	}
-	start, end, ok := hunkChangedLineRange(ts.gitDiff, ed.Cursor.Line+1)
+	start, end, ok := hunkChangedLineRange(ts.activeDiff(), ed.Cursor.Line+1)
 	if !ok {
 		return false
 	}

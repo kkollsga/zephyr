@@ -550,16 +550,6 @@ func TestUnclaimedTabTransferRemovesItsContentFile(t *testing.T) {
 
 // --- Compare with disk ---
 
-// pressCompareExit sends a compare exit the way the app receives it: Escape is
-// a named key event, c is a character and arrives as an edit event.
-func (st *appState) pressCompareExit(name key.Name) {
-	if name == "C" {
-		st.handleEditEvent("c")
-		return
-	}
-	st.dispatchKey(key.Event{Name: name})
-}
-
 // compareRepoTab is conflictedTab in a git repository, so the git cache that
 // refreshes a tab's diff is real.
 func compareRepoTab(t *testing.T, mine, theirs string) (*appState, *editor.Editor, *tabState, string) {
@@ -637,31 +627,29 @@ func TestCompareTouchesNeitherDiskNorBuffer(t *testing.T) {
 // Leaving compare puts the same prompt back, still carrying the flags of the
 // flow that raised it, so a refusal inside a quit is still inside that quit.
 func TestCompareReturnsToPromptWithFlagsIntact(t *testing.T) {
-	for _, back := range []key.Name{"C", key.NameEscape} {
-		st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
-		// Vim mode, because that is where c is the exit and not a character.
-		st.vimEnabled = true
-		st.vimState = vim.NewState()
-		st.startQuitFlow()
-		// Click Save on the quit prompt; the conflict turns it into the
-		// clobber prompt, still carrying the quit's flags.
-		dx, dy, dw, dropdownH, itemH := st.saveMenuRect()
-		st.handleSaveMenuClick(dx+dw/6, dy+dropdownH-itemH/2)
-		if !st.saveMenu.confirmClobber || !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
-			t.Fatalf("quit prompt = %+v", st.saveMenu)
-		}
-		st.handleEditEvent("c")
-		st.pressCompareExit(back)
+	st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+	// Vim mode, because that is where Escape is contested.
+	st.vimEnabled = true
+	st.vimState = vim.NewState()
+	st.startQuitFlow()
+	// Click Save on the quit prompt; the conflict turns it into the clobber
+	// prompt, still carrying the quit's flags.
+	dx, dy, dw, dropdownH, itemH := st.saveMenuRect()
+	st.handleSaveMenuClick(dx+dw/6, dy+dropdownH-itemH/2)
+	if !st.saveMenu.confirmClobber || !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
+		t.Fatalf("quit prompt = %+v", st.saveMenu)
+	}
+	st.handleEditEvent("c")
+	st.dispatchKey(key.Event{Name: key.NameEscape})
 
-		if !st.saveMenu.visible || !st.saveMenu.confirmClobber {
-			t.Fatalf("%v did not put the prompt back: %+v", back, st.saveMenu)
-		}
-		if !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
-			t.Fatalf("%v lost the prompt's flags: %+v", back, st.saveMenu)
-		}
-		if ts.compareDiff != nil {
-			t.Fatalf("%v left the compare overlay up", back)
-		}
+	if !st.saveMenu.visible || !st.saveMenu.confirmClobber {
+		t.Fatalf("Escape did not put the prompt back: %+v", st.saveMenu)
+	}
+	if !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
+		t.Fatalf("Escape lost the prompt's flags: %+v", st.saveMenu)
+	}
+	if ts.compareDiff != nil {
+		t.Fatal("Escape left the compare overlay up")
 	}
 }
 
@@ -770,68 +758,232 @@ func TestClobberClickHitsAllFourCells(t *testing.T) {
 	}
 }
 
-// Vim mode routes keys past handleKey entirely, so the overlay's exit has to
-// sit ahead of the vim handler. Observed in the GUI harness: with the
-// navigator (and so vim) on, Escape was swallowed as "back to normal mode" and
-// compare could not be left.
-func TestCompareExitsUnderVimMode(t *testing.T) {
-	for _, name := range []key.Name{"C", key.NameEscape} {
-		st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
-		st.vimEnabled = true
-		st.vimState = vim.NewState()
-		st.saveTab(st.tabBar.Tabs[0])
-		st.handleEditEvent("c")
-		if ts.compareDiff == nil {
-			t.Fatal("c at the prompt did not enter compare")
-		}
+// In insert mode Escape belongs to the buffer: it ends insert mode and must
+// not pull the prompt back over the text being typed.
+func TestCompareExitDefersToVimInsertMode(t *testing.T) {
+	st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+	st.vimEnabled = true
+	st.vimState = vim.NewState()
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	st.vimState.Mode = vim.ModeInsert
 
-		st.pressCompareExit(name)
-
-		if ts.compareDiff != nil || !st.saveMenu.confirmClobber {
-			t.Fatalf("%v did not leave compare under vim mode", name)
-		}
+	st.dispatchKey(key.Event{Name: key.NameEscape})
+	if ts.compareDiff == nil {
+		t.Fatal("Escape left compare from insert mode")
 	}
 }
 
-// In insert mode both keys belong to the buffer: Escape ends insert mode and c
-// is a character. Neither may pull the prompt back over the text being typed.
-func TestCompareExitKeysDeferToVimInsertMode(t *testing.T) {
-	for _, name := range []key.Name{"C", key.NameEscape} {
-		st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
-		st.vimEnabled = true
-		st.vimState = vim.NewState()
-		st.saveTab(st.tabBar.Tabs[0])
-		st.handleEditEvent("c")
-		st.vimState.Mode = vim.ModeInsert
+// --- Phase R: c is an operator, not an exit ---
 
-		st.pressCompareExit(name)
-		if ts.compareDiff == nil {
-			t.Fatalf("%v left compare from insert mode", name)
-		}
+// A bare c in normal mode is the change operator. While compare was an exit
+// key it ate the c of cw/cc/ci(/caw, so no change operator was reachable for
+// as long as the overlay stood — and the overlay stands until the conflict is
+// resolved.
+func TestCompareLeavesCAsTheChangeOperator(t *testing.T) {
+	st, ed, ts, _ := conflictedTab(t, "alpha beta\n", "theirs\n")
+	st.vimEnabled = true
+	st.vimState = vim.NewState()
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	if ts.compareDiff == nil {
+		t.Fatal("c at the prompt did not enter compare")
+	}
+	ed.Cursor.SetPosition(ed.Buffer, 0, 0)
+	before := ed.Buffer.Text()
+
+	st.handleEditEvent("c")
+	if ts.compareDiff == nil || st.saveMenu.confirmClobber {
+		t.Fatal("c while comparing left the overlay instead of starting an operator")
+	}
+	st.handleEditEvent("w")
+
+	if got := ed.Buffer.Text(); got == before {
+		t.Fatalf("cw changed nothing: %q", got)
+	}
+	if st.vimState.Mode != vim.ModeInsert {
+		t.Fatalf("cw mode = %v, want insert", st.vimState.Mode)
+	}
+	if ts.compareDiff == nil {
+		t.Fatal("cw took the compare overlay down")
 	}
 }
 
-// ]c and [c step through the very hunks compare is showing, so the c that
-// completes them must not be taken as the overlay's exit.
-func TestCompareLeavesBracketCSequenceAlone(t *testing.T) {
-	for _, bracket := range []key.Name{"]", "["} {
-		st, ed, ts, _ := conflictedTab(t, "mine ", "theirs\n")
-		st.vimEnabled = true
-		st.vimState = vim.NewState()
-		st.saveTab(st.tabBar.Tabs[0])
-		st.handleEditEvent("c")
-		if ts.compareDiff == nil {
-			t.Fatal("c at the prompt did not enter compare")
-		}
+// A focused find bar owns the keyboard: c is a character of the query, and no
+// overlay behind it may intercept it.
+func TestCompareDoesNotStealCFromTheFindBar(t *testing.T) {
+	st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+	st.vimEnabled = true
+	st.vimState = vim.NewState()
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	if ts.compareDiff == nil {
+		t.Fatal("c at the prompt did not enter compare")
+	}
+	st.findBar.Open()
 
-		st.handleEditEvent(string(bracket))
-		st.handleEditEvent("c")
-		if ts.compareDiff == nil {
-			t.Fatalf("%vc left compare instead of navigating", bracket)
-		}
-		if st.saveMenu.confirmClobber {
-			t.Fatalf("%vc put the prompt back", bracket)
-		}
-		_ = ed
+	st.handleEditEvent("c")
+
+	if st.findBar.Query != "c" {
+		t.Fatalf("find query = %q, want %q", st.findBar.Query, "c")
+	}
+	if ts.compareDiff == nil {
+		t.Fatal("typing into the find bar took the compare overlay down")
+	}
+}
+
+// Escape is the only exit, and it stays the exit under vim's normal mode,
+// where vim would otherwise swallow it as "back to normal mode".
+func TestCompareExitsOnEscapeOnly(t *testing.T) {
+	st, _, ts, _ := conflictedTab(t, "mine ", "theirs\n")
+	st.vimEnabled = true
+	st.vimState = vim.NewState()
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+
+	st.dispatchKey(key.Event{Name: key.NameEscape})
+
+	if ts.compareDiff != nil || !st.saveMenu.confirmClobber {
+		t.Fatalf("Escape did not leave compare: overlay=%v prompt=%+v", ts.compareDiff != nil, st.saveMenu)
+	}
+}
+
+// --- Phase R: a save raised from inside compare keeps the flow's flags ---
+
+// Cmd+S while comparing re-raises the prompt, and the prompt has to come back
+// inside the flow that raised it. It arrives from saveTab with no flags of its
+// own, so the flags compare stashed are what carry the quit: without them
+// Overwrite writes the file, never continues the quit, and leaves
+// quitInProgress standing with nothing on screen to resolve it — after which
+// Cmd+Q and the window's close button do nothing at all.
+func TestSaveWhileComparingKeepsTheQuitFlowsFlags(t *testing.T) {
+	st, _, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	// A second, clean tab so closing the first does not exit the process.
+	other := filepath.Join(filepath.Dir(path), "other.go")
+	if err := os.WriteFile(other, []byte("other\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ed2, err := editor.NewEditorFromFile(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.tabBar.OpenEditor(ed2, "other.go")
+	st.tabStates[ed2] = &tabState{viewport: render.NewViewport(), foldState: render.NewFoldState(), lastCursorLine: -1}
+	st.barTabIdxs = []int{0, 1}
+	st.switchTab(0)
+
+	st.startQuitFlow()
+	dx, dy, dw, dropdownH, itemH := st.saveMenuRect()
+	st.handleSaveMenuClick(dx+dw/6, dy+dropdownH-itemH/2) // Save
+	if !st.saveMenu.confirmClobber || !st.saveMenu.forQuit {
+		t.Fatalf("quit prompt = %+v", st.saveMenu)
+	}
+	st.handleEditEvent("c")
+	if ts.compareDiff == nil {
+		t.Fatal("c at the prompt did not enter compare")
+	}
+
+	st.saveTab(st.tabBar.Tabs[0])
+
+	if !st.saveMenu.confirmClobber {
+		t.Fatalf("the save did not re-raise the prompt: %+v", st.saveMenu)
+	}
+	if !st.saveMenu.forQuit || !st.saveMenu.closeAfterSave {
+		t.Fatalf("the re-raised prompt lost the quit's flags: %+v", st.saveMenu)
+	}
+
+	st.clobberOverwrite()
+
+	if got, _ := os.ReadFile(path); string(got) != "mine original\n" {
+		t.Fatalf("Overwrite did not write the buffer: %q", got)
+	}
+	if st.quitInProgress && !st.exitPending && !st.saveMenu.visible {
+		t.Fatal("the quit is stuck: in progress, nothing on screen, not exiting")
+	}
+	if !st.exitPending {
+		t.Fatalf("Overwrite did not continue the quit: exitPending=%v menu=%+v", st.exitPending, st.saveMenu)
+	}
+}
+
+// --- Phase R: a second external write while comparing ---
+
+// The overlay is a live read of disk against the buffer. A further write to
+// the file makes the markers on screen describe a version of the file that no
+// longer exists, and nothing else refreshes them.
+func TestExternalChangeWhileComparingRefreshesTheDiff(t *testing.T) {
+	st, _, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	before := ts.compareDiff
+	if before == nil {
+		t.Fatal("Compare left no diff to show")
+	}
+	beforeAdded, beforeRemoved := before.Stats()
+
+	if err := os.WriteFile(path, []byte("theirs\nand more\nand more again\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st.handleExternalFileChange(path)
+
+	if ts.compareDiff == nil {
+		t.Fatal("the second external write took the overlay down")
+	}
+	if ts.compareDiff == before {
+		t.Fatal("the compare diff still describes the previous disk contents")
+	}
+	if a, r := ts.compareDiff.Stats(); a == beforeAdded && r == beforeRemoved {
+		t.Fatalf("compare stats unchanged after disk grew by two lines: +%d -%d", a, r)
+	}
+}
+
+// A write that makes disk agree with the buffer resolves the conflict the
+// prompt was raised for, so there is nothing left to compare and nothing left
+// to decide.
+func TestExternalChangeMatchingTheBufferEndsCompare(t *testing.T) {
+	st, ed, ts, path := conflictedTab(t, "mine ", "theirs\n")
+	st.saveTab(st.tabBar.Tabs[0])
+	st.handleEditEvent("c")
+	if ts.compareDiff == nil {
+		t.Fatal("Compare left no diff to show")
+	}
+
+	if err := os.WriteFile(path, []byte(ed.Buffer.Text()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st.handleExternalFileChange(path)
+
+	if ts.compareDiff != nil {
+		t.Fatal("disk caught up with the buffer and compare stayed up")
+	}
+	if ts.conflict != conflictNone {
+		t.Fatalf("conflict = %v, want none once disk matches the buffer", ts.conflict)
+	}
+	if st.saveWouldClobber(st.tabBar.Tabs[0]) {
+		t.Fatal("a save is still refused after disk and buffer agreed")
+	}
+	if !strings.Contains(st.notification, "match") {
+		t.Fatalf("no notification that compare closed: %q", st.notification)
+	}
+}
+
+// A key press arrives as a key event and the edit event that accompanies it.
+// Compare is entered on the edit event and ignored on the key event: acting on
+// the key event would close the prompt first, and the edit event that follows
+// would then land in vim as the change operator, arming cw over the file the
+// user only asked to look at.
+func TestEnteringCompareArmsNoOperator(t *testing.T) {
+	st, _, ts, _ := conflictedTab(t, "alpha beta\n", "theirs\n")
+	st.vimEnabled = true
+	st.vimState = vim.NewState()
+	st.saveTab(st.tabBar.Tabs[0])
+
+	st.dispatchKey(key.Event{Name: "C"})
+	st.handleEditEvent("c")
+
+	if ts.compareDiff == nil {
+		t.Fatal("c at the prompt did not enter compare")
+	}
+	if st.vimState.Operator != vim.OpNone || st.vimState.Mode != vim.ModeNormal {
+		t.Fatalf("entering compare left vim armed: operator=%v mode=%v", st.vimState.Operator, st.vimState.Mode)
 	}
 }

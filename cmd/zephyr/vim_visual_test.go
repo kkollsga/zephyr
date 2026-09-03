@@ -112,3 +112,40 @@ func TestVisualParagraphObjectIsRejected(t *testing.T) {
 		t.Fatalf("vip changed the buffer: %q", got)
 	}
 }
+
+// While the compare overlay is up, activeDiff() is what the gutter, the header
+// stats and ]c/[c read — so it is also what ih must operate on. Reading
+// ts.gitDiff directly made the hunk object select the git hunks, or nothing at
+// all when the file is not in a repository, while the marks on screen came
+// from the compare diff.
+func TestVisualHunkObjectFollowsTheCompareOverlay(t *testing.T) {
+	st, ed, ts := testAppWithText("one\ntwo\nthree\nfour\nfive\n", "Plain Text")
+	st.vimState = vim.NewState()
+	ts.gitDiff = nil
+	ts.compareDiff = hunkFixture()
+	ed.Cursor.SetPosition(ed.Buffer, 1, 1)
+
+	vimFeed(st, "vih")
+
+	if st.vimState.Mode != vim.ModeVisualLine {
+		t.Fatalf("vih mode = %v, want V-LINE", st.vimState.Mode)
+	}
+	if got := ed.SelectedText(); got != "two\nthree" {
+		t.Fatalf("vih over the compare overlay selected %q, want the marked lines", got)
+	}
+}
+
+// The operator form reads the same diff for the same reason.
+func TestHunkOperatorFollowsTheCompareOverlay(t *testing.T) {
+	st, ed, ts := testAppWithText("one\ntwo\nthree\nfour\nfive\n", "Plain Text")
+	st.vimState = vim.NewState()
+	ts.gitDiff = nil
+	ts.compareDiff = hunkFixture()
+	ed.Cursor.SetPosition(ed.Buffer, 1, 0)
+
+	st.executeVimAction(vim.Action{Kind: vim.ActionDelete, TextObj: 'h', TextObjType: 'i'})
+
+	if got := ed.Buffer.Text(); got != "one\nfour\nfive\n" {
+		t.Fatalf("dih over the compare overlay = %q", got)
+	}
+}

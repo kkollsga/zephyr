@@ -123,10 +123,15 @@ All notable changes to Zephyr are documented here.
   It stands the prompt down and marks the buffer's divergence from the file on
   disk in the gutter: added and modified markers are lines the buffer has that
   disk does not, and a deletion wedge sits where disk has lines the buffer
-  lacks. `]c` and `[c` step through them, the file stays editable, and `c` or
-  Escape brings the same prompt back — carrying the close-tab and quit flags of
-  the flow that raised it, so nothing is decided by looking. Nothing is written
-  either: a save asked for while comparing hits the same guard.
+  lacks. `]c` and `[c` step through them, the file stays fully editable —
+  `cw`, `cc`, `ci(` and the rest of the change operator included — and Escape
+  brings the same prompt back, carrying the close-tab and quit flags of the
+  flow that raised it, so nothing is decided by looking. A further write to the
+  file while you are looking refreshes the markers, and a write that leaves the
+  file holding exactly what the buffer holds retires the conflict and closes
+  the overlay. Nothing is written by comparing either: a save asked for while
+  comparing hits the same guard and comes back inside the same flow, so a quit
+  that was waiting on the decision still finishes.
 
 ### Markdown
 
