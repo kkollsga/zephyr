@@ -41,6 +41,12 @@ All notable changes to Zephyr are documented here.
 - The Save As overwrite prompt now answers to the keyboard: Return overwrites,
   Escape goes back to the filename with the existing file untouched. Return
   used to re-raise the same prompt and Escape closed the whole menu.
+- The status bar no longer draws the conflict badge, the vim mode indicator
+  and the notification over each other. They are laid out left to right, the
+  indicator keeping the bar's centre while the badge leaves it free and
+  sliding right of the badge when it does not, so the long "Comparing with
+  disk" badge stays readable. A window too narrow for all three cuts the badge
+  with an ellipsis rather than overlapping it.
 
 ### Find
 
