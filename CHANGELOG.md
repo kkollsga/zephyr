@@ -4,8 +4,9 @@ All notable changes to Zephyr are documented here.
 
 ## Unreleased
 
-### Files
+## [0.1.4] — 2026-09-03
 
+### Files
 - An external change to an open file is now noticed while the window sits
   idle. Previously the watcher's events were only read on the next frame, so
   a file changed while Zephyr was in the background went unreported until
@@ -49,7 +50,6 @@ All notable changes to Zephyr are documented here.
   with an ellipsis rather than overlapping it.
 
 ### Find
-
 - The find bar now gives the keyboard back when you click in the text. The bar
   stays open with its matches highlighted, its field goes dim, and typing edits
   the file again. Cmd+F or a click in the bar's field takes focus back; Escape
@@ -62,7 +62,6 @@ All notable changes to Zephyr are documented here.
   different things and now look like it.
 
 ### Navigator
-
 - Navigator keys with nothing behind them no longer report success. `go`,
   `gi`, `g?`, `<Space>f` and `<Space>b` used to be accepted and silently do
   nothing, so `go` in particular claimed to show HEAD content while you were
@@ -140,13 +139,11 @@ All notable changes to Zephyr are documented here.
   that was waiting on the decision still finishes.
 
 ### Markdown
-
 - Markdown read mode now renders color emoji on macOS, including ZWJ
   sequences (👨‍👩‍👧‍👦), flags, and variation selectors, in body text, headings,
   and code blocks.
 
 ### Editing
-
 - Clicking the right or middle mouse button during a drag no longer
   interrupts it. A secondary button pressed mid-drag collapsed a text
   selection to the pointer and restarted it there, or grabbed a different
@@ -224,7 +221,6 @@ All notable changes to Zephyr are documented here.
   of the file.
 
 ### Cross-platform
-
 - Vim mode on Windows and Linux now honours its Ctrl bindings. Gio reports the
   platform shortcut modifier as Ctrl off macOS, and every Ctrl key was being
   discarded as a host accelerator, so Ctrl+d, Ctrl+u, Ctrl+f, Ctrl+b, Ctrl+r
@@ -244,11 +240,9 @@ All notable changes to Zephyr are documented here.
   does everywhere else. The file still opens through the platform path.
 
 ### macOS
-
 - The Zephyr application menu now shows the current version as its first row.
 
 ### Versioning
-
 - The repository root `VERSION` file is now the version source of truth for
   local builds, with `scripts/bump-version.sh` to bump patch/minor/major.
 - Pushing a `VERSION` change to `main` now automatically tags `vX.Y.Z` and
@@ -256,7 +250,6 @@ All notable changes to Zephyr are documented here.
   without a manual tag.
 
 ### Reliability and testing
-
 - Fixed primary/secondary/middle mouse isolation, pointer-gesture identity,
   fractional scrolling, tab-aware hit testing, and Markdown selection routing.
 - Preserved symlink targets, permissions, and macOS extended attributes during
@@ -265,7 +258,6 @@ All notable changes to Zephyr are documented here.
   controller coverage, and a real macOS input/screenshot regression harness.
 
 ### Performance
-
 - Eliminated retained Tree-sitter trees across reparses.
 - Reduced the combined large-document open/index/edit workload from roughly
   1.6 ms and 4.10 MiB to 0.85 ms and 0.77 MiB on the baseline Apple M4.
@@ -273,7 +265,6 @@ All notable changes to Zephyr are documented here.
   measurement tooling.
 
 ### Tooling
-
 - `make bench` now runs every benchmarked package (`internal/buffer`,
   `internal/fuzzy`, `internal/git`, `internal/highlight`, `internal/navigator`
   and the new `internal/benchcontrol`) with `-run '^$'`, so it no longer skips
@@ -311,7 +302,6 @@ All notable changes to Zephyr are documented here.
   default branch, so nothing about this file can run before it merges.
 
 ### Installation
-
 - Added a terminal-first macOS installer/upgrader with checksum verification,
   transactional rollback, a `zephyr` command, and universal arm64/x86_64
   release builds.
@@ -319,6 +309,7 @@ All notable changes to Zephyr are documented here.
   checks that keep its primary command aligned with the README and installer.
 - Replaced manual quarantine instructions with the supported one-command
   install/upgrade path and added copy buttons to the Pages install surfaces.
+
 
 ## [0.1.0-alpha] — 2026-03-25
 
