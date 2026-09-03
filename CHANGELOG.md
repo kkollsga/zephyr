@@ -261,6 +261,21 @@ All notable changes to Zephyr are documented here.
 - Added repeatable first-frame, frame CPU, event-to-submit, RSS, and soak
   measurement tooling.
 
+### Tooling
+
+- `make bench` now runs every benchmarked package (`internal/buffer`,
+  `internal/fuzzy`, `internal/git`, `internal/highlight`, `internal/navigator`
+  and the new `internal/benchcontrol`) with `-run '^$'`, so it no longer skips
+  three of them and no longer runs each package's unit tests before timing it.
+- Added `internal/benchcontrol`: two benchmarks that measure no Zephyr code —
+  a local FNV-1a over a fixed 64 KiB slice, and `sort.Ints` over a fixed-seed
+  slice. They are the drift meter that separates a slower machine (every cell
+  moves) from a real regression (one cell moves).
+- Added `scripts/bench-capture.sh` and `make bench-capture`, which record a
+  benchmark run as a TSV carrying the host, arch, OS, Go version, commit and
+  load averages it was taken under. `bench/history/<version>.tsv` is the
+  committed per-release record; see `bench/README.md`.
+
 ### Installation
 
 - Added a terminal-first macOS installer/upgrader with checksum verification,

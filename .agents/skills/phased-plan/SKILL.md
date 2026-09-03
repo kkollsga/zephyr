@@ -292,8 +292,9 @@ Then fix, by where it lives:
   *in this plan* (fold it into the perf phase, or add one).
 
 ## Phase 4 — Perf gate (only if the plan touched perf-sensitive paths)
-Run `make bench` (Go benchmarks over `internal/buffer`, `internal/highlight`,
-`internal/fuzzy`) and, for anything the user can feel, `make perf`
+Run `make bench` (Go benchmarks over `internal/buffer`, `internal/fuzzy`,
+`internal/git`, `internal/highlight`, `internal/navigator` and the control cells
+in `internal/benchcontrol`) and, for anything the user can feel, `make perf`
 (`scripts/perf-test.sh` — launch time, first submit, steady frame p95, Gio
 event-to-submit p95, RSS, optional soak) against `testdata/gui/mouse_fixture.go`.
 `make baseline` (`scripts/baseline.sh`) captures the broad snapshot.
@@ -305,10 +306,12 @@ event-to-submit p95, RSS, optional soak) against `testdata/gui/mouse_fixture.go`
   regression**; it produces numbers. Treating its exit code as a perf gate is
   exactly the decorative-gate failure `R1` names. To make it a gate, set the
   relevant `ZEPHYR_PERF_MAX_*` for the run and say which value you set.
-- Zephyr has **no baseline-anchor mechanism and no control cells** — nothing
-  compares this release's capture against three releases back, so slow
-  cumulative drift is invisible here. Do not imply otherwise in a report. If a
-  plan wants that property, it is a phase, not an assumption.
+- **Control cells exist; the anchor comparison does not yet.**
+  `internal/benchcontrol` carries two benchmarks that measure no Zephyr code, so
+  a capture can tell load moving every cell from a real regression moving one
+  (`R11`). But nothing compares this release's capture against three releases
+  back, so slow cumulative drift is still invisible here. Do not imply
+  otherwise in a report.
 - Outputs land under `.artifacts/perf/latest` and `.artifacts/baseline/latest`
   (`ZEPHYR_PERF_DIR` / `ZEPHYR_BASELINE_DIR` override). `.artifacts/` is
   gitignored and has no purge tier of its own; a number worth keeping is copied

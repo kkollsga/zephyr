@@ -45,7 +45,8 @@ make gate     # the pre-commit / pre-push gate: check-dev-docs, vet, test
 make vet      # go vet ./...          (also reachable as `make lint`)
 make test     # go test ./... -count=1
 make build    # the binary;  make app  bundles + ad-hoc-signs Zephyr.app
-make bench    # Go benchmarks for internal/buffer, internal/highlight, internal/fuzzy
+make bench    # Go benchmarks: buffer, fuzzy, git, highlight, navigator, benchcontrol
+make bench-capture  # the same run recorded as a TSV with its machine conditions
 make fuzz     # 30s fuzz of the piece table, editor, and both diff paths
 ```
 

@@ -1,4 +1,4 @@
-.PHONY: build build-windows app run test bench fuzz perf clean vet fmt lint all baseline install-test docs-test gui-test-build gui-test-launch gui-test-stop gui-test-permissions gui-test-smoke gui-test-regression gate check-dev-docs check-buffer-mutations
+.PHONY: build build-windows app run test bench bench-capture fuzz perf clean vet fmt lint all baseline install-test docs-test gui-test-build gui-test-launch gui-test-stop gui-test-permissions gui-test-smoke gui-test-regression gate check-dev-docs check-buffer-mutations
 
 # Bounds for check-dev-docs. DEV_DOCS_MAX_MB caps the gitignored working
 # folder; MIN_FREE_MB is a floor on free space of the volume the repo sits on,
@@ -6,6 +6,12 @@
 # protecting free space has to key on free space, not on one folder's du.
 DEV_DOCS_MAX_MB ?= 256
 MIN_FREE_MB     ?= 5000
+
+# The benchmarked package list lives in scripts/bench-capture.sh and is read
+# back from there, so `make bench` and a recorded capture can never end up
+# covering different sets. BENCH_COUNT applies to both.
+BENCH_PKGS  = $(shell ./scripts/bench-capture.sh --list)
+BENCH_COUNT ?= 1
 
 BINARY    = zephyr
 APP       = Zephyr.app
@@ -40,10 +46,22 @@ run: build
 test:
 	go test ./... -count=1
 
+## Every benchmarked package in one run. `-run '^$$'` matters: without it this
+## target runs the whole unit-test suite of each package first and reports its
+## time as part of the benchmark run.
 bench:
-	go test ./internal/buffer/ -bench=. -benchmem
-	go test ./internal/highlight/ -bench=. -benchmem
-	go test ./internal/fuzzy/ -bench=. -benchmem
+	@[ -n "$(BENCH_PKGS)" ] || { \
+		echo "FAIL: scripts/bench-capture.sh --list produced no packages"; \
+		echo "  an empty package list is a broken target, not an empty tree"; \
+		exit 1; }
+	go test $(BENCH_PKGS) -run '^$$' -bench=. -benchmem -count=$(BENCH_COUNT)
+
+## The same run, recorded as a TSV with the machine conditions it was taken
+## under (R11). Pass OUT=<path> to place it; the default is a dated file in the
+## working folder's durable bench tier. The release flow writes
+## bench/history/<version>.tsv with this — see bench/README.md.
+bench-capture:
+	./scripts/bench-capture.sh $(OUT)
 
 fuzz:
 	go test ./internal/buffer -run '^$$' -fuzz=FuzzPieceTableEditModel -fuzztime=30s
