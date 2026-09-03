@@ -106,6 +106,10 @@ All notable changes to Zephyr are documented here.
   covers the changed lines only — a context line inside a hunk is not part of
   the object, and with the cursor on an unchanged line the keys do nothing
   rather than reaching for the whole file.
+- `gf` inside a git repository now falls back to the open file's own directory
+  when the name does not exist at the repo root. The root candidate was tested
+  with a call that accepts any path, so it always won and `gf` on a sibling
+  file did nothing.
 
 ### Markdown
 

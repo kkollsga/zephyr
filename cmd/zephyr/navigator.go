@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -880,24 +881,31 @@ func (st *appState) navGoFile() {
 		return
 	}
 
-	// Try to resolve as a file path
+	// Repo root first, then the open file's own directory.
 	if st.gitRepo != nil {
-		// Try relative to repo root
 		fullPath := filepath.Join(st.gitRepo.Root, path)
-		if _, err := filepath.Glob(fullPath); err == nil {
+		if isOpenableFile(fullPath) {
 			st.openFileInTab(fullPath)
 			return
 		}
 	}
 	if ed.FilePath != "" {
-		// Try relative to current file
-		dir := filepath.Dir(ed.FilePath)
-		fullPath := filepath.Join(dir, path)
-		if _, err := filepath.Glob(fullPath); err == nil {
+		fullPath := filepath.Join(filepath.Dir(ed.FilePath), path)
+		if isOpenableFile(fullPath) {
 			st.openFileInTab(fullPath)
 			return
 		}
 	}
+}
+
+// isOpenableFile reports whether path names a regular file gf can open. Stat,
+// not filepath.Glob: Glob returns a nil error for a literal path that does not
+// exist, so it accepted every candidate and the repo-root branch above always
+// won — inside a repo the file-relative fallback was unreachable. IsRegular
+// keeps a directory from being opened as an empty tab.
+func isOpenableFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // extractQuotedString extracts the string content at the cursor position from a line.
