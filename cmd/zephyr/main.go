@@ -769,6 +769,10 @@ func (st *appState) toggleNavigatorMode() {
 	if st.navRoot == "" {
 		st.openNavRootDropdown()
 	}
+
+	// Tabs opened before this point have no diff: their state was built when
+	// there was no git cache to ask.
+	st.refreshGitDiffAllTabs()
 }
 
 // detectNavRoot attempts to discover the project root automatically.

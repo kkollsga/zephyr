@@ -115,6 +115,10 @@ All notable changes to Zephyr are documented here.
   deletion, or the line before it when the deletion runs to the end of the
   file — so a delete-only change (a formatter, a `git checkout`) no longer
   shows an empty gutter.
+- Switching Navigator Mode on now fills in the git gutter for the tabs
+  already open. Their diff was looked up before the navigator created the git
+  cache, so the markers and the header's diff stats stayed blank until a save
+  or an external change happened to refresh them.
 
 ### Markdown
 

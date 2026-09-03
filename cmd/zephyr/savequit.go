@@ -476,6 +476,14 @@ func (st *appState) refreshGitDiffForEditor(ed *editor.Editor) {
 	}
 }
 
+// refreshGitDiffAllTabs reloads every open tab's diff. Used when the git cache
+// appears after the tabs do.
+func (st *appState) refreshGitDiffAllTabs() {
+	for _, tab := range st.tabBar.Tabs {
+		st.refreshGitDiffForEditor(tab.Editor)
+	}
+}
+
 // saveTabToPath is the funnel every Save As lands in, so the HEAD-view refusal
 // sits here rather than at each entry point: a write of committed content is
 // data loss whichever menu, key or prompt asked for it.
