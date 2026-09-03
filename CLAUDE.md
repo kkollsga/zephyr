@@ -46,7 +46,7 @@ make vet      # go vet ./...          (also reachable as `make lint`)
 make test     # go test ./... -count=1
 make build    # the binary;  make app  bundles + ad-hoc-signs Zephyr.app
 make bench    # Go benchmarks for internal/buffer, internal/highlight, internal/fuzzy
-make fuzz     # 30s fuzz of the piece table and the diff parser
+make fuzz     # 30s fuzz of the piece table, editor, and both diff paths
 ```
 
 `make gate` is the ceiling for local pre-push checking; the rest is CI's job

@@ -48,6 +48,7 @@ bench:
 fuzz:
 	go test ./internal/buffer -run '^$$' -fuzz=FuzzPieceTableEditModel -fuzztime=30s
 	go test ./internal/git -run '^$$' -fuzz=FuzzParseUnifiedDiff -fuzztime=30s
+	go test ./internal/git -run '^$$' -fuzz=FuzzLineDiff -fuzztime=30s
 	go test ./internal/editor -run '^$$' -fuzz=FuzzEditorCommandSequence -fuzztime=30s
 
 perf:
